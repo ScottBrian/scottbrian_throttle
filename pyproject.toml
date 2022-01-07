@@ -1,0 +1,12 @@
+[build-system]
+requires = [
+    "setuptools >= 59",
+#    "setuptools_scm[toml] >= 6.0",
+#    "setuptools_scm_git_archive",
+    "wheel >= 0.37"
+]
+build-backend = 'setuptools.build_meta'
+
+#[tool.setuptools_scm]
+#write_to = "scottbrian_throttle/version.py"
+#git_describe_command = "git_describe --dirty --tags --long --match v* --first-parent"
