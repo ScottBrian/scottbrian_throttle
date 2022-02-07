@@ -6,8 +6,38 @@ Intro
 =====
 
 
-With **@throttle** you can decorate a function to avoid exceeding a stated limit. This is useful for some
-internet services which have a stated limit, such as no more than one request per minute.
+With **@throttle** you can control the frequency at which a function is executed to avoid exceeding a limit.
+This is useful for internet services that have a stated limit, such as "no more than one request per second".
+
+The @throttle decorator wraps a method that makes requests to ensure that the limit is not exceeded. The @throttle
+keeps track of the time for each request and will insert a wait (via time.sleep()) as needed to stay within the
+limit. Note that the Throttle class provides the same service to allow you to use the throttle where a decorator is not
+the optimal choice.
+
+To use the throttle, you specify the number of requests and the number of seconds. Additionally, you can choose one of
+four modes that control the throttle behavior:
+
+    1) **mode=Throttle.MODE_ASYNC** specifies asynchronous mode.
+                   With asynchronous throttling,
+                   each request is placed on a queue and control returns
+                   to the caller. A separate thread then executes each
+                   request at a steady interval to achieve the specified
+                   number of requests per the specified number of seconds.
+    2) **mode=Throttle.MODE_SYNC** specifies synchronous mode.
+                   For synchronous throttling, the caller may be blocked to
+                   delay the request in order to achieve the specified
+                   number of requests per the specified number of seconds.
+    3) **mode=Throttle.MODE_SYNC_EC** specifies synchronous mode using an early arrival algorithm.
+                   For synchronous throttling with the early
+                   arrival algorithm, requests are sent immediately without
+                   delay until the limit is reached, at which point the throttling
+                   becomes active.
+    4) **mode=Throttle.MODE_SYNC_LB** specifies synchronous mode
+                   using a leaky bucket algorithm.
+                   For synchronous throttling with the leaky bucket
+                   algorithm, requests are sent
+                   immediately without delay until the limit is reached, at which point the throttling
+                   becomes active.
 
 :Example: prevent a request loop from exceeding 10 requests per second
 
