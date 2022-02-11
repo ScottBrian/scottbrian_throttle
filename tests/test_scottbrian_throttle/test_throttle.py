@@ -16,13 +16,14 @@ from typing_extensions import TypeAlias
 ########################################################################
 # Third Party
 ########################################################################
+import matplotlib.pyplot as plt
+import numpy as np
 import pytest
-
+from scottbrian_utils.flower_box import print_flower_box_msg as flowers
+from scottbrian_utils.timer import Timer
 ########################################################################
 # Local
 ########################################################################
-from scottbrian_utils.flower_box import print_flower_box_msg as flowers
-
 from scottbrian_throttle.throttle import (
     Throttle,
     throttle,
@@ -89,10 +90,18 @@ class ReqTime:
     f_time: float = 0.0
 
 
+single_requests_arg: Optional[int] = 3  # 1 2 3
+single_seconds_arg: Optional[float] = 0.3  # 2.0 0.3 0.3
+single_early_count_arg: Optional[int] = 1  # 1 2 1
+single_send_interval_mult_arg: Optional[float] = 0.0  # 1.1 1.1 0.0
+
+
 ########################################################################
 # requests_arg fixture
 ########################################################################
 requests_arg_list = [1, 2, 3]
+if single_requests_arg:
+    requests_arg_list = [single_requests_arg]
 
 
 @pytest.fixture(params=requests_arg_list)  # type: ignore
@@ -112,6 +121,8 @@ def requests_arg(request: Any) -> int:
 # seconds_arg fixture
 ########################################################################
 seconds_arg_list = [0.3, 1, 2]
+if single_seconds_arg:
+    seconds_arg_list = [single_seconds_arg]
 
 
 @pytest.fixture(params=seconds_arg_list)  # type: ignore
@@ -440,6 +451,8 @@ def lb_threshold_arg(request: Any) -> IntFloat:
 # early_count_arg fixture
 ########################################################################
 early_count_arg_list = [1, 2, 3]
+if single_early_count_arg:
+    early_count_arg_list = [single_early_count_arg]
 
 
 @pytest.fixture(params=early_count_arg_list)  # type: ignore
@@ -459,6 +472,8 @@ def early_count_arg(request: Any) -> int:
 # send_interval_mult_arg fixture
 ########################################################################
 send_interval_mult_arg_list = [0.0, 0.9, 1.0, 1.1]
+if single_send_interval_mult_arg:
+    send_interval_mult_arg_list = [single_send_interval_mult_arg]
 
 
 @pytest.fixture(params=send_interval_mult_arg_list)  # type: ignore
@@ -1320,7 +1335,7 @@ class TestThrottle:
                              early_count=early_count_arg,
                              lb_threshold=0,
                              send_interval=send_interval,
-                             request_style=4)
+                             request_style=0)
 
     ####################################################################
     # test_throttle_sync_lb
@@ -1396,7 +1411,7 @@ class TestThrottle:
             BadRequestStyleArg: The request style arg must be 0 to 6
             InvalidModeNum: The Mode must be 1, 2, 3, or 4
         """
-        request_multiplier = 32
+        request_multiplier = 16
         ################################################################
         # Instantiate Throttle
         ################################################################
@@ -1441,15 +1456,33 @@ class TestThrottle:
         ################################################################
         # Make requests and validate
         ################################################################
+        num_reqs_to_do = requests * request_multiplier
+        if mode == Throttle.MODE_SYNC_EC:
+            num_reqs_to_do = ((((num_reqs_to_do + 1)
+                              // early_count)
+                              * early_count)
+                              + 1)
+        about_to_send_time: list[float] = []
+        after_send_time: list[float] = []
         if request_style == 0:
-            for i in range(requests * request_multiplier):
+            for i in range(num_reqs_to_do):
                 # 0
                 rc = a_throttle.send_request(request_validator.request0)
+                now_time = time.time()
+                end_time = now_time + send_interval
+
                 if mode == Throttle.MODE_ASYNC:
                     assert rc is Throttle.RC_OK
                 else:
                     assert rc == i
-                time.sleep(send_interval)
+
+                time.sleep(send_interval * .90)
+                # make sure we are not sleeping too long
+                # note: when send_interval is 0, now_time is equal to
+                # end_time (which is why we assert <= here)
+                assert now_time <= end_time
+                while now_time < end_time:
+                    now_time = time.time()
 
             if mode == Throttle.MODE_ASYNC:
                 a_throttle.start_shutdown(
@@ -1458,7 +1491,7 @@ class TestThrottle:
             request_validator.validate_series()  # validate for the series
 
         elif request_style == 1:
-            for i in range(requests * request_multiplier):
+            for i in range(num_reqs_to_do):
                 # 1
                 rc = a_throttle.send_request(request_validator.request1, i)
                 exp_rc = i if mode != Throttle.MODE_ASYNC else Throttle.RC_OK
@@ -1471,7 +1504,7 @@ class TestThrottle:
             request_validator.validate_series()  # validate for the series
 
         elif request_style == 2:
-            for i in range(requests * request_multiplier):
+            for i in range(num_reqs_to_do):
                 # 2
                 rc = a_throttle.send_request(request_validator.request2,
                                              i,
@@ -1486,7 +1519,7 @@ class TestThrottle:
             request_validator.validate_series()  # validate for the series
 
         elif request_style == 3:
-            for i in range(requests * request_multiplier):
+            for i in range(num_reqs_to_do):
                 # 3
                 rc = a_throttle.send_request(request_validator.request3, idx=i)
                 exp_rc = i if mode != Throttle.MODE_ASYNC else Throttle.RC_OK
@@ -1499,22 +1532,57 @@ class TestThrottle:
             request_validator.validate_series()  # validate for the series
 
         elif request_style == 4:
-            for i in range(requests * request_multiplier):
+            for i in range(num_reqs_to_do):
                 # 4
+                # about_to_send_time.append(time.time())
                 rc = a_throttle.send_request(request_validator.request4,
                                              idx=i,
                                              seconds=seconds)
+                # sent_time = time.time()
+                # after_send_time.append(sent_time)
                 exp_rc = i if mode != Throttle.MODE_ASYNC else Throttle.RC_OK
                 assert rc == exp_rc
-                time.sleep(send_interval)
+                now_t = time.time()
+                end_t = now_t + send_interval
+                # start_now = time.perf_counter_ns()
+                start_now = time.perf_counter()
+                now = start_now
+                # end = now + (send_interval * 1000000000.0)
+                end = now + send_interval
+                # while (now < end) or (time.time() < end_t):
+                #     now = time.perf_counter()
+                time.sleep(send_interval*.95)
+                dummy = 4
+                while time.time() < end_t:
+                    dummy = 2 + 2
+                assert dummy == 4
+
+                # while time.time() < end_t:
+                #     remaining_time = end_t - time.time()
+                #     half_time = remaining_time / 2.0
+                #     if half_time > 0:
+                #         time.sleep(half_time)
+                # time.sleep(send_interval)
+                final_time = time.time()
+                assert end_t <= final_time
+                # if now < end:
+                #     time.sleep(end-now)
+
+                # now = time.perf_counter()
+                # end = now + send_interval + .00001
+                # while now < end:
+                #     now = time.perf_counter()
 
             if mode == Throttle.MODE_ASYNC:
                 a_throttle.start_shutdown(
                     shutdown_type=Throttle.TYPE_SHUTDOWN_SOFT)
-            request_validator.validate_series()  # validate for the series
+            # request_validator.validate_series()  # validate for the series
+            request_validator.validate_series(
+                about_to_send_time=about_to_send_time,
+                after_send_time=after_send_time)
 
         elif request_style == 5:
-            for i in range(requests * request_multiplier):
+            for i in range(num_reqs_to_do):
                 # 5
                 rc = a_throttle.send_request(request_validator.request5,
                                              i,
@@ -1529,7 +1597,7 @@ class TestThrottle:
             request_validator.validate_series()  # validate for the series
 
         elif request_style == 6:
-            for i in range(requests * request_multiplier):
+            for i in range(num_reqs_to_do):
                 # 6
                 rc = a_throttle.send_request(request_validator.request6,
                                              i,
@@ -2955,21 +3023,30 @@ class RequestValidator:
         self.normalized_nst_intervals: list[float] = []
         self.mean_nst_interval = 0.0
 
+        self.p_target_intervals: list[str] = []
+        self.p_actual_intervals: list[str] = []
+        self.diff_intervals: list[float] = []
+        self.p_diff_intervals: list[str] = []
+
         # calculate parms
 
         self.total_requests = requests * request_mult
-        print('total requests:', self.total_requests)
+        if mode == Throttle.MODE_SYNC_EC:
+            self.total_requests = ((((self.total_requests + 1)
+                                   // early_count)
+                                   * early_count)
+                                   + 1)
+
         self.target_interval = seconds / requests
 
         self.max_interval = max(self.target_interval,
                                 self.send_interval)
 
-        print('self.max_interval:', self.max_interval)
         self.min_interval = min(self.target_interval,
                                 self.send_interval)
 
-        self.exp_total_time = self.max_interval * self.total_requests
-        print('self.exp_total_time:', self.exp_total_time)
+        self.exp_total_time = self.max_interval * (self.total_requests - 1)
+
 
         self.target_interval_1pct = self.target_interval * 0.01
         self.target_interval_5pct = self.target_interval * 0.05
@@ -2987,6 +3064,8 @@ class RequestValidator:
         self.min_interval_15pct = self.min_interval * 0.15
 
         self.reset()
+
+        self.print_vars()
 
     def reset(self) -> None:
         """Reset the variables to starting values."""
@@ -3009,6 +3088,29 @@ class RequestValidator:
         self.normalized_nst_intervals = []
         self.mean_nst_interval = 0.0
 
+        self.p_target_intervals = []
+        self.p_actual_intervals = []
+        self.diff_intervals = []
+        self.p_diff_intervals = []
+
+    def print_vars(self) -> None:
+        """Print the vars for the test case."""
+        print(f'\n{self.requests=}')
+        print(f'{self.seconds=}')
+        print(f'{self.mode=}')
+        print(f'{self.early_count=}')
+        print(f'{self.lb_threshold=}')
+        print(f'{self.request_mult=}')
+        print(f'{self.send_interval=}')
+        print(f'{self.total_requests=}')
+        print(f'{self.requests=}')
+        print(f'{self.seconds=}')
+        print(f'{self.target_interval=}')
+        print(f'{self.send_interval=}')
+        print(f'{self.min_interval=}')
+        print(f'{self.max_interval=}')
+        print(f'{self.exp_total_time=}')
+
     def add_func_throttles(self,
                            *args: FuncWithThrottleAttr[Callable[..., Any]]
                            ) -> None:
@@ -3022,6 +3124,65 @@ class RequestValidator:
         self.throttles = []
         for func in args:
             self.throttles.append(func.throttle)
+
+    def print_intervals(self):
+        """Build the expected intervals arrays."""
+        if (self.mode == Throttle.MODE_SYNC_EC
+                and self.send_interval < self.target_interval):
+            use_long_int = True
+            short_interval = self.min_interval
+            long_interval = ((self.early_count * self.target_interval)
+                             - ((self.early_count - 1) * self.min_interval))
+        else:
+            use_long_int = False
+            short_interval = self.target_interval
+            long_interval = self.target_interval
+
+        print(f'{short_interval=}')
+        print(f'{long_interval=}')
+        print(f'{use_long_int=}')
+        s_int = f'{short_interval: .3f}'
+        l_int = f'{long_interval: .3f}'
+
+        self.p_target_intervals = [' 0.000']
+        self.diff_intervals = [0.0]
+        for idx, interval in enumerate(self.normalized_intervals[1:], 1):
+            if (use_long_int
+                    and ((idx % self.early_count) == 0)):  # long int
+                self.p_target_intervals.append(l_int)
+                diff_int = (interval - long_interval) / self.target_interval
+                self.diff_intervals.append(diff_int)
+            else:
+                self.p_target_intervals.append(s_int)
+                diff_int = ((interval - self.min_interval)
+                            / self.target_interval)
+                self.diff_intervals.append(diff_int)
+
+        # self.p_diff_intervals = []
+        # for interval in self.diff_intervals:
+        #     self.p_diff_intervals.append(f'{interval: .3f}')
+
+
+        p_norm_times = list(map(lambda num: f'{num: .3f}',
+                                self.normalized_times))
+        p_actual_intervals = list(map(lambda num: f'{num: .3f}',
+                                       self.normalized_intervals))
+        self.p_diff_intervals = list(map(lambda num: f'{num: .3f}',
+                                         self.diff_intervals))
+        p_abts_intervals = list(map(lambda num: f'{num: .3f}',
+                                    self.normalized_abts_intervals))
+        p_ast_intervals = list(map(lambda num: f'{num: .3f}',
+                                   self.normalized_ast_intervals))
+
+        print(f'{p_norm_times           =}')
+        print(f'{self.p_target_intervals=}')
+        print(f'{self.p_actual_intervals=}')
+        print(f'{p_actual_intervals     =}')
+        print(f'{self.p_diff_intervals  =}')
+        print(f'{p_abts_intervals       =}')
+        print(f'{p_ast_intervals        =}')
+
+
 
     def validate_series(self,
                         about_to_send_time: Optional[list[float]] = None,
@@ -3040,16 +3201,24 @@ class RequestValidator:
         assert len(self.req_times) == self.total_requests
         base_time = self.req_times[0][1]
         prev_time = base_time
+        self.p_actual_intervals = []
         for idx, req_item in enumerate(self.req_times):
             assert idx == req_item[0]
             cur_time = req_item[1]
             self.normalized_times.append(cur_time - base_time)
-            self.normalized_intervals.append(cur_time - prev_time)
+            interval = cur_time - prev_time
+            # self.normalized_intervals.append(interval)
+            self.p_actual_intervals.append(f'{interval: .3f}')
             prev_time = cur_time
 
+        self.normalized_intervals = list(map(lambda t1, t2: t1 - t2,
+                                             self.normalized_times,
+                                             [0.0]
+                                             + self.normalized_times[:-1]))
         assert self.normalized_times
         self.mean_interval = (self.normalized_times[-1]
                               / (self.total_requests - 1))
+        print(f'{self.mean_interval=}')
 
         if about_to_send_time is not None:
             assert len(about_to_send_time) == self.total_requests
@@ -3108,6 +3277,7 @@ class RequestValidator:
 
     def validate_async_sync(self) -> None:
         """Validate results for sync."""
+        self.print_intervals()
         num_early = 0
         num_early_1pct = 0
         num_early_5pct = 0
@@ -3162,25 +3332,16 @@ class RequestValidator:
 
         if self.target_interval < self.send_interval:
             if num_early > 0:
-                print('\nself.normalized_abts_intervals:\n',
-                      self.normalized_abts_intervals)
-                print('\nself.mean_abts_interval='
-                      f'{self.mean_abts_interval}')
+                print(f'\n{self.normalized_abts_intervals=}')
+                print(f'{self.mean_abts_interval=}')
 
-                print('\nself.normalized_nst_intervals:\n',
-                      self.normalized_nst_intervals)
-                print('\nself.mean_nst_interval'
-                      f'={self.mean_nst_interval}')
+                print(f'{self.normalized_nst_intervals=}')
+                print(f'{self.mean_nst_interval=}')
 
-                print('\nself.normalized_intervals:\n',
-                      self.normalized_intervals)
-                print('\nself.mean_interval'
-                      f'={self.mean_interval}')
+                print(f'{self.normalized_intervals=}')
 
-                print('\nself.normalized_ast_intervals:\n',
-                      self.normalized_ast_intervals)
-                print('\nself.mean_ast_interval'
-                      f'={self.mean_ast_interval}')
+                print(f'{self.normalized_ast_intervals=}')
+                print(f'{self.mean_ast_interval=}')
             assert num_early == 0
 
         # assert num_late_15pct == 0
@@ -3189,27 +3350,26 @@ class RequestValidator:
         # assert num_late == 0
 
         self.exp_total_time = self.max_interval * self.total_requests
-        print('self.exp_total_time:', self.exp_total_time)
+        print(f'{self.exp_total_time=}')
         extra_exp_total_time = self.mean_interval * self.total_requests
-        print('extra_exp_total_time:', extra_exp_total_time)
+        print(f'{extra_exp_total_time=}')
         mean_late_pct = ((self.mean_interval - self.max_interval) /
                          self.max_interval) * 100
-        print(f'mean_late_pct: {mean_late_pct:.2f}%')
+        print(f'{mean_late_pct=:.2f}%')
 
         extra_time_pct = ((extra_exp_total_time - self.exp_total_time) /
                           self.exp_total_time) * 100
 
-        print(f'extra_time_pct: {extra_time_pct:.2f}%')
+        print(f'{extra_time_pct=:.2f}%')
 
         num_to_add = extra_exp_total_time - self.exp_total_time
-        print(f'num_to_add: {num_to_add:.2f}')
+        print(f'{num_to_add=:.2f}')
 
-        print('self.max_interval:', self.max_interval)
-        print('self.mean_interval:', self.mean_interval)
         assert self.max_interval <= self.mean_interval
 
     def validate_sync_ec(self) -> None:
         """Validate results for sync early count."""
+        self.print_intervals()
         num_short_early = 0
         num_short_early_1pct = 0
         num_short_early_5pct = 0
@@ -3229,12 +3389,25 @@ class RequestValidator:
         num_long_late_1pct = 0
         num_long_late_5pct = 0
         num_long_late_10pct = 0
+        num_long_late_15pct = 0
 
-        long_interval = (((self.early_count + 1) * self.target_interval)
-                         - (self.early_count * self.min_interval))
+        long_interval = ((self.early_count * self.target_interval)
+                         - ((self.early_count-1) * self.min_interval))
 
+        actual_intervals = []
+        for interval in self.normalized_intervals:
+            r_int = round(interval, 3)
+            r_int = f'{r_int: .3f}'
+            actual_intervals.append(r_int)
+        target_intervals = ['0.000']
+        r_t_int = f'{long_interval: .3f}'
+        r_m_int = f'{self.min_interval: .3f}'
+        diff_intervals = [0.0]
         for idx, interval in enumerate(self.normalized_intervals[1:], 1):
-            if idx % (self.early_count + 1):  # if long interval expected
+            if (idx % self.early_count) == 0:  # long interval
+                target_intervals.append(r_t_int)
+                diff_int = (interval - long_interval) / self.target_interval
+                diff_intervals.append(diff_int)
                 if interval < long_interval:
                     num_long_early += 1
                 if interval < long_interval - self.target_interval_1pct:
@@ -3244,15 +3417,21 @@ class RequestValidator:
                 if interval < (long_interval - self.target_interval_10pct):
                     num_long_early_10pct += 1
 
-                if self.max_interval < interval:
+                if long_interval < interval:
                     num_long_late += 1
-                if self.max_interval + self.max_interval_1pct < interval:
+                if (long_interval * 1.01) < interval:
                     num_long_late_1pct += 1
-                if self.max_interval + self.max_interval_5pct < interval:
+                if (long_interval * 1.05) < interval:
                     num_long_late_5pct += 1
-                if self.max_interval + self.max_interval_10pct < interval:
+                if (long_interval * 1.1) < interval:
                     num_long_late_10pct += 1
+                if (long_interval * 1.15) < interval:
+                    num_long_late_15pct += 1
             else:
+                target_intervals.append(r_m_int)
+                diff_int = ((interval - self.min_interval)
+                            / self.target_interval)
+                diff_intervals.append(diff_int)
                 if interval < self.min_interval:
                     num_short_early += 1
                 if interval < self.min_interval - self.min_interval_1pct:
@@ -3271,33 +3450,79 @@ class RequestValidator:
                 if self.min_interval + self.min_interval_10pct < interval:
                     num_short_late_10pct += 1
 
-        print('num_requests_sent2:', self.total_requests)
-        print('num_early2:', num_long_early)
-        print('num_early_1pct2:', num_long_early_1pct)
-        print('num_early_5pct2:', num_long_early_5pct)
-        print('num_early_10pct2:', num_long_early_10pct)
+        p_diff_intervals = []
+        for interval in diff_intervals:
+            r_int = round(interval, 3)
+            r_int = f'{r_int: .3f}'
+            p_diff_intervals.append(r_int)
 
-        print('num_late2:', num_long_late)
-        print('num_late_1pct2:', num_long_late_1pct)
-        print('num_late_5pct2:', num_long_late_5pct)
-        print('num_late_10pct2:', num_long_late_10pct)
+        print(f'{long_interval=}')
+        # print(f'{self.normalized_intervals=}')
+        # print(f'{self.normalized_times=}')
 
-        print('num_early2:', num_short_early)
-        print('num_early_1pct2:', num_short_early_1pct)
-        print('num_early_5pct2:', num_short_early_5pct)
-        print('num_early_10pct2:', num_short_early_10pct)
+        print(f'{num_long_early=}')
+        print(f'{num_long_early_1pct=}')
+        print(f'{num_long_early_5pct=}')
+        print(f'{num_long_early_10pct=}')
 
-        print('num_late2:', num_short_late)
-        print('num_late_1pct2:', num_short_late_1pct)
-        print('num_late_5pct2:', num_short_late_5pct)
-        print('num_late_10pct2:', num_short_late_10pct)
+        print(f'{num_long_late=}')
+        print(f'{num_long_late_1pct=}')
+        print(f'{num_long_late_5pct=}')
+        print(f'{num_long_late_10pct=}')
+        print(f'{num_long_late_15pct=}')
+
+        print(f'{num_short_early=}')
+        print(f'{num_short_early_1pct=}')
+        print(f'{num_short_early_5pct=}')
+        print(f'{num_short_early_10pct=}')
+
+        print(f'{num_short_late=}')
+        print(f'{num_short_late_1pct=}')
+        print(f'{num_short_late_5pct=}')
+        print(f'{num_short_late_10pct=}')
+
+        flowers('stats')
+        diff_mean = stats.mean(diff_intervals[1:])
+        print(f'{diff_mean=:.3f}')
+
+        diff_median = stats.median(diff_intervals[1:])
+        print(f'{diff_median=:.3f}')
+
+        diff_pvariance = stats.pvariance(diff_intervals[1:])
+        print(f'{diff_pvariance=:.5f}')
+
+        diff_pstdev = stats.pstdev(diff_intervals[1:])
+        print(f'{diff_pstdev=:.3f}')
+
+        diff_variance = stats.variance(diff_intervals[1:])
+        print(f'{diff_variance=:.5f}')
+
+        diff_stdev = stats.stdev(diff_intervals[1:])
+        print(f'{diff_stdev=:.3f}')
+
+        # plt.style.use('_mpl-gallery')
+
+        # make data
+        # np.random.seed(1)
+        # x = 4 + np.random.normal(0, 1.5, 200)
+
+        # plot:
+        # fig, ax = plt.subplots()
+        #
+        # ax.hist(diff_intervals, bins=16, linewidth=0.5, edgecolor="white")
+
+        # ax.set(xlim=(0, 8), xticks=np.arange(1, 8),
+        #        ylim=(0, 56), yticks=np.linspace(0, 56, 9))
+
+        # plt.show()
 
         assert num_long_early_10pct == 0
         # assert num_long_early_5pct == 0
         # assert num_long_early_5pct == 0
         # assert num_long_early == 0
 
-        assert num_long_late_10pct == 0
+        assert num_long_late_15pct < 2
+        # assert num_long_late_10pct == 0
         # assert num_long_late_5pct == 0
         # assert num_long_late_1pct == 0
         # assert num_long_late == 0
@@ -3307,7 +3532,7 @@ class RequestValidator:
         # assert num_short_early_5pct == 0
         # assert num_short_early == 0
 
-        assert num_short_late_10pct == 0
+        assert num_short_late_10pct <= 2
         # assert num_short_late_5pct == 0
         # assert num_short_late_1pct == 0
         # assert num_short_late == 0

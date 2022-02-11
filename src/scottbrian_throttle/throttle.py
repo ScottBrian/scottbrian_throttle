@@ -290,12 +290,12 @@ class Throttle:
                 3) **mode=Throttle.MODE_SYNC_EC** specifies synchronous
                    mode using an early arrival algorithm. For
                    synchronous throttling with the early arrival
-                   algorithm, requests are sent immediately without
-                   delay until the limit is reached, at which point the
-                   throttling becomes active. An early_count
-                   specification is required when mode
-                   Throttle.MODE_SYNC_EC is specified. See the
-                   early_count parameter for details.
+                   algorithm, an *early_count* number of requests are
+                   sent immediately without delay before the throttling
+                   becomes active. The objective is to allow a bursts of
+                   requests while also ensuring that the average arrival
+                   rate is within the limit as specified by the
+                   *requsts* and *seconds* arguments.
                 4) **mode=Throttle.MODE_SYNC_LB** specifies synchronous
                    mode using a leaky bucket algorithm. For synchronous
                    throttling with the leaky bucket algorithm, some
@@ -313,19 +313,12 @@ class Throttle:
                             until queued requests are removed and
                             scheduled. The default is 4096 requests.
             early_count: Specifies the number of requests that are
-                           allowed to proceed that arrive earlier than
-                           the allowed interval. The count of early
-                           requests is incremented, and when it exceeds
-                           the early_count, the request will be delayed
-                           to
-                           align it with its expected arrival time. Any
-                           request that arrives at or beyond the
-                           allowed interval will cause the count to be
-                           reset (included the request that was delayed
-                           since it will now be sent at the allowed
-                           interval). A specification of zero for the
-                           early_count will effectively cause all
-                           requests that are early to be delayed.
+                           allowed to proceed immediately without delay
+                           for **mode=Throttle.MODE_SYNC_EC**.
+                           Note that a specification of 1 for the
+                           *early_count* will result in the same
+                           behavior as if **mode=Throttle.MODE_SYNC**
+                           had been chosen.
             lb_threshold: Specifies the threshold for the leaky bucket
                             when Throttle.MODE_SYNC_LB is specified for
                             mode. This is the number of requests that
@@ -846,12 +839,14 @@ class Throttle:
             # sync and sync with early count, the
             # _leaky_bucket_tolerance will be zero.
             ############################################################
-            if arrival_time < self._expected_arrival_time:
+            if self._expected_arrival_time <= arrival_time:
+                self._early_arrival_count = 1
+            else:
                 self._early_arrival_count += 1
                 if ((self.mode != Throttle.MODE_SYNC_EC) or
                         (self.early_count <
                             self._early_arrival_count)):
-                    self._early_arrival_count = 0  # reset the count
+                    self._early_arrival_count = 1  # reset the count
                     wait_time = self._expected_arrival_time - arrival_time
                     time.sleep(wait_time)
 
