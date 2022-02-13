@@ -249,7 +249,7 @@ class Throttle:
     __slots__ = ('requests', 'seconds', 'mode', 'async_q_size',
                  'early_count', 'lb_threshold', 'target_interval',
                  'next_send_time', 'shutdown_lock', '_shutdown',
-                 'do_shutdown', '_expected_arrival_time',
+                 'do_shutdown', '_expected_arrival_time', '_arrival_time',
                  '_early_arrival_count', 'async_q',
                  'request_scheduler_thread', 'logger', 'num_shutdown_timeouts')
 
@@ -554,6 +554,7 @@ class Throttle:
         self.shutdown_lock = threading.Lock()
         self._shutdown = False
         self.do_shutdown = Throttle.TYPE_SHUTDOWN_NONE
+        self._arrival_time = 0.0
         self._expected_arrival_time = 0.0
         self._early_arrival_count = 0
         self.async_q: Optional[queue.Queue[Throttle.Request]] = None
@@ -829,7 +830,7 @@ class Throttle:
         ################################################################
         else:
             # set the time that this request is being made
-            arrival_time = time.time()
+            self._arrival_time = time.time()
 
             ############################################################
             # The Throttle class can be instantiated for sync, sync with
@@ -839,7 +840,7 @@ class Throttle:
             # sync and sync with early count, the
             # _leaky_bucket_tolerance will be zero.
             ############################################################
-            if self._expected_arrival_time <= arrival_time:
+            if self._expected_arrival_time <= self._arrival_time:
                 self._early_arrival_count = 1
             else:
                 self._early_arrival_count += 1
@@ -847,7 +848,8 @@ class Throttle:
                         (self.early_count <
                             self._early_arrival_count)):
                     self._early_arrival_count = 1  # reset the count
-                    wait_time = self._expected_arrival_time - arrival_time
+                    wait_time = (self._expected_arrival_time
+                                 - self._arrival_time)
                     time.sleep(wait_time)
 
             # The caller should protect the function with a try and
