@@ -117,6 +117,7 @@ from typing_extensions import TypeAlias
 ########################################################################
 # Third Party
 ########################################################################
+from scottbrian_utils.pauser import Pauser
 from wrapt.decorators import decorator  # type: ignore
 
 ########################################################################
@@ -217,6 +218,39 @@ class AsyncQIsNoneDuringShutdown(ThrottleError):
     """Throttle exception for missing async queue."""
     pass
 
+# class Pauser:
+#     """Pauser class to pause execution."""
+#     def __init__(self,
+#                  min_interval: float = 0.02,
+#                  part_time_factor: float = 0.4):
+#         """Initialize the instance.
+#
+#         Args:
+#             min_interval: the minimum interval that will use sleep as
+#                             part of the pause routine
+#             part_time_factor: the value to multiply the sleep interval
+#                                 by to reduce the sleep time
+#
+#         """
+#         self.min_interval = 0.02
+#         self.part_time_factor = 0.4
+#
+#     def pause(self, interval: IntFloat):
+#         """Pause for the specified number of seconds.
+#
+#         Args:
+#             interval: number of seconds to pause
+#         """
+#         # start_time = time.time()
+#         now_time = time.time()
+#         stop_time = now_time + interval
+#         part_time = interval
+#         while now_time < stop_time:
+#             if part_time >= self.min_interval:
+#                 part_time = part_time * self.part_time_factor
+#                 time.sleep(part_time)
+#             now_time = time.time()
+
 
 class Throttle:
     """Provides a throttle mechanism.
@@ -251,7 +285,8 @@ class Throttle:
                  'next_send_time', 'shutdown_lock', '_shutdown',
                  'do_shutdown', '_expected_arrival_time', '_arrival_time',
                  '_early_arrival_count', 'async_q',
-                 'request_scheduler_thread', 'logger', 'num_shutdown_timeouts')
+                 'request_scheduler_thread', 'logger',
+                 'num_shutdown_timeouts', 'pauser', 'lb_adjustment')
 
     def __init__(self, *,
                  requests: int,
@@ -550,17 +585,22 @@ class Throttle:
         # Set remainder of vars
         ################################################################
         self.target_interval = seconds/requests
+        self.lb_adjustment: float = max(0.0,
+                                        (self.target_interval
+                                         * self.lb_threshold)
+                                        - self.target_interval)
         self.next_send_time = 0.0
         self.shutdown_lock = threading.Lock()
         self._shutdown = False
         self.do_shutdown = Throttle.TYPE_SHUTDOWN_NONE
         self._arrival_time = 0.0
-        self._expected_arrival_time = 0.0
+        self._expected_arrival_time = time.time() - self.lb_adjustment
         self._early_arrival_count = 0
         self.async_q: Optional[queue.Queue[Throttle.Request]] = None
         self.request_scheduler_thread: Optional[threading.Thread] = None
         self.logger = logging.getLogger(__name__)
         self.num_shutdown_timeouts = 0  # limit timeout log messages
+        self.pauser = Pauser()
 
         if mode == Throttle.MODE_ASYNC:
             self.async_q = queue.Queue(maxsize=self.async_q_size)
@@ -848,9 +888,15 @@ class Throttle:
                         (self.early_count <
                             self._early_arrival_count)):
                     self._early_arrival_count = 1  # reset the count
+                    # add an extra millisec for now as a test to see why
+                    # sometimes the average interval is slightly less
+                    # than we expect it to be - could be the inaccuracy
+                    # of time.time()
                     wait_time = (self._expected_arrival_time
-                                 - self._arrival_time)
-                    time.sleep(wait_time)
+                                 - self._arrival_time) + 0.001
+                    # the shortest interval is 0.015 seconds
+                    # time.sleep(wait_time)
+                    self.pauser.pause(wait_time)
 
             # The caller should protect the function with a try and
             # either raise an exception or pass back a return value that
@@ -879,9 +925,11 @@ class Throttle:
             # TODO: subtract the constant path delay from the interval
             self._expected_arrival_time = (max(time.time(),
                                                self._expected_arrival_time
-                                               + self.lb_threshold
+                                               + self.lb_adjustment
+                                               # + self.lb_threshold
                                                )
-                                           - self.lb_threshold
+                                           # - self.lb_threshold
+                                           - self.lb_adjustment
                                            + self.target_interval)
 
             # return the request return value (might be None)

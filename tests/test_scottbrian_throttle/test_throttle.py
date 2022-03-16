@@ -11,6 +11,7 @@ import math
 import statistics as stats
 import threading
 import time
+from time import perf_counter_ns
 from typing import Any, Callable, cast, Optional, Union
 from typing_extensions import TypeAlias
 
@@ -19,7 +20,7 @@ from typing_extensions import TypeAlias
 ########################################################################
 import pytest
 from scottbrian_utils.flower_box import print_flower_box_msg as flowers
-from scottbrian_utils.timer import Timer
+from scottbrian_utils.pauser import Pauser
 ########################################################################
 # Local
 ########################################################################
@@ -89,17 +90,19 @@ class ReqTime:
     f_time: float = 0.0
 
 
-single_requests_arg: Optional[int] = 3  # 1 2 3
-single_seconds_arg: Optional[float] = 0.3  # 2.0 0.3 0.3
-single_early_count_arg: Optional[int] = 3  # 1 2 1
-single_send_interval_mult_arg: Optional[float] = 0.0  # 1.1 1.1 0.0
+single_requests_arg: Optional[int] = None
+single_seconds_arg: Optional[float] = None
+single_early_count_arg: Optional[int] = None
+single_send_interval_mult_arg: Optional[float] = None
+
+single_lb_threshold_arg: OptIntFloat = None
 
 
 ########################################################################
 # requests_arg fixture
 ########################################################################
 requests_arg_list = [1, 2, 3]
-if single_requests_arg:
+if single_requests_arg is not None:
     requests_arg_list = [single_requests_arg]
 
 
@@ -120,7 +123,7 @@ def requests_arg(request: Any) -> int:
 # seconds_arg fixture
 ########################################################################
 seconds_arg_list = [0.3, 1, 2]
-if single_seconds_arg:
+if single_seconds_arg is not None:
     seconds_arg_list = [single_seconds_arg]
 
 
@@ -430,7 +433,9 @@ def mode_arg(request: Any) -> int:
 ########################################################################
 # mode_arg fixture
 ########################################################################
-lb_threshold_arg_list = [0.1, 1, 1.5, 3]
+lb_threshold_arg_list = [1, 1.5, 3]
+if single_lb_threshold_arg is not None:
+    lb_threshold_arg_list = [single_lb_threshold_arg]
 
 
 @pytest.fixture(params=lb_threshold_arg_list)  # type: ignore
@@ -450,7 +455,7 @@ def lb_threshold_arg(request: Any) -> IntFloat:
 # early_count_arg fixture
 ########################################################################
 early_count_arg_list = [1, 2, 3]
-if single_early_count_arg:
+if single_early_count_arg is not None:
     early_count_arg_list = [single_early_count_arg]
 
 
@@ -471,7 +476,7 @@ def early_count_arg(request: Any) -> int:
 # send_interval_mult_arg fixture
 ########################################################################
 send_interval_mult_arg_list = [0.0, 0.9, 1.0, 1.1]
-if single_send_interval_mult_arg:
+if single_send_interval_mult_arg is not None:
     send_interval_mult_arg_list = [single_send_interval_mult_arg]
 
 
@@ -1187,7 +1192,7 @@ class TestThrottle:
     The non-decorator cases will be simpler, with the exception of
     doing some explicit calls to shutdown the throttle (which is not
     possible with the decorator style - for this, we can set the
-    start_shutdown_event.
+    start_shutdown_event).
 
     The following keywords with various values and in all combinations
     are tested:
@@ -1411,6 +1416,7 @@ class TestThrottle:
             InvalidModeNum: The Mode must be 1, 2, 3, or 4
         """
         request_multiplier = 16
+        pauser = Pauser()
         ################################################################
         # Instantiate Throttle
         ################################################################
@@ -1442,6 +1448,19 @@ class TestThrottle:
             raise InvalidModeNum('The Mode must be 1, 2, 3, or 4')
 
         ################################################################
+        # Build send interval list
+        ################################################################
+        num_reqs_to_do = requests * request_multiplier
+        if mode == Throttle.MODE_SYNC_EC:
+            num_reqs_to_do = ((((num_reqs_to_do + 1)
+                                // early_count)
+                               * early_count)
+                              + 1)
+        send_intervals = [0.0]
+        for _ in range(num_reqs_to_do-1):
+            send_intervals.append(send_interval)
+
+        ################################################################
         # Instantiate Request Validator
         ################################################################
         request_validator = RequestValidator(t_throttle=a_throttle,
@@ -1451,42 +1470,29 @@ class TestThrottle:
                                              early_count=early_count,
                                              lb_threshold=lb_threshold,
                                              request_mult=request_multiplier,
-                                             send_interval=send_interval)
+                                             send_interval=send_interval,
+                                             send_intervals=send_intervals)
 
         ################################################################
         # Make requests and validate
         ################################################################
-        num_reqs_to_do = requests * request_multiplier
-        if mode == Throttle.MODE_SYNC_EC:
-            num_reqs_to_do = ((((num_reqs_to_do + 1)
-                              // early_count)
-                              * early_count)
-                              + 1)
         if request_style == 0:
-            for i in range(num_reqs_to_do):
+            # for i in range(num_reqs_to_do):
+            for i, s_interval in enumerate(send_intervals):
                 # 0
-                request_validator.before_req_times.append(time.time())
+                pauser.pause(s_interval)  # first one is 0.0
+                request_validator.before_req_times.append(perf_counter_ns())
                 rc = a_throttle.send_request(request_validator.request0)
-                sent_time = time.time()
+                sent_time = perf_counter_ns()
                 request_validator.after_req_times.append(sent_time)
-                now_time = sent_time
-                end_time = now_time + send_interval
 
                 if mode == Throttle.MODE_ASYNC:
                     assert rc is Throttle.RC_OK
                 else:
                     assert rc == i
 
-                time.sleep(send_interval * .90)
-                # make sure we are not sleeping too long
-                # note: when send_interval is 0, now_time is equal to
-                # end_time (which is why we assert <= here)
-                now_time = time.time()
-                assert now_time <= end_time
-                while now_time < end_time:
-                    now_time = time.time()
-                wait_time = now_time - sent_time
-
+                # pauser.pause(send_interval)
+                request_validator.wait_times.append(perf_counter_ns())
 
             if mode == Throttle.MODE_ASYNC:
                 a_throttle.start_shutdown(
@@ -1601,14 +1607,18 @@ class TestThrottle:
         elif request_style == 6:
             for i in range(num_reqs_to_do):
                 # 6
+                request_validator.before_req_times.append(perf_counter_ns())
                 rc = a_throttle.send_request(request_validator.request6,
                                              i,
                                              requests,
                                              seconds=seconds,
                                              interval=send_interval)
+                sent_time = perf_counter_ns()
+                request_validator.after_req_times.append(sent_time)
                 exp_rc = i if mode != Throttle.MODE_ASYNC else Throttle.RC_OK
                 assert rc == exp_rc
-                time.sleep(send_interval)
+                pauser.pause(send_interval)
+                request_validator.wait_times.append(perf_counter_ns())
 
             if mode == Throttle.MODE_ASYNC:
                 a_throttle.start_shutdown(
@@ -2972,7 +2982,8 @@ class RequestValidator:
                  early_count: int,
                  lb_threshold: float,
                  request_mult: int,
-                 send_interval: float) -> None:
+                 send_interval: float,
+                 send_intervals: list[float]) -> None:
         """Initialize the RequestValidator object.
 
         Args:
@@ -2995,6 +3006,8 @@ class RequestValidator:
         self.lb_threshold = lb_threshold
         self.request_mult = request_mult
         self.send_interval = send_interval
+        self.send_intervals = send_intervals
+
         self.throttles: list[Throttle] = []
         self.next_send_times: list[float] = []
         self.idx = -1
@@ -3005,25 +3018,36 @@ class RequestValidator:
         self.expected_times: list[float] = []
         self.expected_intervals: list[float] = []
 
+        self.diff_req_intervals: list[float] = []
+        self.diff_req_ratio: list[float] = []
+
         self.before_req_times: list[float] = []
         self.arrival_times: list[float] = []
         self.req_times: list[tuple[int, float]] = []
         self.after_req_times: list[float] = []
+        self.wait_times: list[float] = []
+        self.exp_arrival_times: list[float] = []
 
         self.norm_before_req_times: list[float] = []
         self.norm_arrival_times: list[float] = []
         self.norm_req_times: list[float] = []
         self.norm_after_req_times: list[float] = []
+        self.norm_wait_times: list[float] = []
+        self.norm_exp_arrival_times: list[float] = []
 
         self.norm_before_req_intervals: list[float] = []
         self.norm_arrival_intervals: list[float] = []
         self.norm_req_intervals: list[float] = []
         self.norm_after_req_intervals: list[float] = []
+        self.norm_wait_intervals: list[float] = []
+        self.norm_exp_arrival_intervals: list[float] = []
 
         self.mean_before_req_interval = 0.0
         self.mean_arrival_interval = 0.0
         self.mean_req_interval = 0.0
         self.mean_after_req_interval = 0.0
+        self.mean_wait_interval = 0.0
+        self.mean_exp_arrival_interval = 0.0
 
         self.norm_next_send_times: list[float] = []
         self.norm_next_send_intervals: list[float] = []
@@ -3050,7 +3074,6 @@ class RequestValidator:
                                 self.send_interval)
 
         self.exp_total_time = self.max_interval * (self.total_requests - 1)
-
 
         self.target_interval_1pct = self.target_interval * 0.01
         self.target_interval_5pct = self.target_interval * 0.05
@@ -3089,25 +3112,35 @@ class RequestValidator:
         self.expected_times = []
         self.expected_intervals = []
 
+        self.diff_req_intervals = []
+        self.diff_req_ratio = []
+
         self.before_req_times = []
         self.arrival_times = []
         self.req_times = []
         self.after_req_times = []
+        self.wait_times = []
+        self.exp_arrival_times = []
 
         self.norm_before_req_times = []
         self.norm_arrival_times = []
         self.norm_req_times = []
         self.norm_after_req_times = []
+        self.norm_wait_times = []
+        self.norm_exp_arrival_times = []
 
         self.norm_before_req_intervals = []
         self.norm_arrival_intervals = []
         self.norm_req_intervals = []
         self.norm_after_req_intervals = []
+        self.norm_wait_intervals = []
+        self.norm_exp_arrival_intervals = []
 
         self.mean_before_req_interval = 0.0
         self.mean_arrival_interval = 0.0
         self.mean_req_interval = 0.0
         self.mean_after_req_interval = 0.0
+        self.mean_exp_arrival_interval = 0.0
 
         self.next_send_times = []
         self.norm_next_send_times = []
@@ -3130,8 +3163,6 @@ class RequestValidator:
         print(f'{self.request_mult=}')
         print(f'{self.send_interval=}')
         print(f'{self.total_requests=}')
-        print(f'{self.requests=}')
-        print(f'{self.seconds=}')
         print(f'{self.target_interval=}')
         print(f'{self.send_interval=}')
         print(f'{self.min_interval=}')
@@ -3156,6 +3187,67 @@ class RequestValidator:
             self.throttles.append(func.throttle)
 
     ####################################################################
+    # build_sync_ec_exp_list
+    ####################################################################
+    def build_sync_ec_exp_list(self) -> None:
+        """Build lists of expected intervals."""
+        self.expected_intervals = []
+        self.expected_intervals.append(0)
+        current_interval_sum = 0.0
+        # the very first request is counted as early, and each
+        # first request of each new target interval is counted as
+        # early
+        current_early_count = 1
+        current_target_interval = 0.0
+        for send_interval in self.send_intervals[1:]:
+            current_target_interval += self.target_interval
+            current_interval_sum += send_interval
+            interval_remaining = (current_target_interval
+                                  - current_interval_sum)
+            # if this send is at or beyond the target interval
+            if current_target_interval <= current_interval_sum:
+                current_early_count = 1  # start a new series
+                current_interval_sum = 0.0
+                current_target_interval = 0.0
+                self.expected_intervals.append(send_interval)
+            else:  # this send is early
+                if self.early_count <= current_early_count:
+                    # we have exhausted our early count - must pause
+                    current_early_count = 1  # start a new series
+                    current_interval_sum = 0.0
+                    current_target_interval = 0.0
+                    self.expected_intervals.append(send_interval
+                                                   + interval_remaining)
+                else:
+                    current_early_count += 1
+                    self.expected_intervals.append(send_interval)
+
+    ####################################################################
+    # build_sync_lb_exp_list
+    ####################################################################
+    def build_sync_lb_exp_list(self) -> None:
+        """Build lists of expected intervals."""
+        self.expected_intervals = []
+        self.expected_intervals.append(0)
+
+        bucket_capacity = self.lb_threshold * self.target_interval
+        current_bucket_amt = self.target_interval  # first send
+        for send_interval in self.send_intervals[1:]:
+            # remove the amount that leaked since the last send
+            current_bucket_amt = max(0.0,
+                                     current_bucket_amt - send_interval)
+            available_bucket_amt = bucket_capacity - current_bucket_amt
+            # add target interval amount
+            if self.target_interval <= available_bucket_amt:
+                current_bucket_amt += self.target_interval
+                self.expected_intervals.append(send_interval)
+            else:
+                reduction_needed = self.target_interval - available_bucket_amt
+                self.expected_intervals.append(send_interval
+                                               + reduction_needed)
+                current_bucket_amt += (self.target_interval - reduction_needed)
+
+    ####################################################################
     # build time lists
     ####################################################################
     def build_times(self) -> None:
@@ -3167,25 +3259,19 @@ class RequestValidator:
                 [0.0] + [self.target_interval
                          for _ in range(len(self.req_times)-1)])
         self.target_times = list(accumulate(self.target_intervals))
+
         ################################################################
-        # create list of expected times and intervals
+        # Build the expected intervals list
         ################################################################
-        if (self.mode == Throttle.MODE_SYNC_EC
-                and self.send_interval < self.target_interval
-                and self.early_count > 1):
-            short_interval = self.min_interval
-            long_interval = ((self.early_count * self.target_interval)
-                             - ((self.early_count - 1) * self.min_interval))
-            self.expected_intervals = (
-                    [0.0] + (([short_interval
-                               for _ in range(self.early_count-1)]
-                              + [long_interval])
-                             * (self.total_requests
-                                // self.early_count)))
+        if self.mode == Throttle.MODE_SYNC_EC:
+            self.build_sync_ec_exp_list()
+        elif self.mode == Throttle.MODE_SYNC_LB:
+            self.build_sync_lb_exp_list()
         else:
             self.expected_intervals = (
-                    [0.0] + [self.target_interval
-                             for _ in range(len(self.req_times)-1)])
+                            [0.0] + [self.max_interval
+                                     for _ in range(len(self.req_times)-1)])
+
         self.expected_times = list(accumulate(self.expected_intervals))
 
         ################################################################
@@ -3193,7 +3279,7 @@ class RequestValidator:
         ################################################################
         assert len(self.before_req_times) == self.total_requests
         base_time = self.before_req_times[0]
-        self.norm_before_req_times = [item - base_time
+        self.norm_before_req_times = [(item - base_time) * Pauser.NS_2_SECS
                                       for item in self.before_req_times]
         self.norm_before_req_intervals = list(
             map(lambda t1, t2: t1 - t2,
@@ -3207,8 +3293,8 @@ class RequestValidator:
         # create list of arrival times and intervals
         ################################################################
         assert len(self.arrival_times) == self.total_requests
-        base_time = self.arrival_times[0]
-        self.norm_arrival_times = [item - base_time
+        base_time2 = self.arrival_times[0]
+        self.norm_arrival_times = [item - base_time2
                                    for item in self.arrival_times]
         self.norm_arrival_intervals = list(
             map(lambda t1, t2: t1 - t2,
@@ -3221,8 +3307,8 @@ class RequestValidator:
         ################################################################
         # create list of request times and intervals
         ################################################################
-        base_time = self.req_times[0][1]
-        self.norm_req_times = [item[1] - base_time
+        # base_time = self.req_times[0][1]
+        self.norm_req_times = [(item[1] - base_time) * Pauser.NS_2_SECS
                                for item in self.req_times]
         self.norm_req_intervals = list(map(lambda t1, t2: t1 - t2,
                                            self.norm_req_times,
@@ -3235,8 +3321,8 @@ class RequestValidator:
         # create list of after request times and intervals
         ################################################################
         assert len(self.after_req_times) == self.total_requests
-        base_time = self.after_req_times[0]
-        self.norm_after_req_times = [item - base_time
+        # base_time = self.after_req_times[0]
+        self.norm_after_req_times = [(item - base_time) * Pauser.NS_2_SECS
                                      for item in self.after_req_times]
         self.norm_after_req_intervals = list(
             map(lambda t1, t2: t1 - t2,
@@ -3247,19 +3333,62 @@ class RequestValidator:
                                         / (self.total_requests - 1))
 
         ################################################################
+        # create list of wait times and intervals
+        ################################################################
+        assert len(self.wait_times) == self.total_requests
+        # base_time = self.wait_times[0]
+        self.norm_wait_times = [(item - base_time) * Pauser.NS_2_SECS
+                                for item in self.wait_times]
+        self.norm_wait_intervals = list(
+            map(lambda t1, t2: t1 - t2,
+                self.norm_wait_times,
+                [0.0] + self.norm_wait_times[:-1]))
+
+        self.mean_wait_interval = (self.norm_wait_times[-1]
+                                   / (self.total_requests - 1))
+
+        ################################################################
+        # create list of diff and diff pct on req_intervals/exp_req_int
+        ################################################################
+        self.diff_req_intervals = list(
+            map(lambda t1, t2: t1 - t2,
+                self.norm_req_intervals,
+                self.expected_intervals))
+
+        self.diff_req_ratio = [item/self.target_interval
+                               for item in self.diff_req_intervals]
+
+        ################################################################
+        # create list of expected arrival times and intervals
+        ################################################################
+        assert len(self.exp_arrival_times) == self.total_requests
+        # base_time = self.exp_arrival_times[0]
+        self.norm_exp_arrival_times = [item - base_time
+                                       for item in self.exp_arrival_times]
+        self.norm_exp_arrival_intervals = list(
+            map(lambda t1, t2: t1 - t2,
+                self.norm_exp_arrival_times,
+                [0.0] + self.norm_exp_arrival_times[:-1]))
+
+        self.mean_exp_arrival_interval = (self.norm_exp_arrival_times[-1]
+                                          / (self.total_requests - 1))
+
+        ################################################################
         # create list of path times and intervals
         ################################################################
         for idx in range(self.total_requests):
             self.path_times.append([self.norm_before_req_times[idx],
                                     self.norm_arrival_times[idx],
                                     self.norm_req_times[idx],
-                                    self.norm_after_req_times[idx]])
+                                    self.norm_after_req_times[idx],
+                                    self.norm_wait_times[idx]])
 
         for item in self.path_times:
             self.path_intervals.append(
                 [item[1] - item[0],
                  item[2] - item[1],
-                 item[3] - item[2]]
+                 item[3] - item[2],
+                 item[4] - item[3]]
             )
 
         ################################################################
@@ -3283,38 +3412,13 @@ class RequestValidator:
     ####################################################################
     def print_intervals(self):
         """Build the expected intervals arrays."""
-        if (self.mode == Throttle.MODE_SYNC_EC
-                and self.send_interval < self.target_interval):
-            use_long_int = True
-            short_interval = self.min_interval
-            long_interval = ((self.early_count * self.target_interval)
-                             - ((self.early_count - 1) * self.min_interval))
-        else:
-            use_long_int = False
-            short_interval = self.target_interval
-            long_interval = self.target_interval
 
-        print(f'{short_interval=}')
-        print(f'{long_interval=}')
-        print(f'{use_long_int=}')
-        s_int = f'{short_interval: .3f}'
-        l_int = f'{long_interval: .3f}'
-
+        print(f'{self.norm_req_times[-1]=}')
         print(f'{self.mean_req_interval=}')
-
-        # p_expected_intervals = [' 0.000']
-        diff_intervals = [0.0]
-        for idx, interval in enumerate(self.norm_req_intervals[1:], 1):
-            if (use_long_int
-                    and ((idx % self.early_count) == 0)):  # long int
-                # p_expected_intervals.append(l_int)
-                diff_int = (interval - long_interval) / self.target_interval
-                diff_intervals.append(diff_int)
-            else:
-                # p_expected_intervals.append(s_int)
-                diff_int = ((interval - self.min_interval)
-                            / self.target_interval)
-                diff_intervals.append(diff_int)
+        print(f'{self.mean_before_req_interval=}')
+        print(f'{self.mean_arrival_interval=}')
+        print(f'{self.mean_after_req_interval=}')
+        print(f'{self.mean_wait_interval=}')
 
         ################################################################
         # build printable times
@@ -3332,6 +3436,8 @@ class RequestValidator:
                                self.norm_req_times))
         p_after_req_times = list(map(lambda num: f'{num: .3f}',
                                      self.norm_after_req_times))
+        p_wait_times = list(map(lambda num: f'{num: .3f}',
+                                self.norm_wait_times))
 
         ################################################################
         # build printable intervals
@@ -3349,9 +3455,13 @@ class RequestValidator:
                                    self.norm_req_intervals))
         p_after_req_intervals = list(map(lambda num: f'{num: .3f}',
                                          self.norm_after_req_intervals))
+        p_wait_intervals = list(map(lambda num: f'{num: .3f}',
+                                    self.norm_wait_intervals))
 
         p_diff_intervals = list(map(lambda num: f'{num: .3f}',
-                                    diff_intervals))
+                                    self.diff_req_intervals))
+        p_diff_ratio = list(map(lambda num: f'{num: .3f}',
+                            self.diff_req_ratio))
 
         print(f'\n{p_target_times        =}')
         print(f'{p_expected_times      =}')
@@ -3360,6 +3470,7 @@ class RequestValidator:
         print(f'{p_arrival_times       =}')
         print(f'{p_req_times           =}')
         print(f'{p_after_req_times     =}')
+        print(f'{p_wait_times          =}')
 
         print(f'\n{p_target_intervals    =}')
         print(f'{p_expected_intervals  =}')
@@ -3368,26 +3479,65 @@ class RequestValidator:
         print(f'{p_arrival_intervals   =}')
         print(f'{p_req_intervals       =}')
         print(f'{p_after_req_intervals =}')
+        print(f'{p_wait_intervals      =}')
 
-
-        print(f'{p_diff_intervals    =}')
+        print(f'\n{p_diff_intervals      =}')
+        print(f'{p_diff_ratio          =}')
 
         flowers('path times')
         for idx, item in enumerate(self.path_times):
             line = (f'{item[0]: .3f} '
                     f'{item[1]: .3f} '
                     f'{item[2]: .3f} '
-                    f'{item[3]: .3f} ')
-            print(f'{idx}: {line}')
+                    f'{item[3]: .3f} '
+                    f'{item[4]: .3f} ')
+            print(f'{idx:>3}: {line}')
 
         flowers('path intervals')
         for idx, item in enumerate(self.path_intervals):
             line = (f'{item[0]: .3f} '
                     f'{item[1]: .3f} '
-                    f'{item[2]: .3f} ')
-            print(f'{idx}: {line}')
-        
+                    f'{item[2]: .3f} '
+                    f'{item[3]: .3f} ')
+            print(f'{idx:>3}: {line}')
 
+        flowers('stats')
+        diff_mean = stats.mean(self.diff_req_intervals[1:])
+        print(f'{diff_mean=:.3f}')
+
+        diff_median = stats.median(self.diff_req_intervals[1:])
+        print(f'{diff_median=:.3f}')
+
+        diff_pvariance = stats.pvariance(self.diff_req_intervals[1:])
+        print(f'{diff_pvariance=:.5f}')
+
+        diff_pstdev = stats.pstdev(self.diff_req_intervals[1:])
+        print(f'{diff_pstdev=:.3f}')
+
+        diff_variance = stats.variance(self.diff_req_intervals[1:])
+        print(f'{diff_variance=:.5f}')
+
+        diff_stdev = stats.stdev(self.diff_req_intervals[1:])
+        print(f'{diff_stdev=:.3f}')
+
+        # plt.style.use('_mpl-gallery')
+
+        # make data
+        # np.random.seed(1)
+        # x = 4 + np.random.normal(0, 1.5, 200)
+
+        # plot:
+        # fig, ax = plt.subplots()
+        #
+        # ax.hist(self.diff_req_intervals,
+        #         bins=16,
+        #         linewidth=0.5,
+        #         edgecolor="white")
+
+        # ax.set(xlim=(0, 8), xticks=np.arange(1, 8),
+        #        ylim=(0, 56), yticks=np.linspace(0, 56, 9))
+
+        # plt.show()
     ####################################################################
     # validate_series
     ####################################################################
@@ -3440,28 +3590,27 @@ class RequestValidator:
         num_late_10pct = 0
         num_late_15pct = 0
 
-        for interval in self.norm_req_intervals[1:]:
-            if interval < self.target_interval:
+        for ratio in self.diff_req_ratio[1:]:
+            if ratio < 0:  # if negative
                 num_early += 1
-            if interval < self.target_interval - self.target_interval_1pct:
-                num_early_1pct += 1
-            if interval < self.target_interval - self.target_interval_5pct:
-                num_early_5pct += 1
-            if interval < self.target_interval - self.target_interval_10pct:
-                num_early_10pct += 1
-            if interval < self.target_interval - self.target_interval_15pct:
-                num_early_15pct += 1
-
-            if self.max_interval < interval:
+                if ratio <= -0.01:
+                    num_early_1pct += 1
+                if ratio <= -0.05:
+                    num_early_5pct += 1
+                if ratio <= -0.10:
+                    num_early_10pct += 1
+                if ratio <= -0.15:
+                    num_early_15pct += 1
+            else:
                 num_late += 1
-            if self.max_interval + self.max_interval_1pct < interval:
-                num_late_1pct += 1
-            if self.max_interval + self.max_interval_5pct < interval:
-                num_late_5pct += 1
-            if self.max_interval + self.max_interval_10pct < interval:
-                num_late_10pct += 1
-            if self.max_interval + self.max_interval_15pct < interval:
-                num_late_15pct += 1
+                if 0.01 <= ratio:
+                    num_late_1pct += 1
+                if 0.05 <= ratio:
+                    num_late_5pct += 1
+                if 0.10 <= ratio:
+                    num_late_10pct += 1
+                if 0.15 <= ratio:
+                    num_late_15pct += 1
 
         print('num_requests_sent1:', self.total_requests)
         print('num_early1:', num_early)
@@ -3475,10 +3624,6 @@ class RequestValidator:
         print('num_late_5pct1:', num_late_5pct)
         print('num_late_10pct1:', num_late_10pct)
         print('num_late_15pct1:', num_late_15pct)
-
-        # assert num_early_10pct == 0
-        # assert num_early_5pct == 0
-        # assert num_early_1pct == 0
 
         if self.target_interval < self.send_interval:
             if num_early > 0:
@@ -3494,13 +3639,8 @@ class RequestValidator:
                 print(f'{self.mean_after_req_interval=}')
             assert num_early == 0
 
-        # assert num_late_15pct == 0
-        # assert num_late_5pct == 0
-        # assert num_late_1pct == 0
-        # assert num_late == 0
-
-        self.exp_total_time = self.max_interval * self.total_requests
-        print(f'{self.exp_total_time=}')
+        # self.exp_total_time = self.max_interval * self.total_requests
+        # print(f'{self.exp_total_time=}')
         extra_exp_total_time = self.mean_req_interval * self.total_requests
         print(f'{extra_exp_total_time=}')
         mean_late_pct = ((self.mean_req_interval - self.max_interval) /
@@ -3515,6 +3655,17 @@ class RequestValidator:
         num_to_add = extra_exp_total_time - self.exp_total_time
         print(f'{num_to_add=:.2f}')
 
+        assert num_early_15pct == 0
+        assert num_early_10pct == 0
+        assert num_early_5pct == 0
+        # assert num_early_1pct == 0
+
+        assert num_late_15pct == 0
+        assert num_late_10pct == 0
+        assert num_late_5pct == 0
+        # assert num_late_1pct == 0
+        # assert num_late == 0
+
         assert self.max_interval <= self.mean_req_interval
 
     ####################################################################
@@ -3523,167 +3674,63 @@ class RequestValidator:
     def validate_sync_ec(self) -> None:
         """Validate results for sync early count."""
         self.print_intervals()
-        num_short_early = 0
-        num_short_early_1pct = 0
-        num_short_early_5pct = 0
-        num_short_early_10pct = 0
+        num_early = 0
+        num_early_1pct = 0
+        num_early_5pct = 0
+        num_early_10pct = 0
+        num_early_15pct = 0
 
-        num_short_late = 0
-        num_short_late_1pct = 0
-        num_short_late_5pct = 0
-        num_short_late_10pct = 0
+        num_late = 0
+        num_late_1pct = 0
+        num_late_5pct = 0
+        num_late_10pct = 0
+        num_late_15pct = 0
 
-        num_long_early = 0
-        num_long_early_1pct = 0
-        num_long_early_5pct = 0
-        num_long_early_10pct = 0
-
-        num_long_late = 0
-        num_long_late_1pct = 0
-        num_long_late_5pct = 0
-        num_long_late_10pct = 0
-        num_long_late_15pct = 0
-
-        long_interval = ((self.early_count * self.target_interval)
-                         - ((self.early_count-1) * self.min_interval))
-
-        norm_req_intervals = []
-        for interval in self.norm_req_intervals:
-            r_int = round(interval, 3)
-            r_int = f'{r_int: .3f}'
-            norm_req_intervals.append(r_int)
-        target_intervals = ['0.000']
-        r_t_int = f'{long_interval: .3f}'
-        r_m_int = f'{self.min_interval: .3f}'
-        diff_intervals = [0.0]
-        for idx, interval in enumerate(self.norm_req_intervals[1:], 1):
-            if (idx % self.early_count) == 0:  # long interval
-                target_intervals.append(r_t_int)
-                diff_int = (interval - long_interval) / self.target_interval
-                diff_intervals.append(diff_int)
-                if interval < long_interval:
-                    num_long_early += 1
-                if interval < long_interval - self.target_interval_1pct:
-                    num_long_early_1pct += 1
-                if interval < long_interval - self.target_interval_5pct:
-                    num_long_early_5pct += 1
-                if interval < (long_interval - self.target_interval_10pct):
-                    num_long_early_10pct += 1
-
-                if long_interval < interval:
-                    num_long_late += 1
-                if (long_interval * 1.01) < interval:
-                    num_long_late_1pct += 1
-                if (long_interval * 1.05) < interval:
-                    num_long_late_5pct += 1
-                if (long_interval * 1.1) < interval:
-                    num_long_late_10pct += 1
-                if (long_interval * 1.15) < interval:
-                    num_long_late_15pct += 1
+        for ratio in self.diff_req_ratio[1:]:
+            if ratio < 0:  # if negative
+                num_early += 1
+                if ratio <= -0.01:
+                    num_early_1pct += 1
+                if ratio <= -0.05:
+                    num_early_5pct += 1
+                if ratio <= -0.10:
+                    num_early_10pct += 1
+                if ratio <= -0.15:
+                    num_early_15pct += 1
             else:
-                target_intervals.append(r_m_int)
-                diff_int = ((interval - self.min_interval)
-                            / self.target_interval)
-                diff_intervals.append(diff_int)
-                if interval < self.min_interval:
-                    num_short_early += 1
-                if interval < self.min_interval - self.min_interval_1pct:
-                    num_short_early_1pct += 1
-                if interval < self.min_interval - self.min_interval_5pct:
-                    num_short_early_5pct += 1
-                if interval < (self.min_interval - self.min_interval_10pct):
-                    num_short_early_10pct += 1
+                num_late += 1
+                if 0.01 <= ratio:
+                    num_late_1pct += 1
+                if 0.05 <= ratio:
+                    num_late_5pct += 1
+                if 0.10 <= ratio:
+                    num_late_10pct += 1
+                if 0.15 <= ratio:
+                    num_late_15pct += 1
 
-                if self.min_interval < interval:
-                    num_short_late += 1
-                if self.min_interval + self.min_interval_1pct < interval:
-                    num_short_late_1pct += 1
-                if self.min_interval + self.min_interval_5pct < interval:
-                    num_short_late_5pct += 1
-                if self.min_interval + self.min_interval_10pct < interval:
-                    num_short_late_10pct += 1
+        print(f'{num_early=}')
+        print(f'{num_early_1pct=}')
+        print(f'{num_early_5pct=}')
+        print(f'{num_early_10pct=}')
+        print(f'{num_early_15pct=}')
 
-        print(f'{long_interval=}')
-        # print(f'{self.norm_req_intervals=}')
-        # print(f'{self.norm_req_times=}')
+        print(f'{num_late=}')
+        print(f'{num_late_1pct=}')
+        print(f'{num_late_5pct=}')
+        print(f'{num_late_10pct=}')
+        print(f'{num_late_15pct=}')
 
-        print(f'{num_long_early=}')
-        print(f'{num_long_early_1pct=}')
-        print(f'{num_long_early_5pct=}')
-        print(f'{num_long_early_10pct=}')
+        assert num_early_10pct == 0
+        assert num_early_5pct == 0
+        # assert num_long_early_1pct == 0
 
-        print(f'{num_long_late=}')
-        print(f'{num_long_late_1pct=}')
-        print(f'{num_long_late_5pct=}')
-        print(f'{num_long_late_10pct=}')
-        print(f'{num_long_late_15pct=}')
-
-        print(f'{num_short_early=}')
-        print(f'{num_short_early_1pct=}')
-        print(f'{num_short_early_5pct=}')
-        print(f'{num_short_early_10pct=}')
-
-        print(f'{num_short_late=}')
-        print(f'{num_short_late_1pct=}')
-        print(f'{num_short_late_5pct=}')
-        print(f'{num_short_late_10pct=}')
-
-        flowers('stats')
-        diff_mean = stats.mean(diff_intervals[1:])
-        print(f'{diff_mean=:.3f}')
-
-        diff_median = stats.median(diff_intervals[1:])
-        print(f'{diff_median=:.3f}')
-
-        diff_pvariance = stats.pvariance(diff_intervals[1:])
-        print(f'{diff_pvariance=:.5f}')
-
-        diff_pstdev = stats.pstdev(diff_intervals[1:])
-        print(f'{diff_pstdev=:.3f}')
-
-        diff_variance = stats.variance(diff_intervals[1:])
-        print(f'{diff_variance=:.5f}')
-
-        diff_stdev = stats.stdev(diff_intervals[1:])
-        print(f'{diff_stdev=:.3f}')
-
-        # plt.style.use('_mpl-gallery')
-
-        # make data
-        # np.random.seed(1)
-        # x = 4 + np.random.normal(0, 1.5, 200)
-
-        # plot:
-        # fig, ax = plt.subplots()
-        #
-        # ax.hist(diff_intervals, bins=16, linewidth=0.5, edgecolor="white")
-
-        # ax.set(xlim=(0, 8), xticks=np.arange(1, 8),
-        #        ylim=(0, 56), yticks=np.linspace(0, 56, 9))
-
-        # plt.show()
-
-        assert num_long_early_10pct == 0
-        # assert num_long_early_5pct == 0
-        # assert num_long_early_5pct == 0
-        # assert num_long_early == 0
-
-        assert num_long_late_15pct < 2
-        # assert num_long_late_10pct == 0
-        # assert num_long_late_5pct == 0
+        assert num_late_15pct == 0
+        assert num_late_10pct == 0
+        assert num_late_5pct == 0
         # assert num_long_late_1pct == 0
-        # assert num_long_late == 0
 
-        assert num_short_early_10pct == 0
-        # assert num_short_early_5pct == 0
-        # assert num_short_early_5pct == 0
-        # assert num_short_early == 0
-
-        assert num_short_late_10pct <= 2
-        # assert num_short_late_5pct == 0
-        # assert num_short_late_1pct == 0
-        # assert num_short_late == 0
-
+        if self.mean_req_interval < self.target_interval:
+            print(f'{self.norm_req_intervals=}')
         assert self.target_interval <= self.mean_req_interval
 
     ####################################################################
@@ -3691,159 +3738,67 @@ class RequestValidator:
     ####################################################################
     def validate_sync_lb(self) -> None:
         """Validate the results for sync leaky bucket."""
-        amt_added_per_send = self.target_interval - self.send_interval
-        num_sends_before_trigger = (math.floor(self.lb_threshold /
-                                               amt_added_per_send))
-        amt_remaining_in_bucket = (self.lb_threshold
-                                   - (num_sends_before_trigger
-                                      * self.send_interval))
-        amt_over = self.send_interval - amt_remaining_in_bucket
-
-        trigger_interval = self.send_interval + amt_over
-        trigger_interval_1pct = trigger_interval * 0.01
-        trigger_interval_5pct = trigger_interval * 0.05
-        trigger_interval_10pct = trigger_interval * 0.10
-
-        num_short_early = 0
-        num_short_early_1pct = 0
-        num_short_early_5pct = 0
-        num_short_early_10pct = 0
-
-        num_short_late = 0
-        num_short_late_1pct = 0
-        num_short_late_5pct = 0
-        num_short_late_10pct = 0
-
-        num_trigger_early = 0
-        num_trigger_early_1pct = 0
-        num_trigger_early_5pct = 0
-        num_trigger_early_10pct = 0
-
-        num_trigger_late = 0
-        num_trigger_late_1pct = 0
-        num_trigger_late_5pct = 0
-        num_trigger_late_10pct = 0
-
+        self.print_intervals()
         num_early = 0
         num_early_1pct = 0
         num_early_5pct = 0
         num_early_10pct = 0
+        num_early_15pct = 0
 
         num_late = 0
         num_late_1pct = 0
         num_late_5pct = 0
         num_late_10pct = 0
+        num_late_15pct = 0
 
-        # the following assert ensures our request_multiplier is
-        # sufficient to get the bucket filled and then some
-        assert (num_sends_before_trigger+8) < len(self.norm_req_intervals)
+        exp_mean_req_interval = stats.mean(self.expected_intervals[1:])
 
-        for idx, interval in enumerate(self.norm_req_intervals[1:], 1):
-            if idx <= num_sends_before_trigger:
-                if interval < self.min_interval:
-                    num_short_early += 1
-                if interval < self.min_interval - self.min_interval_1pct:
-                    num_short_early_1pct += 1
-                if interval < self.min_interval - self.min_interval_5pct:
-                    num_short_early_5pct += 1
-                if interval < (self.min_interval - self.min_interval_10pct):
-                    num_short_early_10pct += 1
-
-                if self.min_interval < interval:
-                    num_short_late += 1
-                if self.min_interval + self.min_interval_1pct < interval:
-                    num_short_late_1pct += 1
-                if self.min_interval + self.min_interval_5pct < interval:
-                    num_short_late_5pct += 1
-                if self.min_interval + self.min_interval_10pct < interval:
-                    num_short_late_10pct += 1
-            elif idx == num_sends_before_trigger + 1:
-                if interval < trigger_interval:
-                    num_trigger_early += 1
-                if interval < trigger_interval - trigger_interval_1pct:
-                    num_trigger_early_1pct += 1
-                if interval < trigger_interval - trigger_interval_5pct:
-                    num_trigger_early_5pct += 1
-                if interval < trigger_interval - trigger_interval_10pct:
-                    num_trigger_early_10pct += 1
-
-                if trigger_interval < interval:
-                    num_trigger_late += 1
-                if trigger_interval + trigger_interval_1pct < interval:
-                    num_trigger_late_1pct += 1
-                if trigger_interval + trigger_interval_5pct < interval:
-                    num_trigger_late_5pct += 1
-                if trigger_interval + trigger_interval_10pct < interval:
-                    num_trigger_late_10pct += 1
-            else:
-                if interval < self.target_interval:
-                    num_early += 1
-                if interval < self.target_interval - self.target_interval_1pct:
+        for ratio in self.diff_req_ratio[1:]:
+            if ratio < 0:  # if negative
+                num_early += 1
+                if ratio <= -0.01:
                     num_early_1pct += 1
-                if interval < self.target_interval - self.target_interval_5pct:
+                if ratio <= -0.05:
                     num_early_5pct += 1
-                if interval < self.target_interval - \
-                        self.target_interval_10pct:
+                if ratio <= -0.10:
                     num_early_10pct += 1
-
-                if self.max_interval < interval:
-                    num_late += 1
-                if self.max_interval + self.max_interval_1pct < interval:
+                if ratio <= -0.15:
+                    num_early_15pct += 1
+            else:
+                num_late += 1
+                if 0.01 <= ratio:
                     num_late_1pct += 1
-                if self.max_interval + self.max_interval_5pct < interval:
+                if 0.05 <= ratio:
                     num_late_5pct += 1
-                if self.max_interval + self.max_interval_10pct < interval:
+                if 0.10 <= ratio:
                     num_late_10pct += 1
+                if 0.15 <= ratio:
+                    num_late_15pct += 1
 
-        print('num_requests_sent3:', self.total_requests)
+        print(f'{num_early=}')
+        print(f'{num_early_1pct=}')
+        print(f'{num_early_5pct=}')
+        print(f'{num_early_10pct=}')
+        print(f'{num_early_15pct=}')
 
-        print('num_short_early3:', num_short_early)
-        print('num_short_early_1pct3:', num_short_early_1pct)
-        print('num_short_early_5pct3:', num_short_early_5pct)
-        print('num_short_early_10pct3:', num_short_early_10pct)
-
-        print('num_short_late3:', num_short_late)
-        print('num_short_late_1pct3:', num_short_late_1pct)
-        print('num_short_late_5pct3:', num_short_late_5pct)
-        print('num_short_late_10pct3:', num_short_late_10pct)
-
-        print('num_trigger_early3:', num_trigger_early)
-        print('num_trigger_early_1pct3:', num_trigger_early_1pct)
-        print('num_trigger_early_5pct3:', num_trigger_early_5pct)
-        print('num_trigger_early_10pct3:', num_trigger_early_10pct)
-
-        print('num_trigger_late3:', num_trigger_late)
-        print('num_trigger_late_1pct3:', num_trigger_late_1pct)
-        print('num_trigger_late_5pct3:', num_trigger_late_5pct)
-        print('num_trigger_late_10pct3:', num_trigger_late_10pct)
-
-        print('num_early3:', num_early)
-        print('num_early_1pct3:', num_early_1pct)
-        print('num_early_5pct3:', num_early_5pct)
-        print('num_early_10pct3:', num_early_10pct)
-
-        print('num_late3:', num_late)
-        print('num_late_1pct3:', num_late_1pct)
-        print('num_late_5pct3:', num_late_5pct)
-        print('num_late_10pct3:', num_late_10pct)
-
-        assert num_short_early_10pct == 0
-        assert num_short_late_10pct == 0
-
-        assert num_trigger_early_10pct == 0
-        assert num_trigger_late_10pct == 0
+        print(f'{num_late=}')
+        print(f'{num_late_1pct=}')
+        print(f'{num_late_5pct=}')
+        print(f'{num_late_10pct=}')
+        print(f'{num_late_15pct=}')
 
         assert num_early_10pct == 0
+        assert num_early_5pct == 0
+        # assert num_long_early_1pct == 0
+
+        assert num_late_15pct == 0
         assert num_late_10pct == 0
+        assert num_late_5pct == 0
+        # assert num_long_late_1pct == 0
 
-        exp_mean_interval = ((self.send_interval * num_sends_before_trigger)
-                             + trigger_interval
-                             + (self.target_interval
-                                * (self.total_requests
-                                   - (num_sends_before_trigger + 1)))
-                             ) / (self.total_requests - 1)
-
-        assert exp_mean_interval <= self.mean_req_interval
+        if self.mean_req_interval < exp_mean_req_interval:
+            print(f'{self.norm_req_intervals=}')
+        assert exp_mean_req_interval <= self.mean_req_interval
 
     ####################################################################
     # request0
@@ -3855,8 +3810,9 @@ class RequestValidator:
             the index reflected back
         """
         self.idx += 1
-        self.req_times.append((self.idx, time.time()))
+        self.req_times.append((self.idx, perf_counter_ns()))
         self.arrival_times.append(self.t_throttle._arrival_time)
+        self.exp_arrival_times.append(self.t_throttle._expected_arrival_time)
         return self.idx
 
     ####################################################################
@@ -3871,7 +3827,7 @@ class RequestValidator:
         Returns:
             the index reflected back
         """
-        self.req_times.append((idx, time.time()))
+        self.req_times.append((idx, perf_counter_ns()))
         assert idx == self.idx + 1
         self.idx = idx
         return idx
@@ -3889,7 +3845,7 @@ class RequestValidator:
         Returns:
             the index reflected back
         """
-        self.req_times.append((idx, time.time()))
+        self.req_times.append((idx, perf_counter_ns()))
         assert idx == self.idx + 1
         assert requests == self.requests
         self.idx = idx
@@ -3907,7 +3863,7 @@ class RequestValidator:
         Returns:
             the index reflected back
         """
-        self.req_times.append((idx, time.time()))
+        self.req_times.append((idx, perf_counter_ns()))
         assert idx == self.idx + 1
         self.idx = idx
         return idx
@@ -3925,7 +3881,7 @@ class RequestValidator:
         Returns:
             the index reflected back
         """
-        self.req_times.append((idx, time.time()))
+        self.req_times.append((idx, perf_counter_ns()))
         assert idx == self.idx + 1
         assert seconds == self.seconds
         self.idx = idx
@@ -3944,7 +3900,7 @@ class RequestValidator:
         Returns:
             the index reflected back
         """
-        self.req_times.append((idx, time.time()))
+        self.req_times.append((idx, perf_counter_ns()))
         assert idx == self.idx + 1
         assert interval == self.send_interval
         self.idx = idx
@@ -3970,7 +3926,9 @@ class RequestValidator:
         Returns:
             the index reflected back
         """
-        self.req_times.append((idx, time.time()))
+        self.req_times.append((idx, perf_counter_ns()))
+        self.arrival_times.append(self.t_throttle._arrival_time)
+        self.exp_arrival_times.append(self.t_throttle._expected_arrival_time)
         assert idx == self.idx + 1
         assert requests == self.requests
         assert seconds == self.seconds
