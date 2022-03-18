@@ -218,39 +218,6 @@ class AsyncQIsNoneDuringShutdown(ThrottleError):
     """Throttle exception for missing async queue."""
     pass
 
-# class Pauser:
-#     """Pauser class to pause execution."""
-#     def __init__(self,
-#                  min_interval: float = 0.02,
-#                  part_time_factor: float = 0.4):
-#         """Initialize the instance.
-#
-#         Args:
-#             min_interval: the minimum interval that will use sleep as
-#                             part of the pause routine
-#             part_time_factor: the value to multiply the sleep interval
-#                                 by to reduce the sleep time
-#
-#         """
-#         self.min_interval = 0.02
-#         self.part_time_factor = 0.4
-#
-#     def pause(self, interval: IntFloat):
-#         """Pause for the specified number of seconds.
-#
-#         Args:
-#             interval: number of seconds to pause
-#         """
-#         # start_time = time.time()
-#         now_time = time.time()
-#         stop_time = now_time + interval
-#         part_time = interval
-#         while now_time < stop_time:
-#             if part_time >= self.min_interval:
-#                 part_time = part_time * self.part_time_factor
-#                 time.sleep(part_time)
-#             now_time = time.time()
-
 
 class Throttle:
     """Provides a throttle mechanism.
@@ -264,6 +231,7 @@ class Throttle:
         request_func: Callable[..., Any]
         args: tuple[Any, ...]
         kwargs: dict[str, Any]
+        arrival_time: float
 
     MODE_ASYNC: Final[int] = 1
     MODE_SYNC: Final[int] = 2
@@ -282,11 +250,12 @@ class Throttle:
 
     __slots__ = ('requests', 'seconds', 'mode', 'async_q_size',
                  'early_count', 'lb_threshold', 'target_interval',
-                 'next_send_time', 'shutdown_lock', '_shutdown',
-                 'do_shutdown', '_expected_arrival_time', '_arrival_time',
+                 'shutdown_lock', '_shutdown',
+                 'do_shutdown', '_next_target_time', '_arrival_time',
                  '_early_arrival_count', 'async_q',
                  'request_scheduler_thread', 'logger',
-                 'num_shutdown_timeouts', 'pauser', 'lb_adjustment')
+                 'num_shutdown_timeouts', 'pauser', 'lb_adjustment',
+                 'target_interval_ns', 'lb_adjustment_ns')
 
     def __init__(self, *,
                  requests: int,
@@ -585,16 +554,18 @@ class Throttle:
         # Set remainder of vars
         ################################################################
         self.target_interval = seconds/requests
+        self.target_interval_ns: float = (self.target_interval
+                                          * Pauser.SECS_2_NS)
         self.lb_adjustment: float = max(0.0,
                                         (self.target_interval
                                          * self.lb_threshold)
                                         - self.target_interval)
-        self.next_send_time = 0.0
+        self.lb_adjustment_ns: float = self.lb_adjustment * Pauser.SECS_2_NS
         self.shutdown_lock = threading.Lock()
         self._shutdown = False
         self.do_shutdown = Throttle.TYPE_SHUTDOWN_NONE
         self._arrival_time = 0.0
-        self._expected_arrival_time = time.time() - self.lb_adjustment
+        self._next_target_time = time.perf_counter_ns() - self.lb_adjustment_ns
         self._early_arrival_count = 0
         self.async_q: Optional[queue.Queue[Throttle.Request]] = None
         self.request_scheduler_thread: Optional[threading.Thread] = None
@@ -840,7 +811,10 @@ class Throttle:
 
             # TODO: use se_lock
             with self.shutdown_lock:
-                request_item = Throttle.Request(func, args, kwargs)
+                request_item = Throttle.Request(func,
+                                                args,
+                                                kwargs,
+                                                time.perf_counter_ns())
                 while not self._shutdown:
                     try:
                         self.async_q.put(request_item,  # type: ignore
@@ -870,8 +844,8 @@ class Throttle:
         ################################################################
         else:
             # set the time that this request is being made
-            self._arrival_time = time.time()
-
+            # self._arrival_time = time.time()
+            self._arrival_time = time.perf_counter_ns()
             ############################################################
             # The Throttle class can be instantiated for sync, sync with
             # the early count algo, or sync with the leaky bucket algo.
@@ -880,7 +854,7 @@ class Throttle:
             # sync and sync with early count, the
             # _leaky_bucket_tolerance will be zero.
             ############################################################
-            if self._expected_arrival_time <= self._arrival_time:
+            if self._next_target_time <= self._arrival_time:
                 self._early_arrival_count = 1
             else:
                 self._early_arrival_count += 1
@@ -892,8 +866,8 @@ class Throttle:
                     # sometimes the average interval is slightly less
                     # than we expect it to be - could be the inaccuracy
                     # of time.time()
-                    wait_time = (self._expected_arrival_time
-                                 - self._arrival_time) + 0.001
+                    wait_time = (self._next_target_time
+                                 - self._arrival_time) * Pauser.NS_2_SECS
                     # the shortest interval is 0.015 seconds
                     # time.sleep(wait_time)
                     self.pauser.pause(wait_time)
@@ -923,14 +897,22 @@ class Throttle:
             # the undesirable effect that all requests will now be
             # throttled more than they need to be.
             # TODO: subtract the constant path delay from the interval
-            self._expected_arrival_time = (max(time.time(),
-                                               self._expected_arrival_time
-                                               + self.lb_adjustment
-                                               # + self.lb_threshold
-                                               )
-                                           # - self.lb_threshold
-                                           - self.lb_adjustment
-                                           + self.target_interval)
+            # self._next_target_time = (max(time.time(),
+            #                                    self._next_target_time
+            #                                    + self.lb_adjustment
+            #                                    # + self.lb_threshold
+            #                                    )
+            #                                # - self.lb_threshold
+            #                                - self.lb_adjustment
+            #                                + self.target_interval)
+            self._next_target_time = (max(time.perf_counter_ns(),
+                                          self._next_target_time
+                                          + self.lb_adjustment_ns
+                                          # + self.lb_threshold
+                                          )
+                                      # - self.lb_threshold
+                                      - self.lb_adjustment_ns
+                                      + self.target_interval_ns)
 
             # return the request return value (might be None)
             return ret_value
@@ -960,7 +942,7 @@ class Throttle:
             try:
                 request_item = self.async_q.get(block=True,  # type: ignore
                                                 timeout=1)
-                self.next_send_time = time.time() + self.target_interval
+                self._next_target_time = time.time() + self.target_interval
             except queue.Empty:
                 if self.do_shutdown != Throttle.TYPE_SHUTDOWN_NONE:
                     return
@@ -972,6 +954,7 @@ class Throttle:
             ############################################################
             try:
                 if self.do_shutdown != Throttle.TYPE_SHUTDOWN_HARD:
+                    self._arrival_time = request_item.arrival_time
                     request_item.request_func(*request_item.args,
                                               **request_item.kwargs)
             except Exception as e:
@@ -1002,7 +985,7 @@ class Throttle:
 
                 # Use min to ensure we don't sleep too long and appear
                 # slow to respond to a shutdown request
-                sleep_seconds = self.next_send_time - time.time()
+                sleep_seconds = self._next_target_time - time.time()
                 if sleep_seconds > 0:  # if still time to go
                     time.sleep(min(1.0, sleep_seconds))
                 else:  # we are done sleeping
