@@ -897,20 +897,10 @@ class Throttle:
             # the undesirable effect that all requests will now be
             # throttled more than they need to be.
             # TODO: subtract the constant path delay from the interval
-            # self._next_target_time = (max(time.time(),
-            #                                    self._next_target_time
-            #                                    + self.lb_adjustment
-            #                                    # + self.lb_threshold
-            #                                    )
-            #                                # - self.lb_threshold
-            #                                - self.lb_adjustment
-            #                                + self.target_interval)
             self._next_target_time = (max(time.perf_counter_ns(),
                                           self._next_target_time
                                           + self.lb_adjustment_ns
-                                          # + self.lb_threshold
                                           )
-                                      # - self.lb_threshold
                                       - self.lb_adjustment_ns
                                       + self.target_interval_ns)
 
@@ -936,13 +926,14 @@ class Throttle:
         # the async_q will be cleaned up with any remaining requests
         # either processes (Throttle.TYPE_SHUTDOWN_SOFT) or dropped
         # (Throttle.TYPE_SHUTDOWN_HARD). Note that async_q.get will only
-        # wait for a second so we can detect shutdown in a timely
+        # wait for a second to allow us to detect shutdown in a timely
         # fashion.
         while True:
             try:
                 request_item = self.async_q.get(block=True,  # type: ignore
                                                 timeout=1)
-                self._next_target_time = time.time() + self.target_interval
+                self._next_target_time = (time.perf_counter_ns()
+                                          + self.target_interval_ns)
             except queue.Empty:
                 if self.do_shutdown != Throttle.TYPE_SHUTDOWN_NONE:
                     return
@@ -985,9 +976,10 @@ class Throttle:
 
                 # Use min to ensure we don't sleep too long and appear
                 # slow to respond to a shutdown request
-                sleep_seconds = self._next_target_time - time.time()
+                sleep_seconds = (self._next_target_time
+                                 - time.perf_counter_ns()) * Pauser.NS_2_SECS
                 if sleep_seconds > 0:  # if still time to go
-                    time.sleep(min(1.0, sleep_seconds))
+                    self.pauser.pause(min(1.0, sleep_seconds))
                 else:  # we are done sleeping
                     break
 

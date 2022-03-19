@@ -8,6 +8,7 @@ from enum import auto, Flag
 from itertools import accumulate
 import logging
 import math
+import random
 import statistics as stats
 import threading
 import time
@@ -42,6 +43,8 @@ from scottbrian_throttle.throttle import (
     LbThresholdNotAllowed,
     AttemptedShutdownForSyncThrottle,
     IncorrectShutdownTypeSpecified)
+
+random.seed(42)
 
 ########################################################################
 # type aliases
@@ -1389,6 +1392,32 @@ class TestThrottle:
                              request_style=6)
 
     ####################################################################
+    # build_send_intervals
+    ####################################################################
+    def build_send_intervals(self,
+                             send_interval: float
+                             ) -> list[float]:
+        num_reqs_to_do = 64
+        # if mode == Throttle.MODE_SYNC_EC:
+        #     num_reqs_to_do = ((((num_reqs_to_do + 1)
+        #                         // early_count)
+        #                        * early_count)
+        #                       + 1)
+
+        send_intervals = [0.0]
+        for idx in range(num_reqs_to_do - 1):
+            if idx <= (num_reqs_to_do // 2):
+                send_intervals.append(send_interval)
+            else:
+                if send_interval == 0.0:
+                    alt_send_interval = .5 * (random.random() * 2)
+                else:
+                    alt_send_interval = send_interval * (random.random() * 2)
+                send_intervals.append(alt_send_interval)
+
+        return num_reqs_to_do, send_intervals
+
+    ####################################################################
     # throttle_router
     ####################################################################
     def throttle_router(self,
@@ -1415,8 +1444,13 @@ class TestThrottle:
             BadRequestStyleArg: The request style arg must be 0 to 6
             InvalidModeNum: The Mode must be 1, 2, 3, or 4
         """
-        request_multiplier = 16
         pauser = Pauser()
+
+        ################################################################
+        # get send interval list
+        ################################################################
+        num_reqs_to_do, send_intervals = self.build_send_intervals(
+            send_interval)
         ################################################################
         # Instantiate Throttle
         ################################################################
@@ -1424,8 +1458,7 @@ class TestThrottle:
             a_throttle = Throttle(requests=requests,
                                   seconds=seconds,
                                   mode=Throttle.MODE_ASYNC,
-                                  async_q_size=(requests
-                                                * request_multiplier)
+                                  async_q_size=num_reqs_to_do
                                   )
         elif mode == Throttle.MODE_SYNC:
             a_throttle = Throttle(requests=requests,
@@ -1448,19 +1481,6 @@ class TestThrottle:
             raise InvalidModeNum('The Mode must be 1, 2, 3, or 4')
 
         ################################################################
-        # Build send interval list
-        ################################################################
-        num_reqs_to_do = requests * request_multiplier
-        if mode == Throttle.MODE_SYNC_EC:
-            num_reqs_to_do = ((((num_reqs_to_do + 1)
-                                // early_count)
-                               * early_count)
-                              + 1)
-        send_intervals = [0.0]
-        for _ in range(num_reqs_to_do-1):
-            send_intervals.append(send_interval)
-
-        ################################################################
         # Instantiate Request Validator
         ################################################################
         request_validator = RequestValidator(requests=requests,
@@ -1468,7 +1488,7 @@ class TestThrottle:
                                              mode=mode,
                                              early_count=early_count,
                                              lb_threshold=lb_threshold,
-                                             request_mult=request_multiplier,
+                                             total_requests=num_reqs_to_do,
                                              send_interval=send_interval,
                                              send_intervals=send_intervals,
                                              t_throttle=a_throttle)
@@ -1620,20 +1640,20 @@ class TestThrottle:
         pauser = Pauser()
         requests_arg = 4
         seconds_arg = 1
-        request_multiplier = 16
-        num_reqs_to_do = requests_arg * request_multiplier
         send_interval = 0.1
 
-        send_intervals = [0.0]
-        for _ in range(num_reqs_to_do - 1):
-            send_intervals.append(send_interval)
+        ################################################################
+        # get send interval list
+        ################################################################
+        num_reqs_to_do, send_intervals = self.build_send_intervals(
+            send_interval)
 
         request_validator = RequestValidator(requests=requests_arg,
                                              seconds=seconds_arg,
                                              mode=Throttle.MODE_ASYNC,
                                              early_count=0,
                                              lb_threshold=0,
-                                             request_mult=request_multiplier,
+                                             total_requests=num_reqs_to_do,
                                              send_interval=send_interval,
                                              send_intervals=send_intervals)
 
@@ -1825,20 +1845,20 @@ class TestThrottle:
         # Instantiate Request Validator
         ################################################################
         pauser = Pauser()
-        request_multiplier = 32
-        num_reqs_to_do = requests_arg * request_multiplier
         send_interval = (seconds_arg/requests_arg) * send_interval_mult_arg
 
-        send_intervals = [0.0]
-        for _ in range(num_reqs_to_do - 1):
-            send_intervals.append(send_interval)
+        ################################################################
+        # get send interval list
+        ################################################################
+        num_reqs_to_do, send_intervals = self.build_send_intervals(
+            send_interval)
 
         request_validator = RequestValidator(requests=requests_arg,
                                              seconds=seconds_arg,
                                              mode=Throttle.MODE_ASYNC,
                                              early_count=0,
                                              lb_threshold=0,
-                                             request_mult=request_multiplier,
+                                             total_requests=num_reqs_to_do,
                                              send_interval=send_interval,
                                              send_intervals=send_intervals)
 
@@ -1888,20 +1908,20 @@ class TestThrottle:
         requests_arg = 2
         seconds_arg = 0.5
         send_interval_mult_arg = 1.0
-        request_multiplier = 16
         send_interval = (seconds_arg / requests_arg) * send_interval_mult_arg
 
-        num_reqs_to_do = requests_arg * request_multiplier
-        send_intervals = [0.0]
-        for _ in range(num_reqs_to_do - 1):
-            send_intervals.append(send_interval)
+        ################################################################
+        # get send interval list
+        ################################################################
+        num_reqs_to_do, send_intervals = self.build_send_intervals(
+            send_interval)
 
         request_validator = RequestValidator(requests=requests_arg,
                                              seconds=seconds_arg,
                                              mode=Throttle.MODE_SYNC,
                                              early_count=0,
                                              lb_threshold=0,
-                                             request_mult=request_multiplier,
+                                             total_requests=num_reqs_to_do,
                                              send_interval=send_interval,
                                              send_intervals=send_intervals)
 
@@ -2093,19 +2113,20 @@ class TestThrottle:
         # Instantiate Request Validator
         ################################################################
         pauser = Pauser()
-        request_multiplier = 32
         send_interval = (seconds_arg / requests_arg) * send_interval_mult_arg
-        num_reqs_to_do = requests_arg * request_multiplier
-        send_intervals = [0.0]
-        for _ in range(num_reqs_to_do - 1):
-            send_intervals.append(send_interval)
+
+        ################################################################
+        # get send interval list
+        ################################################################
+        num_reqs_to_do, send_intervals = self.build_send_intervals(
+            send_interval)
 
         request_validator = RequestValidator(requests=requests_arg,
                                              seconds=seconds_arg,
                                              mode=Throttle.MODE_SYNC,
                                              early_count=0,
                                              lb_threshold=0,
-                                             request_mult=request_multiplier,
+                                             total_requests=num_reqs_to_do,
                                              send_interval=send_interval,
                                              send_intervals=send_intervals)
 
@@ -2157,25 +2178,20 @@ class TestThrottle:
         early_count_arg = 2
         send_interval_mult_arg = 1.0
 
-        request_multiplier = 16
         send_interval = (seconds_arg / requests_arg) * send_interval_mult_arg
 
-        num_reqs_to_do = requests_arg * request_multiplier
-        num_reqs_to_do = ((((num_reqs_to_do + 1)
-                            // early_count_arg)
-                           * early_count_arg)
-                          + 1)
-
-        send_intervals = [0.0]
-        for _ in range(num_reqs_to_do - 1):
-            send_intervals.append(send_interval)
+        ################################################################
+        # get send interval list
+        ################################################################
+        num_reqs_to_do, send_intervals = self.build_send_intervals(
+            send_interval)
 
         request_validator = RequestValidator(requests=requests_arg,
                                              seconds=seconds_arg,
                                              mode=Throttle.MODE_SYNC_EC,
                                              early_count=early_count_arg,
                                              lb_threshold=0,
-                                             request_mult=request_multiplier,
+                                             total_requests=num_reqs_to_do,
                                              send_interval=send_interval,
                                              send_intervals=send_intervals)
 
@@ -2363,25 +2379,20 @@ class TestThrottle:
         # Instantiate Request Validator
         ################################################################
         pauser = Pauser()
-        request_multiplier = 32
         send_interval = (seconds_arg / requests_arg) * send_interval_mult_arg
 
-        num_reqs_to_do = requests_arg * request_multiplier
-        num_reqs_to_do = ((((num_reqs_to_do + 1)
-                            // early_count_arg)
-                           * early_count_arg)
-                          + 1)
-
-        send_intervals = [0.0]
-        for _ in range(num_reqs_to_do - 1):
-            send_intervals.append(send_interval)
+        ################################################################
+        # get send interval list
+        ################################################################
+        num_reqs_to_do, send_intervals = self.build_send_intervals(
+            send_interval)
 
         request_validator = RequestValidator(requests=requests_arg,
                                              seconds=seconds_arg,
                                              mode=Throttle.MODE_SYNC_EC,
                                              early_count=early_count_arg,
                                              lb_threshold=0,
-                                             request_mult=request_multiplier,
+                                             request_mult=num_reqs_to_do,
                                              send_interval=send_interval,
                                              send_intervals=send_intervals)
 
@@ -2431,19 +2442,20 @@ class TestThrottle:
         lb_threshold_arg = 4
         send_interval_mult_arg = 0.3
 
-        request_multiplier = 16
         send_interval = (seconds_arg / requests_arg) * send_interval_mult_arg
 
-        num_reqs_to_do = requests_arg * request_multiplier
-        send_intervals = [0.0]
-        for _ in range(num_reqs_to_do - 1):
-            send_intervals.append(send_interval)
+        ################################################################
+        # get send interval list
+        ################################################################
+        num_reqs_to_do, send_intervals = self.build_send_intervals(
+            send_interval)
+
         request_validator = RequestValidator(requests=requests_arg,
                                              seconds=seconds_arg,
                                              mode=Throttle.MODE_SYNC_LB,
                                              early_count=0,
                                              lb_threshold=lb_threshold_arg,
-                                             request_mult=request_multiplier,
+                                             total_requests=num_reqs_to_do,
                                              send_interval=send_interval,
                                              send_intervals=send_intervals)
 
@@ -2631,20 +2643,20 @@ class TestThrottle:
         # Instantiate Request Validator
         ################################################################
         pauser = Pauser()
-        request_multiplier = 32
         send_interval = (seconds_arg / requests_arg) * send_interval_mult_arg
 
-        num_reqs_to_do = requests_arg * request_multiplier
-        send_intervals = [0.0]
-        for _ in range(num_reqs_to_do - 1):
-            send_intervals.append(send_interval)
+        ################################################################
+        # get send interval list
+        ################################################################
+        num_reqs_to_do, send_intervals = self.build_send_intervals(
+            send_interval)
 
         request_validator = RequestValidator(requests=requests_arg,
                                              seconds=seconds_arg,
                                              mode=Throttle.MODE_SYNC_LB,
                                              early_count=0,
                                              lb_threshold=lb_threshold_arg,
-                                             request_mult=request_multiplier,
+                                             total_requests=num_reqs_to_do,
                                              send_interval=send_interval,
                                              send_intervals=send_intervals)
 
@@ -3439,7 +3451,7 @@ class RequestValidator:
                  mode: int,
                  early_count: int,
                  lb_threshold: float,
-                 request_mult: int,
+                 total_requests: int,
                  send_interval: float,
                  send_intervals: list[float],
                  t_throttle: Optional[Throttle] = None) -> None:
@@ -3451,7 +3463,7 @@ class RequestValidator:
             mode: specifies whether async, sync, sync_ec, or sync_lb
             early_count: the early count for the throttle
             lb_threshold: the leaky bucket threshold
-            request_mult: specifies how many requests to make for the
+            total_request: specifies how many requests to make for the
                             test
             send_interval: the interval between sends
             t_throttle: the throttle being used for this test
@@ -3463,9 +3475,9 @@ class RequestValidator:
         self.mode = mode
         self.early_count: int = early_count
         self.lb_threshold = lb_threshold
-        self.request_mult = request_mult
         self.send_interval = send_interval
         self.send_intervals = send_intervals
+        self.num_async_overs: int = 0
 
         self.throttles: list[Throttle] = []
         self.next_target_times: list[float] = []
@@ -3514,7 +3526,7 @@ class RequestValidator:
 
         # calculate parms
 
-        self.total_requests: int = requests * request_mult
+        self.total_requests: int = total_requests
         if mode == Throttle.MODE_SYNC_EC:
             self.total_requests = ((((self.total_requests + 1)
                                    // early_count)
@@ -3613,7 +3625,6 @@ class RequestValidator:
         print(f'{self.mode=}')
         print(f'{self.early_count=}')
         print(f'{self.lb_threshold=}')
-        print(f'{self.request_mult=}')
         print(f'{self.send_interval=}')
         print(f'{self.total_requests=}')
         print(f'{self.target_interval=}')
@@ -3648,18 +3659,49 @@ class RequestValidator:
         """Set the test throttle in the validator.
 
         Args:
-            t_throttlee: throttle to set
+            t_throttle: throttle to set
 
         """
         self.t_throttle = t_throttle
 
     ####################################################################
+    # build_async_exp_list
+    ####################################################################
+    def build_async_exp_list(self) -> None:
+        """Build lists of async and sync expected intervals."""
+        self.expected_intervals = [0.0]
+        self.num_async_overs = 0
+        send_interval_sum = 0.0
+        exp_interval_sum = 0.0
+        for send_interval in self.send_intervals[1:]:
+            send_interval_sum += send_interval
+            exp_interval_sum += self.target_interval
+            if send_interval_sum <= exp_interval_sum:
+                self.expected_intervals.append(self.target_interval)
+            else:
+                self.expected_intervals.append(self.target_interval
+                                               + (send_interval_sum
+                                                  - exp_interval_sum))
+                send_interval_sum = 0.0
+                exp_interval_sum = 0.0
+                self.num_async_overs += 1
+
+    ####################################################################
+    # build_sync_exp_list
+    ####################################################################
+    def build_sync_exp_list(self) -> None:
+        """Build lists of async and sync expected intervals."""
+        self.expected_intervals = [0.0]
+        for send_interval in self.send_intervals[1:]:
+            self.expected_intervals.append(max(self.target_interval,
+                                               send_interval))
+
+    ####################################################################
     # build_sync_ec_exp_list
     ####################################################################
     def build_sync_ec_exp_list(self) -> None:
-        """Build lists of expected intervals."""
-        self.expected_intervals = []
-        self.expected_intervals.append(0)
+        """Build list of sync ec expected intervals."""
+        self.expected_intervals = [0.0]
         current_interval_sum = 0.0
         # the very first request is counted as early, and each
         # first request of each new target interval is counted as
@@ -3693,10 +3735,8 @@ class RequestValidator:
     # build_sync_lb_exp_list
     ####################################################################
     def build_sync_lb_exp_list(self) -> None:
-        """Build lists of expected intervals."""
-        self.expected_intervals = []
-        self.expected_intervals.append(0)
-
+        """Build list of sync lb expected intervals."""
+        self.expected_intervals = [0.0]
         bucket_capacity = self.lb_threshold * self.target_interval
         current_bucket_amt = self.target_interval  # first send
         for send_interval in self.send_intervals[1:]:
@@ -3730,14 +3770,14 @@ class RequestValidator:
         ################################################################
         # Build the expected intervals list
         ################################################################
-        if self.mode == Throttle.MODE_SYNC_EC:
+        if self.mode == Throttle.MODE_ASYNC:
+            self.build_async_exp_list()
+        elif self.mode == Throttle.MODE_SYNC:
+            self.build_sync_exp_list()
+        elif self.mode == Throttle.MODE_SYNC_EC:
             self.build_sync_ec_exp_list()
         elif self.mode == Throttle.MODE_SYNC_LB:
             self.build_sync_lb_exp_list()
-        else:
-            self.expected_intervals = (
-                            [0.0] + [self.max_interval
-                                     for _ in range(len(self.req_times)-1)])
 
         self.expected_times = list(accumulate(self.expected_intervals))
 
@@ -3870,6 +3910,7 @@ class RequestValidator:
         print(f'{self.mean_arrival_interval=}')
         print(f'{self.mean_after_req_interval=}')
         print(f'{self.mean_start_interval=}')
+        print(f'{self.num_async_overs=}')
 
         ################################################################
         # build printable times
