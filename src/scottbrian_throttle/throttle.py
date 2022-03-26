@@ -255,7 +255,9 @@ class Throttle:
                  '_early_arrival_count', 'async_q',
                  'request_scheduler_thread', 'logger',
                  'num_shutdown_timeouts', 'pauser', 'lb_adjustment',
-                 'target_interval_ns', 'lb_adjustment_ns')
+                 'target_interval_ns', 'lb_adjustment_ns',
+                 '_check_async_q_time', 'time_traces', 'stop_times',
+                 '_check_async_q_time2')
 
     def __init__(self, *,
                  requests: int,
@@ -565,6 +567,8 @@ class Throttle:
         self._shutdown = False
         self.do_shutdown = Throttle.TYPE_SHUTDOWN_NONE
         self._arrival_time = 0.0
+        self._check_async_q_time = 0.0
+        self._check_async_q_time2 = 0.0
         self._next_target_time = time.perf_counter_ns() - self.lb_adjustment_ns
         self._early_arrival_count = 0
         self.async_q: Optional[queue.Queue[Throttle.Request]] = None
@@ -572,6 +576,8 @@ class Throttle:
         self.logger = logging.getLogger(__name__)
         self.num_shutdown_timeouts = 0  # limit timeout log messages
         self.pauser = Pauser()
+        # self.time_traces = []
+        # self.stop_times = []
 
         if mode == Throttle.MODE_ASYNC:
             self.async_q = queue.Queue(maxsize=self.async_q_size)
@@ -929,9 +935,21 @@ class Throttle:
         # wait for a second to allow us to detect shutdown in a timely
         # fashion.
         while True:
+            # obtained_nowait = False
+            # try:
+            #     self._check_async_q_time = time.perf_counter_ns()
+            #
+            #     request_item = self.async_q.get_nowait()  # type: ignore
+            #     self._next_target_time = (time.perf_counter_ns()
+            #                               + self.target_interval_ns)
+            #     obtained_nowait = True
+            # except queue.Empty:
             try:
+                # self._check_async_q_time2 = time.perf_counter_ns()
+
                 request_item = self.async_q.get(block=True,  # type: ignore
                                                 timeout=1)
+
                 self._next_target_time = (time.perf_counter_ns()
                                           + self.target_interval_ns)
             except queue.Empty:
@@ -948,6 +966,7 @@ class Throttle:
                     self._arrival_time = request_item.arrival_time
                     request_item.request_func(*request_item.args,
                                               **request_item.kwargs)
+                    # obtained_nowait=obtained_nowait)
             except Exception as e:
                 self.logger.debug('throttle schedule_requests unhandled '
                                   f'exception in request: {e}')
@@ -980,6 +999,10 @@ class Throttle:
                                  - time.perf_counter_ns()) * Pauser.NS_2_SECS
                 if sleep_seconds > 0:  # if still time to go
                     self.pauser.pause(min(1.0, sleep_seconds))
+                    # time_trace, stop_time = self.pauser.pause(min(1.0,
+                    #                                         sleep_seconds))
+                    # self.time_traces.append(time_trace)
+                    # self.stop_times.append(stop_time)
                 else:  # we are done sleeping
                     break
 
