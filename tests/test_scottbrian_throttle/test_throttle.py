@@ -1302,8 +1302,8 @@ class TestThrottle:
         """Method to start throttle sync_ec tests.
 
         Args:
-
             request_style_arg: chooses function args mix
+
         """
         send_interval = 0.4
         self.throttle_router(requests=3,
@@ -1393,7 +1393,16 @@ class TestThrottle:
     ####################################################################
     def build_send_intervals(self,
                              send_interval: float
-                             ) -> list[float]:
+                             ) -> tuple[int, list[float]]:
+        """Build the list of send intervals.
+
+        Args:
+            send_interval: the interval between sends
+
+        Returns:
+            a list of send intervals
+
+        """
         random.seed(send_interval)
         num_reqs_to_do = 16
         # if mode == Throttle.MODE_SYNC_EC:
@@ -1637,6 +1646,9 @@ class TestThrottle:
         Args:
             request_style_arg: chooses which function args to use
 
+        Raises:
+            BadRequestStyleArg: The request style arg must be 0 to 6
+
         """
         ################################################################
         # Instantiate Request Validator
@@ -1652,52 +1664,43 @@ class TestThrottle:
         num_reqs_to_do, send_intervals = self.build_send_intervals(
             send_interval)
 
-        request_validator = RequestValidator(requests=requests_arg,
-                                             seconds=seconds_arg,
-                                             mode=Throttle.MODE_ASYNC,
-                                             early_count=0,
-                                             lb_threshold=0,
-                                             total_requests=num_reqs_to_do,
-                                             send_interval=send_interval,
-                                             send_intervals=send_intervals)
-
         ################################################################
         # Decorate functions with throttle
         ################################################################
         @throttle(requests=requests_arg,
                   seconds=seconds_arg,
                   mode=Throttle.MODE_ASYNC)
-        def f0() -> int:
+        def f0() -> Any:
             request_validator.callback0()
 
         @throttle(requests=requests_arg,
                   seconds=seconds_arg,
                   mode=Throttle.MODE_ASYNC)
-        def f1(idx: int) -> int:
+        def f1(idx: int) -> Any:
             request_validator.callback1(idx)
 
         @throttle(requests=requests_arg,
                   seconds=seconds_arg,
                   mode=Throttle.MODE_ASYNC)
-        def f2(idx: int, requests: int) -> int:
+        def f2(idx: int, requests: int) -> Any:
             request_validator.callback2(idx, requests)
 
         @throttle(requests=requests_arg,
                   seconds=seconds_arg,
                   mode=Throttle.MODE_ASYNC)
-        def f3(*, idx: int) -> int:
+        def f3(*, idx: int) -> Any:
             request_validator.callback3(idx=idx)
 
         @throttle(requests=requests_arg,
                   seconds=seconds_arg,
                   mode=Throttle.MODE_ASYNC)
-        def f4(*, idx: int, seconds: float) -> int:
+        def f4(*, idx: int, seconds: float) -> Any:
             request_validator.callback4(idx=idx, seconds=seconds)
 
         @throttle(requests=requests_arg,
                   seconds=seconds_arg,
                   mode=Throttle.MODE_ASYNC)
-        def f5(idx: int, *, interval: float) -> int:
+        def f5(idx: int, *, interval: float) -> Any:
             request_validator.callback5(idx,
                                         interval=interval)
 
@@ -1705,12 +1708,41 @@ class TestThrottle:
                   seconds=seconds_arg,
                   mode=Throttle.MODE_ASYNC)
         def f6(idx: int, requests: int, *, seconds: float, interval: float
-               ) -> int:
+               ) -> Any:
             request_validator.callback6(idx,
                                         requests,
                                         seconds=seconds,
                                         interval=interval)
 
+        ################################################################
+        # Instantiate the validator
+        ################################################################
+        if request_style_arg == 0:
+            test_throttle = f0.throttle
+        elif request_style_arg == 1:
+            test_throttle = f1.throttle
+        elif request_style_arg == 2:
+            test_throttle = f2.throttle
+        elif request_style_arg == 3:
+            test_throttle = f3.throttle
+        elif request_style_arg == 4:
+            test_throttle = f4.throttle
+        elif request_style_arg == 5:
+            test_throttle = f5.throttle
+        elif request_style_arg == 6:
+            test_throttle = f6.throttle
+        else:
+            raise BadRequestStyleArg('The request style arg must be 0 to 6')
+
+        request_validator = RequestValidator(requests=requests_arg,
+                                             seconds=seconds_arg,
+                                             mode=Throttle.MODE_ASYNC,
+                                             early_count=0,
+                                             lb_threshold=0,
+                                             total_requests=num_reqs_to_do,
+                                             send_interval=send_interval,
+                                             send_intervals=send_intervals,
+                                             t_throttle=test_throttle)
         ################################################################
         # Invoke the functions
         ################################################################
@@ -1718,7 +1750,6 @@ class TestThrottle:
         # Invoke f0
         ################################################################
         if request_style_arg == 0:
-            request_validator.set_test_throttle(t_throttle=f0.throttle)
             for i, s_interval in enumerate(send_intervals):
                 request_validator.start_times.append(perf_counter_ns())
                 pauser.pause(s_interval)  # first one is 0.0
@@ -1734,7 +1765,6 @@ class TestThrottle:
         # Invoke f1
         ################################################################
         elif request_style_arg == 1:
-            request_validator.set_test_throttle(t_throttle=f1.throttle)
             for i, s_interval in enumerate(send_intervals):
                 request_validator.start_times.append(perf_counter_ns())
                 pauser.pause(s_interval)  # first one is 0.0
@@ -1750,7 +1780,6 @@ class TestThrottle:
         # Invoke f2
         ################################################################
         elif request_style_arg == 2:
-            request_validator.set_test_throttle(t_throttle=f2.throttle)
             for i, s_interval in enumerate(send_intervals):
                 request_validator.start_times.append(perf_counter_ns())
                 pauser.pause(s_interval)  # first one is 0.0
@@ -1766,7 +1795,6 @@ class TestThrottle:
         # Invoke f3
         ################################################################
         elif request_style_arg == 3:
-            request_validator.set_test_throttle(t_throttle=f3.throttle)
             for i, s_interval in enumerate(send_intervals):
                 request_validator.start_times.append(perf_counter_ns())
                 pauser.pause(s_interval)  # first one is 0.0
@@ -1782,7 +1810,6 @@ class TestThrottle:
         # Invoke f4
         ################################################################
         elif request_style_arg == 4:
-            request_validator.set_test_throttle(t_throttle=f4.throttle)
             for i, s_interval in enumerate(send_intervals):
                 request_validator.start_times.append(perf_counter_ns())
                 pauser.pause(s_interval)  # first one is 0.0
@@ -1798,7 +1825,6 @@ class TestThrottle:
         # Invoke f5
         ################################################################
         elif request_style_arg == 5:
-            request_validator.set_test_throttle(t_throttle=f5.throttle)
             for i, s_interval in enumerate(send_intervals):
                 request_validator.start_times.append(perf_counter_ns())
                 pauser.pause(s_interval)  # first one is 0.0
@@ -1814,7 +1840,6 @@ class TestThrottle:
         # Invoke f6
         ################################################################
         elif request_style_arg == 6:
-            request_validator.set_test_throttle(t_throttle=f6.throttle)
             for i, s_interval in enumerate(send_intervals):
                 request_validator.start_times.append(perf_counter_ns())
                 pauser.pause(s_interval)  # first one is 0.0
@@ -1857,6 +1882,18 @@ class TestThrottle:
         num_reqs_to_do, send_intervals = self.build_send_intervals(
             send_interval)
 
+        ################################################################
+        # Decorate functions with throttle
+        ################################################################
+        @throttle(requests=requests_arg,
+                  seconds=seconds_arg,
+                  mode=Throttle.MODE_ASYNC)
+        def f0() -> Any:
+            request_validator.callback0()
+
+        ################################################################
+        # Instantiate the validator
+        ################################################################
         request_validator = RequestValidator(requests=requests_arg,
                                              seconds=seconds_arg,
                                              mode=Throttle.MODE_ASYNC,
@@ -1864,24 +1901,14 @@ class TestThrottle:
                                              lb_threshold=0,
                                              total_requests=num_reqs_to_do,
                                              send_interval=send_interval,
-                                             send_intervals=send_intervals)
-
-        ################################################################
-        # Decorate functions with throttle
-        ################################################################
-        @throttle(requests=requests_arg,
-                  seconds=seconds_arg,
-                  mode=Throttle.MODE_ASYNC)
-        def f0() -> int:
-            request_validator.callback0()
-
+                                             send_intervals=send_intervals,
+                                             t_throttle=f0.throttle)
         ################################################################
         # Invoke the functions
         ################################################################
         ################################################################
         # Invoke f0
         ################################################################
-        request_validator.set_test_throttle(t_throttle=f0.throttle)
         for i, s_interval in enumerate(send_intervals):
             request_validator.start_times.append(perf_counter_ns())
             pauser.pause(s_interval)  # first one is 0.0
@@ -1904,6 +1931,9 @@ class TestThrottle:
         Args:
             request_style_arg: chooses which function args to use
 
+        Raises:
+            BadRequestStyleArg: The request style arg must be 0 to 6
+
         """
         ################################################################
         # Instantiate Request Validator
@@ -1919,15 +1949,6 @@ class TestThrottle:
         ################################################################
         num_reqs_to_do, send_intervals = self.build_send_intervals(
             send_interval)
-
-        request_validator = RequestValidator(requests=requests_arg,
-                                             seconds=seconds_arg,
-                                             mode=Throttle.MODE_SYNC,
-                                             early_count=0,
-                                             lb_threshold=0,
-                                             total_requests=num_reqs_to_do,
-                                             send_interval=send_interval,
-                                             send_intervals=send_intervals)
 
         ################################################################
         # Decorate functions with throttle
@@ -1987,13 +2008,41 @@ class TestThrottle:
             return idx + 42 + 6
 
         ################################################################
+        # Instantiate the validator
+        ################################################################
+        if request_style_arg == 0:
+            test_throttle = f0.throttle
+        elif request_style_arg == 1:
+            test_throttle = f1.throttle
+        elif request_style_arg == 2:
+            test_throttle = f2.throttle
+        elif request_style_arg == 3:
+            test_throttle = f3.throttle
+        elif request_style_arg == 4:
+            test_throttle = f4.throttle
+        elif request_style_arg == 5:
+            test_throttle = f5.throttle
+        elif request_style_arg == 6:
+            test_throttle = f6.throttle
+        else:
+            raise BadRequestStyleArg('The request style arg must be 0 to 6')
+
+        request_validator = RequestValidator(requests=requests_arg,
+                                             seconds=seconds_arg,
+                                             mode=Throttle.MODE_SYNC,
+                                             early_count=0,
+                                             lb_threshold=0,
+                                             total_requests=num_reqs_to_do,
+                                             send_interval=send_interval,
+                                             send_intervals=send_intervals,
+                                             t_throttle=test_throttle)
+        ################################################################
         # Invoke the functions
         ################################################################
         ################################################################
         # Invoke f0
         ################################################################
         if request_style_arg == 0:
-            request_validator.set_test_throttle(t_throttle=f0.throttle)
             for i, s_interval in enumerate(send_intervals):
                 request_validator.start_times.append(perf_counter_ns())
                 pauser.pause(s_interval)  # first one is 0.0
@@ -2008,7 +2057,6 @@ class TestThrottle:
         # Invoke f1
         ################################################################
         elif request_style_arg == 1:
-            request_validator.set_test_throttle(t_throttle=f1.throttle)
             for i, s_interval in enumerate(send_intervals):
                 request_validator.start_times.append(perf_counter_ns())
                 pauser.pause(s_interval)  # first one is 0.0
@@ -2023,7 +2071,6 @@ class TestThrottle:
         # Invoke f2
         ################################################################
         elif request_style_arg == 2:
-            request_validator.set_test_throttle(t_throttle=f2.throttle)
             for i, s_interval in enumerate(send_intervals):
                 request_validator.start_times.append(perf_counter_ns())
                 pauser.pause(s_interval)  # first one is 0.0
@@ -2038,7 +2085,6 @@ class TestThrottle:
         # Invoke f3
         ################################################################
         elif request_style_arg == 3:
-            request_validator.set_test_throttle(t_throttle=f3.throttle)
             for i, s_interval in enumerate(send_intervals):
                 request_validator.start_times.append(perf_counter_ns())
                 pauser.pause(s_interval)  # first one is 0.0
@@ -2053,7 +2099,6 @@ class TestThrottle:
         # Invoke f4
         ################################################################
         elif request_style_arg == 4:
-            request_validator.set_test_throttle(t_throttle=f4.throttle)
             for i, s_interval in enumerate(send_intervals):
                 request_validator.start_times.append(perf_counter_ns())
                 pauser.pause(s_interval)  # first one is 0.0
@@ -2068,7 +2113,6 @@ class TestThrottle:
         # Invoke f5
         ################################################################
         elif request_style_arg == 5:
-            request_validator.set_test_throttle(t_throttle=f5.throttle)
             for i, s_interval in enumerate(send_intervals):
                 request_validator.start_times.append(perf_counter_ns())
                 pauser.pause(s_interval)  # first one is 0.0
@@ -2083,7 +2127,6 @@ class TestThrottle:
         # Invoke f6
         ################################################################
         elif request_style_arg == 6:
-            request_validator.set_test_throttle(t_throttle=f6.throttle)
             for i, s_interval in enumerate(send_intervals):
                 request_validator.start_times.append(perf_counter_ns())
                 pauser.pause(s_interval)  # first one is 0.0
@@ -2125,15 +2168,6 @@ class TestThrottle:
         num_reqs_to_do, send_intervals = self.build_send_intervals(
             send_interval)
 
-        request_validator = RequestValidator(requests=requests_arg,
-                                             seconds=seconds_arg,
-                                             mode=Throttle.MODE_SYNC,
-                                             early_count=0,
-                                             lb_threshold=0,
-                                             total_requests=num_reqs_to_do,
-                                             send_interval=send_interval,
-                                             send_intervals=send_intervals)
-
         ################################################################
         # Decorate functions with throttle
         ################################################################
@@ -2145,12 +2179,23 @@ class TestThrottle:
             return idx + 42 + 1
 
         ################################################################
+        # Instantiate the validator
+        ################################################################
+        request_validator = RequestValidator(requests=requests_arg,
+                                             seconds=seconds_arg,
+                                             mode=Throttle.MODE_SYNC,
+                                             early_count=0,
+                                             lb_threshold=0,
+                                             total_requests=num_reqs_to_do,
+                                             send_interval=send_interval,
+                                             send_intervals=send_intervals,
+                                             t_throttle=f1.throttle)
+        ################################################################
         # Invoke the functions
         ################################################################
         ################################################################
         # Invoke f1
         ################################################################
-        request_validator.set_test_throttle(t_throttle=f1.throttle)
         for i, s_interval in enumerate(send_intervals):
             request_validator.start_times.append(perf_counter_ns())
             pauser.pause(s_interval)  # first one is 0.0
@@ -2172,6 +2217,9 @@ class TestThrottle:
         Args:
             request_style_arg: chooses which function args to use
 
+        Raises:
+            BadRequestStyleArg: The request style arg must be 0 to 6
+
         """
         ################################################################
         # Instantiate Request Validator
@@ -2189,15 +2237,6 @@ class TestThrottle:
         ################################################################
         num_reqs_to_do, send_intervals = self.build_send_intervals(
             send_interval)
-
-        request_validator = RequestValidator(requests=requests_arg,
-                                             seconds=seconds_arg,
-                                             mode=Throttle.MODE_SYNC_EC,
-                                             early_count=early_count_arg,
-                                             lb_threshold=0,
-                                             total_requests=num_reqs_to_do,
-                                             send_interval=send_interval,
-                                             send_intervals=send_intervals)
 
         ################################################################
         # Decorate functions with throttle
@@ -2264,13 +2303,42 @@ class TestThrottle:
             return idx + 42 + 6
 
         ################################################################
+        # Instantiate the validator
+        ################################################################
+        if request_style_arg == 0:
+            test_throttle = f0.throttle
+        elif request_style_arg == 1:
+            test_throttle = f1.throttle
+        elif request_style_arg == 2:
+            test_throttle = f2.throttle
+        elif request_style_arg == 3:
+            test_throttle = f3.throttle
+        elif request_style_arg == 4:
+            test_throttle = f4.throttle
+        elif request_style_arg == 5:
+            test_throttle = f5.throttle
+        elif request_style_arg == 6:
+            test_throttle = f6.throttle
+        else:
+            raise BadRequestStyleArg(
+                'The request style arg must be 0 to 6')
+
+        request_validator = RequestValidator(requests=requests_arg,
+                                             seconds=seconds_arg,
+                                             mode=Throttle.MODE_SYNC_EC,
+                                             early_count=early_count_arg,
+                                             lb_threshold=0,
+                                             total_requests=num_reqs_to_do,
+                                             send_interval=send_interval,
+                                             send_intervals=send_intervals,
+                                             t_throttle=test_throttle)
+        ################################################################
         # Invoke the functions
         ################################################################
         ################################################################
         # Invoke f0
         ################################################################
         if request_style_arg == 0:
-            request_validator.set_test_throttle(t_throttle=f0.throttle)
             for i, s_interval in enumerate(send_intervals):
                 request_validator.start_times.append(perf_counter_ns())
                 pauser.pause(s_interval)  # first one is 0.0
@@ -2283,7 +2351,6 @@ class TestThrottle:
         # Invoke f1
         ################################################################
         elif request_style_arg == 1:
-            request_validator.set_test_throttle(t_throttle=f1.throttle)
             for i, s_interval in enumerate(send_intervals):
                 request_validator.start_times.append(perf_counter_ns())
                 pauser.pause(s_interval)  # first one is 0.0
@@ -2296,7 +2363,6 @@ class TestThrottle:
         # Invoke f2
         ################################################################
         elif request_style_arg == 2:
-            request_validator.set_test_throttle(t_throttle=f2.throttle)
             for i, s_interval in enumerate(send_intervals):
                 request_validator.start_times.append(perf_counter_ns())
                 pauser.pause(s_interval)  # first one is 0.0
@@ -2309,7 +2375,6 @@ class TestThrottle:
         # Invoke f3
         ################################################################
         elif request_style_arg == 3:
-            request_validator.set_test_throttle(t_throttle=f3.throttle)
             for i, s_interval in enumerate(send_intervals):
                 request_validator.start_times.append(perf_counter_ns())
                 pauser.pause(s_interval)  # first one is 0.0
@@ -2322,7 +2387,6 @@ class TestThrottle:
         # Invoke f4
         ################################################################
         elif request_style_arg == 4:
-            request_validator.set_test_throttle(t_throttle=f4.throttle)
             for i, s_interval in enumerate(send_intervals):
                 request_validator.start_times.append(perf_counter_ns())
                 pauser.pause(s_interval)  # first one is 0.0
@@ -2335,7 +2399,6 @@ class TestThrottle:
         # Invoke f5
         ################################################################
         elif request_style_arg == 5:
-            request_validator.set_test_throttle(t_throttle=f5.throttle)
             for i, s_interval in enumerate(send_intervals):
                 request_validator.start_times.append(perf_counter_ns())
                 pauser.pause(s_interval)  # first one is 0.0
@@ -2348,7 +2411,6 @@ class TestThrottle:
         # Invoke f6
         ################################################################
         elif request_style_arg == 6:
-            request_validator.set_test_throttle(t_throttle=f6.throttle)
             for i, s_interval in enumerate(send_intervals):
                 request_validator.start_times.append(perf_counter_ns())
                 pauser.pause(s_interval)  # first one is 0.0
@@ -2391,15 +2453,6 @@ class TestThrottle:
         num_reqs_to_do, send_intervals = self.build_send_intervals(
             send_interval)
 
-        request_validator = RequestValidator(requests=requests_arg,
-                                             seconds=seconds_arg,
-                                             mode=Throttle.MODE_SYNC_EC,
-                                             early_count=early_count_arg,
-                                             lb_threshold=0,
-                                             total_requests=num_reqs_to_do,
-                                             send_interval=send_interval,
-                                             send_intervals=send_intervals)
-
         ################################################################
         # Decorate functions with throttle
         ################################################################
@@ -2413,9 +2466,20 @@ class TestThrottle:
             return idx + 42 + 5
 
         ################################################################
+        # Instantiate the validator
+        ################################################################
+        request_validator = RequestValidator(requests=requests_arg,
+                                             seconds=seconds_arg,
+                                             mode=Throttle.MODE_SYNC_EC,
+                                             early_count=early_count_arg,
+                                             lb_threshold=0,
+                                             total_requests=num_reqs_to_do,
+                                             send_interval=send_interval,
+                                             send_intervals=send_intervals,
+                                             t_throttle=f5.throttle)
+        ################################################################
         # Invoke the functions
         ################################################################
-        request_validator.set_test_throttle(t_throttle=f5.throttle)
         for i, s_interval in enumerate(send_intervals):
             request_validator.start_times.append(perf_counter_ns())
             pauser.pause(s_interval)  # first one is 0.0
@@ -2436,6 +2500,9 @@ class TestThrottle:
         Args:
             request_style_arg: chooses which function args to use
 
+        Raises:
+            BadRequestStyleArg: The request style arg must be 0 to 6
+
         """
         ################################################################
         # Instantiate Request Validator
@@ -2453,15 +2520,6 @@ class TestThrottle:
         ################################################################
         num_reqs_to_do, send_intervals = self.build_send_intervals(
             send_interval)
-
-        request_validator = RequestValidator(requests=requests_arg,
-                                             seconds=seconds_arg,
-                                             mode=Throttle.MODE_SYNC_LB,
-                                             early_count=0,
-                                             lb_threshold=lb_threshold_arg,
-                                             total_requests=num_reqs_to_do,
-                                             send_interval=send_interval,
-                                             send_intervals=send_intervals)
 
         ################################################################
         # Decorate functions with throttle
@@ -2528,13 +2586,42 @@ class TestThrottle:
             return idx + 42 + 6
 
         ################################################################
+        # Instantiate the validator
+        ################################################################
+        if request_style_arg == 0:
+            test_throttle = f0.throttle
+        elif request_style_arg == 1:
+            test_throttle = f1.throttle
+        elif request_style_arg == 2:
+            test_throttle = f2.throttle
+        elif request_style_arg == 3:
+            test_throttle = f3.throttle
+        elif request_style_arg == 4:
+            test_throttle = f4.throttle
+        elif request_style_arg == 5:
+            test_throttle = f5.throttle
+        elif request_style_arg == 6:
+            test_throttle = f6.throttle
+        else:
+            raise BadRequestStyleArg(
+                'The request style arg must be 0 to 6')
+
+        request_validator = RequestValidator(requests=requests_arg,
+                                             seconds=seconds_arg,
+                                             mode=Throttle.MODE_SYNC_LB,
+                                             early_count=0,
+                                             lb_threshold=lb_threshold_arg,
+                                             total_requests=num_reqs_to_do,
+                                             send_interval=send_interval,
+                                             send_intervals=send_intervals,
+                                             t_throttle=test_throttle)
+        ################################################################
         # Invoke the functions
         ################################################################
         ################################################################
         # Invoke f0
         ################################################################
         if request_style_arg == 0:
-            request_validator.set_test_throttle(t_throttle=f0.throttle)
             for i, s_interval in enumerate(send_intervals):
                 request_validator.start_times.append(perf_counter_ns())
                 pauser.pause(s_interval)  # first one is 0.0
@@ -2547,7 +2634,6 @@ class TestThrottle:
         # Invoke f1
         ################################################################
         elif request_style_arg == 1:
-            request_validator.set_test_throttle(t_throttle=f1.throttle)
             for i, s_interval in enumerate(send_intervals):
                 request_validator.start_times.append(perf_counter_ns())
                 pauser.pause(s_interval)  # first one is 0.0
@@ -2560,7 +2646,6 @@ class TestThrottle:
         # Invoke f2
         ################################################################
         elif request_style_arg == 2:
-            request_validator.set_test_throttle(t_throttle=f2.throttle)
             for i, s_interval in enumerate(send_intervals):
                 request_validator.start_times.append(perf_counter_ns())
                 pauser.pause(s_interval)  # first one is 0.0
@@ -2573,7 +2658,6 @@ class TestThrottle:
         # Invoke f3
         ################################################################
         elif request_style_arg == 3:
-            request_validator.set_test_throttle(t_throttle=f3.throttle)
             for i, s_interval in enumerate(send_intervals):
                 request_validator.start_times.append(perf_counter_ns())
                 pauser.pause(s_interval)  # first one is 0.0
@@ -2586,7 +2670,6 @@ class TestThrottle:
         # Invoke f4
         ################################################################
         elif request_style_arg == 4:
-            request_validator.set_test_throttle(t_throttle=f4.throttle)
             for i, s_interval in enumerate(send_intervals):
                 request_validator.start_times.append(perf_counter_ns())
                 pauser.pause(s_interval)  # first one is 0.0
@@ -2599,7 +2682,6 @@ class TestThrottle:
         # Invoke f5
         ################################################################
         elif request_style_arg == 5:
-            request_validator.set_test_throttle(t_throttle=f5.throttle)
             for i, s_interval in enumerate(send_intervals):
                 request_validator.start_times.append(perf_counter_ns())
                 pauser.pause(s_interval)  # first one is 0.0
@@ -2612,7 +2694,6 @@ class TestThrottle:
         # Invoke f6
         ################################################################
         elif request_style_arg == 6:
-            request_validator.set_test_throttle(t_throttle=f6.throttle)
             for i, s_interval in enumerate(send_intervals):
                 request_validator.start_times.append(perf_counter_ns())
                 pauser.pause(s_interval)  # first one is 0.0
@@ -2655,15 +2736,6 @@ class TestThrottle:
         num_reqs_to_do, send_intervals = self.build_send_intervals(
             send_interval)
 
-        request_validator = RequestValidator(requests=requests_arg,
-                                             seconds=seconds_arg,
-                                             mode=Throttle.MODE_SYNC_LB,
-                                             early_count=0,
-                                             lb_threshold=lb_threshold_arg,
-                                             total_requests=num_reqs_to_do,
-                                             send_interval=send_interval,
-                                             send_intervals=send_intervals)
-
         ################################################################
         # Decorate functions with throttle
         ################################################################
@@ -2680,9 +2752,21 @@ class TestThrottle:
             return idx + 42 + 6
 
         ################################################################
+        # Instantiate the validator
+        ################################################################
+        request_validator = RequestValidator(requests=requests_arg,
+                                             seconds=seconds_arg,
+                                             mode=Throttle.MODE_SYNC_LB,
+                                             early_count=0,
+                                             lb_threshold=lb_threshold_arg,
+                                             total_requests=num_reqs_to_do,
+                                             send_interval=send_interval,
+                                             send_intervals=send_intervals,
+                                             t_throttle=f6.throttle)
+
+        ################################################################
         # Invoke function f6
         ################################################################
-        request_validator.set_test_throttle(t_throttle=f6.throttle)
         for i, s_interval in enumerate(send_intervals):
             request_validator.start_times.append(perf_counter_ns())
             pauser.pause(s_interval)  # first one is 0.0
@@ -3458,7 +3542,7 @@ class RequestValidator:
                  total_requests: int,
                  send_interval: float,
                  send_intervals: list[float],
-                 t_throttle: Optional[Throttle] = None) -> None:
+                 t_throttle: Throttle) -> None:
         """Initialize the RequestValidator object.
 
         Args:
@@ -3467,9 +3551,10 @@ class RequestValidator:
             mode: specifies whether async, sync, sync_ec, or sync_lb
             early_count: the early count for the throttle
             lb_threshold: the leaky bucket threshold
-            total_request: specifies how many requests to make for the
-                            test
+            total_requests: specifies how many requests to make for the
+                              test
             send_interval: the interval between sends
+            send_intervals: the list of send intervals
             t_throttle: the throttle being used for this test
 
         """
@@ -3492,8 +3577,8 @@ class RequestValidator:
         # self.norm_time_traces_times = []
         # self.norm_time_traces_intervals = []
 
-        self.norm_stop_times_times = []
-        self.norm_stop_times_intervals = []
+        self.norm_stop_times_times: list[float] = []
+        self.norm_stop_times_intervals: list[float] = []
 
         # self.check_async_q_times: list[float] = []
         # self.check_async_q_times2: list[float] = []
@@ -3545,7 +3630,7 @@ class RequestValidator:
         self.mean_start_interval = 0.0
 
         self.norm_next_target_times: list[float] = []
-        self.norm_next_target_intervals: list[float] = []
+
         self.mean_next_target_interval = 0.0
 
         self.path_times: list[list[float]] = []
@@ -3553,7 +3638,6 @@ class RequestValidator:
 
         self.path_async_times: list[list[float]] = []
         self.path_async_intervals: list[list[float]] = []
-
 
         # calculate parms
 
@@ -3707,20 +3791,6 @@ class RequestValidator:
             self.throttles.append(func.throttle)
 
     ####################################################################
-    # set test throttle
-    ####################################################################
-    def set_test_throttle(self,
-                          t_throttle: Throttle
-                          ) -> None:
-        """Set the test throttle in the validator.
-
-        Args:
-            t_throttle: throttle to set
-
-        """
-        self.t_throttle = t_throttle
-
-    ####################################################################
     # build_async_exp_list
     ####################################################################
     def build_async_exp_list(self) -> None:
@@ -3846,7 +3916,7 @@ class RequestValidator:
                 [0.0] + self.norm_start_times[:-1]))
 
         self.mean_start_interval = (self.norm_start_times[-1]
-                                   / (self.total_requests - 1))
+                                    / (self.total_requests - 1))
 
         ################################################################
         # create list of before request times and intervals
@@ -3867,7 +3937,8 @@ class RequestValidator:
         ################################################################
         assert len(self.arrival_times) == self.total_requests
         # base_time2 = self.arrival_times[0]
-        # self.norm_arrival_times = [(item - base_time2) * Pauser.NS_2_SECS
+        # self.norm_arrival_times = [
+        # (item - base_time2) * Pauser.NS_2_SECS
         #                            for item in self.arrival_times]
         self.norm_arrival_times = [(item - base_time) * Pauser.NS_2_SECS
                                    for item in self.arrival_times]
@@ -3984,7 +4055,8 @@ class RequestValidator:
         #     self.norm_time_traces_times.append(norm_time_traces_times)
         #     self.norm_time_traces_intervals.append(norm_time_traces_intervals)
         #
-        # self.norm_stop_times_times = [(item - base_time) * Pauser.NS_2_SECS
+        # self.norm_stop_times_times = [
+        # (item - base_time) * Pauser.NS_2_SECS
         #                               for item in self.stop_times]
         # self.norm_stop_times_intervals = list(
         #     map(lambda t1, t2: t1 - t2,
@@ -4033,9 +4105,8 @@ class RequestValidator:
     ####################################################################
     # print_intervals
     ####################################################################
-    def print_intervals(self):
+    def print_intervals(self) -> None:
         """Build the expected intervals arrays."""
-
         print(f'{self.norm_req_times[-1]=}')
         print(f'{self.mean_req_interval=}')
         print(f'{self.mean_before_req_interval=}')
@@ -4118,8 +4189,9 @@ class RequestValidator:
 
         # p_time_traces_intervals = []
         # for time_trace in self.norm_time_traces_intervals:
-        #     p_time_traces_interval = list(map(lambda num: f'{num: 7.3f}',
-        #                                   time_trace))
+        #     p_time_traces_interval = list(
+        #     map(lambda num: f'{num: 7.3f}',
+        #         time_trace))
         #     p_time_traces_intervals.append(p_time_traces_interval)
         #
         # p_stop_times_intervals = list(map(lambda num: f'{num: 7.3f}',
@@ -4451,7 +4523,7 @@ class RequestValidator:
 
         worst_case_mean_interval = (self.target_interval
                                     * (self.total_requests-self.early_count+1)
-                                     ) / self.total_requests
+                                    ) / self.total_requests
         assert worst_case_mean_interval <= self.mean_req_interval
 
     ####################################################################
@@ -4471,8 +4543,6 @@ class RequestValidator:
         num_late_5pct = 0
         num_late_10pct = 0
         num_late_15pct = 0
-
-        exp_mean_req_interval = stats.mean(self.expected_intervals[1:])
 
         for ratio in self.diff_req_ratio[1:]:
             if ratio < 0:  # if negative
@@ -4564,7 +4634,8 @@ class RequestValidator:
     ####################################################################
     # request2
     ####################################################################
-    # def request2(self, idx: int, requests: int, obtained_nowait: bool) -> int:
+    # def request2(self, idx: int, requests: int,
+    # obtained_nowait: bool) -> int:
     def request2(self, idx: int, requests: int) -> int:
         """Request2 target.
 

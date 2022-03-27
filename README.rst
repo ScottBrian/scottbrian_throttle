@@ -46,15 +46,14 @@ after the other. The 11th call will be delayed for approximately a second to all
 age out. As the code continues for this example, the throttle code will ensure that no more than 10 calls
 are made per second.
 
->>> from scottbrian_throttle.throttle import Throttle
+>>> from scottbrian_throttle.throttle import throttle
 >>> from time import time
->>> @throttle(requests=10, seconds=1)
+>>> @throttle(requests=10, seconds=1, mode=Throttle.MODE_SYNC)
 ... def make_request(i, start_i, start_time):
 ...     if time() - start_time >= 1:
 ...         print(f'requests {start_i} to {i-1} made in 1 second')
 ...         return i, time()  # update for next batch
 ...     return start_i, start_time  # no change
-
 >>> start_i = 0
 >>> start_time = time()
 >>> for i in range(30):

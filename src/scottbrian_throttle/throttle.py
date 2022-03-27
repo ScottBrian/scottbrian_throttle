@@ -54,9 +54,9 @@ the limit is not exceeded.
 ...                             mode=Throttle.MODE_SYNC)
 >>> for i in range(3):
 ...     request_throttle.send_request(my_request, i, life='good')
+my_request entered with idx 0, and life is good
 my_request entered with idx 1, and life is good
-my_request entered with idx 1, and life is good
-my_request entered with idx 1, and life is good
+my_request entered with idx 2, and life is good
 
 Example: use @throttle decorator for a limit of 20 requests per minute
          with the early count algorithm
@@ -612,7 +612,7 @@ class Throttle:
         ...                             seconds=1,
         ...                             mode=Throttle.MODE_ASYNC)
         >>> for i in range(3):  # quickly send 3 items (2 get queued)
-        ...     request_throttle.send_request(my_request,i)
+        >>>     request_throttle.send_request(my_request,i)
         >>> print(len(request_throttle))
         idx=0
         6
@@ -641,7 +641,8 @@ class Throttle:
         ...                             seconds=30,
         ...                             mode=Throttle.MODE_ASYNC)
         >>> repr(request_throttle)
-        Throttle(requests=20, seconds=30, mode=Throttle.MODE_ASYNC)
+        Throttle(requests=30, seconds=30, mode=Throttle.MODE_ASYNC,
+        async_q_size=4096)
 
         """
         if TYPE_CHECKING:
@@ -939,7 +940,7 @@ class Throttle:
             # try:
             #     self._check_async_q_time = time.perf_counter_ns()
             #
-            #     request_item = self.async_q.get_nowait()  # type: ignore
+            #     request_item = self.async_q.get_nowait()
             #     self._next_target_time = (time.perf_counter_ns()
             #                               + self.target_interval_ns)
             #     obtained_nowait = True
@@ -1057,7 +1058,6 @@ def throttle(*,
              early_count: Optional[int] = None,
              lb_threshold: OptIntFloat = None
              ) -> Callable[[F], FuncWithThrottleAttr[F]]:
-    # Callable[[F], F]:
     pass
 
 
