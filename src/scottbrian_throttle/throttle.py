@@ -5,49 +5,84 @@ Throttle
 ========
 
 You can use the Throttle class or the @throttle decorator to limit the
-number of requests made during a specific interval. Some online services
-state a limit as to how many requests can be made per some time
-interval. For example, "no more than one request per second", or maybe
-something like "no more than 30 requests each minute". The @throttle
-decorator wraps a method that makes requests to ensure that the limit is
-not exceeded. The @throttle keeps track of the time for each request and
-will insert a wait (via time.sleep()) as needed to stay within the
-limit. The Throttle class provides the same service to allow
-you to use the throttle where a decorator is not the optimal choice.
+execution rate of a method as specified by the *requests* and
+*seconds* arguments. One example method where this is useful is one that
+makes requests to a server that has a limit, such as "no more than one
+request per second".
+
+The @throttle decorator wraps a method that will ensure that the method
+executes within the specified limit. The @throttle keeps track of the
+time for each request and will delay as needed to stay within the
+limit.
+
+The Throttle class provides the same service to allow the use of the
+throttle where a decorator is not the optimal choice.
+
 Following are examples of using both the @throttle decorator and the
 Throttle class methods.
 
 :Example: use @throttle decorator for a limit of one request per second
 
-In the example code below, in the first iteration, the @throttle
-decorator code will see that there are no requests that have been made
-within the last second and will allow the request to proceed. For each
-subsequent call, the @throttle code will delay via time.sleep for
-approximately 0.9 seconds before allowing the request to proceed. This
-will ensure that the limit is not exceeded.
+In the example code below, the @throttle decorator code will allow the
+first request to proceed immediately. Each subsequent call will be
+delayed to ensure that the limit is not exceeded. Thus, of the 10 calls,
+9 calls will be delayed for 1 second each, and the make_request
+function sleeps for 1/10 second, resulting is a total elapsed time of
+9.1 seconds. The next example after this will show the same code using
+the Throttle *send_request* method instead of the throttle decorator.
 
 >>> from scottbrian_throttle.throttle import Throttle
 >>> import time
 >>> @throttle(requests=1, seconds=1, mode=Throttle.MODE_SYNC)
-... def make_request():
+... def make_request() -> None:
 ...     time.sleep(.1)  # simulate request that takes 1/10 second
->>> for i in range(100):
+>>> start_time = time.time()
+>>> for i in range(10):
 ...     make_request()
+>>> elapsed_time = time.time() - start_time
+>>> print (f'total time for 10 requests: {elapsed_time:0.1f} seconds')
+total time for 10 requests: 9.1 seconds
 
 
 :Example: use Throttle methods for a limit of one request per second
 
-In the example code below, each call to send_request passes the request
-funtion and its args. For the first iteration, send_request will see
-that there are no requests that have been made within the last second
-and will call the request function without delay. For each subsequent
-call, send_request will delay via time.sleep() for approximately 0.9
-seconds before allowing the request to proceed. This will ensure that
-the limit is not exceeded.
+In the example code below, my_request is passed to the throttle via the
+*send_request* method. The throttle will allow the first request to
+proceed immediately. Each subsequent call will be delayed to ensure that
+the limit is not exceeded. Thus, of the 10 calls, 9 calls will be
+delayed for 1 second each, and the make_request function sleeps for 1/10
+second, resulting is a total elapsed time of 9.1 seconds. The previous
+example shows the same code using the throttle decorator instead.
 
 >>> from scottbrian_throttle.throttle import Throttle
 >>> import time
->>> def my_request(idx, *, life):
+>>> a_throttle = Throttle(requests=1,
+...                       seconds=1,
+...                       mode=Throttle.MODE_SYNC)
+>>> def make_request() -> None:
+...     time.sleep(.1)  # simulate request that takes 1/10 second
+>>> start_time = time.time()
+>>> for i in range(10):
+...     a_throttle.send_request(make_request)
+>>> elapsed_time = time.time() - start_time
+>>> print (f'total time for 10 requests: {elapsed_time:0.1f} seconds')
+total time for 10 requests: 9.1 seconds
+
+
+:Example: use Throttle methods for a limit of one request per second
+
+In the example code below, my_request is passed to the throttle via the
+*send_request* method. The throttle will allow the first request to
+proceed immediately. Each subsequent call will be delayed to ensure that
+the limit is not exceeded. Thus, of the 10 calls, 9 calls will be
+delayed for 1 second each, and the make_request function sleeps for 1/10
+second, resulting is a total elapsed time of 9.1 seconds. The previous
+example shows the same code using the throttle decorator instead.
+the Throttle *send_request* method instead of the throttle decorator.
+
+>>> from scottbrian_throttle.throttle import Throttle
+>>> import time
+>>> def my_request(idx: int, *, life: str) -> None:
 ...     print(f'my_request entered with idx {idx}, and life is {life}')
 >>> request_throttle = Throttle(requests=1,
 ...                             seconds=1,
@@ -57,6 +92,8 @@ the limit is not exceeded.
 my_request entered with idx 0, and life is good
 my_request entered with idx 1, and life is good
 my_request entered with idx 2, and life is good
+
+
 
 Example: use @throttle decorator for a limit of 20 requests per minute
          with the early count algorithm
@@ -321,7 +358,7 @@ class Throttle:
             early_count: Specifies the number of requests that are
                            allowed to proceed immediately without delay
                            for **mode=Throttle.MODE_SYNC_EC**.
-                           Note that a specification of 1 for the
+                           Note that a specification of 0 for the
                            *early_count* will result in the same
                            behavior as if **mode=Throttle.MODE_SYNC**
                            had been chosen.
@@ -601,23 +638,22 @@ class Throttle:
         is called. Note that the returned queue size is the approximate
         size as described in the documentation for the python threading
         queue.
+        request_throttle.send_request(my_request)
+        print(len(request_throttle))
 
         :Example: instantiate a throttle for 1 request per second
 
         >>> from scottbrian_throttle.throttle import Throttle
         >>> import time
-        >>> def my_request(idx):
-        ...     print(f'{idx=}')
+        >>> def my_request():
+        ...     pass
         >>> request_throttle = Throttle(requests=1,
         ...                             seconds=1,
         ...                             mode=Throttle.MODE_ASYNC)
         >>> for i in range(3):  # quickly send 3 items (2 get queued)
-        >>>     request_throttle.send_request(my_request,i)
+        ...     _ = request_throttle.send_request(my_request)
         >>> print(len(request_throttle))
-        idx=0
-        6
-        idx=1
-        idx=2
+        2
 
         """
         if self.mode == Throttle.MODE_ASYNC:
@@ -639,29 +675,28 @@ class Throttle:
          >>> from scottbrian_throttle.throttle import Throttle
         >>> request_throttle = Throttle(requests=30,
         ...                             seconds=30,
-        ...                             mode=Throttle.MODE_ASYNC)
+        ...                             mode=Throttle.MODE_SYNC)
         >>> repr(request_throttle)
-        Throttle(requests=30, seconds=30, mode=Throttle.MODE_ASYNC,
-        async_q_size=4096)
+        'Throttle(requests=30, seconds=30.0, mode=Throttle.MODE_SYNC)'
 
         """
         if TYPE_CHECKING:
             __class__: Type[Throttle]
         classname = self.__class__.__name__
-        parms = f'requests={self.requests}, ' \
-                f'seconds={self.seconds.total_seconds()}, '
+        parms = (f'requests={self.requests}, '
+                 f'seconds={self.seconds.total_seconds()}, ')
 
         if self.mode == Throttle.MODE_ASYNC:
-            parms += f'mode=Throttle.MODE_ASYNC, ' \
-                     f'async_q_size={self.async_q_size}'
+            parms += (f'mode=Throttle.MODE_ASYNC, '
+                      f'async_q_size={self.async_q_size}')
         elif self.mode == Throttle.MODE_SYNC:
             parms += 'mode=Throttle.MODE_SYNC'
         elif self.mode == Throttle.MODE_SYNC_EC:
-            parms += f'mode=Throttle.MODE_SYNC_EC, ' \
-                     f'early_count={self.early_count}'
+            parms += (f'mode=Throttle.MODE_SYNC_EC, '
+                      f'early_count={self.early_count}')
         else:
-            parms += f'mode=Throttle.MODE_SYNC_LB, ' \
-                     f'lb_threshold={self.lb_threshold}'
+            parms += (f'mode=Throttle.MODE_SYNC_LB, '
+                      f'lb_threshold={self.lb_threshold}')
 
         return f'{classname}({parms})'
 
@@ -851,7 +886,6 @@ class Throttle:
         ################################################################
         else:
             # set the time that this request is being made
-            # self._arrival_time = time.time()
             self._arrival_time = time.perf_counter_ns()
             ############################################################
             # The Throttle class can be instantiated for sync, sync with
@@ -862,13 +896,13 @@ class Throttle:
             # _leaky_bucket_tolerance will be zero.
             ############################################################
             if self._next_target_time <= self._arrival_time:
-                self._early_arrival_count = 1
+                self._early_arrival_count = 0
             else:
                 self._early_arrival_count += 1
                 if ((self.mode != Throttle.MODE_SYNC_EC) or
                         (self.early_count <
                             self._early_arrival_count)):
-                    self._early_arrival_count = 1  # reset the count
+                    self._early_arrival_count = 0  # reset the count
                     # add an extra millisec for now as a test to see why
                     # sometimes the average interval is slightly less
                     # than we expect it to be - could be the inaccuracy
@@ -878,6 +912,13 @@ class Throttle:
                     # the shortest interval is 0.015 seconds
                     # time.sleep(wait_time)
                     self.pauser.pause(wait_time)
+
+            self._next_target_time = (max(time.perf_counter_ns(),
+                                          self._next_target_time
+                                          + self.lb_adjustment_ns
+                                          )
+                                      - self.lb_adjustment_ns
+                                      + self.target_interval_ns)
 
             # The caller should protect the function with a try and
             # either raise an exception or pass back a return value that
@@ -904,12 +945,12 @@ class Throttle:
             # the undesirable effect that all requests will now be
             # throttled more than they need to be.
             # TODO: subtract the constant path delay from the interval
-            self._next_target_time = (max(time.perf_counter_ns(),
-                                          self._next_target_time
-                                          + self.lb_adjustment_ns
-                                          )
-                                      - self.lb_adjustment_ns
-                                      + self.target_interval_ns)
+            # self._next_target_time = (max(time.perf_counter_ns(),
+            #                               self._next_target_time
+            #                               + self.lb_adjustment_ns
+            #                               )
+            #                           - self.lb_adjustment_ns
+            #                           + self.target_interval_ns)
 
             # return the request return value (might be None)
             return ret_value
@@ -1176,42 +1217,6 @@ def throttle(wrapped: Optional[F] = None, *,
         ...     print('example 1 request function')
 
 
-        :Example: Instantiate an async throttle for 5 requests per 1/2
-                  second with an async queue size of 256 and an event to
-                  start a shutdown when set, and an event to wait upon
-                  for shutdown to complete.
-
-        >>> from scottbrian_throttle.throttle import Throttle
-        >>> from threading import Event
-        >>> start_shutdown = Event()
-        >>> shutdown_done = Event()
-        >>> request_throttle = Throttle(
-        ...     requests=5,
-        ...     seconds=0.5,
-        ...     mode=Throttle.MODE_ASYNC,
-        ...     async_q_size=256,
-        ...     start_shutdown_event=start_shutdown,
-        ...     shutdown_complete_event=shutdown_done)
-
-        :Example: wrap a function with an async throttle for 5 requests
-                  per 1/2 second with an async queue size of 256 and an
-                  event to start a shutdown when set, and an event to
-                  wait upon for shutdown to complete.
-
-        >>> from scottbrian_throttle.throttle import Throttle
-        >>> from threading import Event
-        >>> start_shutdown = Event()
-        >>> shutdown_done = Event()
-        >>> @throttle(requests=5,
-        ...           seconds=0.5,
-        ...           mode=Throttle.MODE_ASYNC,
-        ...           async_q_size=256,
-        ...           start_shutdown_event=start_shutdown,
-        ...           shutdown_complete_event=shutdown_done)
-        ... def f2(a) -> None:
-        ...     print(f'example 2 request function with arg {a}')
-
-
         :Example: wrap a function with a throttle for 20 requests per 2
                   minutes using the early count algo
 
@@ -1353,7 +1358,7 @@ def shutdown_throttle_funcs(
                            quickly removing any remaining requests
                            without executing them.
         timeout: number of seconds to allow for shutdown to complete for
-                   all of the functions specified to be shutdown.
+                   all functions specified to be shutdown.
                    Note that a *timeout* of zero or less is equivalent
                    to a *timeout* of None, meaning start_shutdown will
                    return when the shutdown is complete without a

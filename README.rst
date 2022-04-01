@@ -10,12 +10,11 @@ With **@throttle** you can control the frequency at which a function is executed
 This is useful for internet services that have a stated limit, such as "no more than one request per second".
 
 The @throttle decorator wraps a method that makes requests to ensure that the limit is not exceeded. The @throttle
-keeps track of the time for each request and will insert a wait (via time.sleep()) as needed to stay within the
-limit. Note that the Throttle class provides the same service to allow you to use the throttle where a decorator is not
-the optimal choice.
+keeps track of the time for each request and will insert a wait as needed to stay within the limit. Note that the
+Throttle class provides the same service to allow you to use the throttle where a decorator is not the optimal choice.
 
-To use the throttle, you specify the number of requests and the number of seconds. Additionally, you can choose one of
-four modes that control the throttle behavior:
+To use the throttle, you specify the number of requests, the number of seconds, and one of four modes that control the
+throttle behavior:
 
     1) **mode=Throttle.MODE_ASYNC** specifies asynchronous mode.
                    With asynchronous throttling,
@@ -29,38 +28,45 @@ four modes that control the throttle behavior:
                    number of requests per the specified number of seconds.
     3) **mode=Throttle.MODE_SYNC_EC** specifies synchronous mode using an early arrival algorithm.
                    For synchronous throttling with the early
-                   arrival algorithm, requests are sent immediately without
-                   delay until the limit is reached, at which point the throttling
-                   becomes active.
+                   arrival algorithm, you specify an *early_count* which is the number of requests that can be sent
+                   immediately without delay. Once the *early_count* is reached, the throttle kicks in and the next
+                   request is delayed by a cumulative amount that will ensure that the average sent rate for the
+                   requests sent up to this point is within the rate as specified by the number of requests per number
+                   of seconds.
     4) **mode=Throttle.MODE_SYNC_LB** specifies synchronous mode
                    using a leaky bucket algorithm.
                    For synchronous throttling with the leaky bucket
-                   algorithm, requests are sent
-                   immediately without delay until the limit is reached, at which point the throttling
-                   becomes active.
+                   algorithm, you specify the *lb_threshold* value which is the number of requests that will fit into
+                   the bucket. As each request is received, it is placed in the bucket and sent. The bucket leaks at a
+                   fixed rate such that each new request will fit given the send rate is within the limit specifed by
+                   the number of requests per number of seconds. If the bucket become full and can not hold any
+                   additional requests, the request will be delayed until the bucket can hold them. Unlike the early
+                   count algorithm, the leaky bucket algorithm results in an average send rate that is less than
+                   the rate as specified by the *requests* and *seconds* arguments.
 
-:Example: prevent a request loop from exceeding 10 requests per second
+:Example: throttle a request loop to 3 requests per second
 
-In the following code, make_request will be called 30 times. The first 10 calls will happen quickly, one
-after the other. The 11th call will be delayed for approximately a second to allow the first 10 calls to
-age out. As the code continues for this example, the throttle code will ensure that no more than 10 calls
-are made per second.
+In the following code, make_request will be called 10 times in rapid succession. The first request will be sent
+immediately, and the remaining requests will each be delayed by 1/2 second.
 
->>> from scottbrian_throttle.throttle import throttle
->>> from time import time
->>> @throttle(requests=10, seconds=1, mode=Throttle.MODE_SYNC)
-... def make_request(i, start_i, start_time):
-...     if time() - start_time >= 1:
-...         print(f'requests {start_i} to {i-1} made in 1 second')
-...         return i, time()  # update for next batch
-...     return start_i, start_time  # no change
->>> start_i = 0
->>> start_time = time()
->>> for i in range(30):
-...     start_i, start_time = make_request(i, start_i, start_time)
-requests 0 to 9 made in 1 second
-requests 10 to 19 made in 1 second
-requests 20 to 29 made in 1 second
+>>> from scottbrian_throttle.throttle import Throttle, throttle
+>>> import time
+>>> @throttle(requests=2, seconds=1, mode=Throttle.MODE_SYNC)
+... def make_request(request_number, time_of_start):
+...     print(f'request {request_number} sent at elapsed time: {time.time() - time_of_start:0.1f}')
+>>> start_time = time.time()
+>>> for i in range(10):
+...     make_request(i, start_time)
+request 0 sent at elapsed time: 0.0
+request 1 sent at elapsed time: 0.5
+request 2 sent at elapsed time: 1.0
+request 3 sent at elapsed time: 1.5
+request 4 sent at elapsed time: 2.0
+request 5 sent at elapsed time: 2.5
+request 6 sent at elapsed time: 3.0
+request 7 sent at elapsed time: 3.5
+request 8 sent at elapsed time: 4.0
+request 9 sent at elapsed time: 4.5
 
 
 .. image:: https://img.shields.io/badge/security-bandit-yellow.svg
