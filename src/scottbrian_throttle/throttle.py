@@ -700,18 +700,18 @@ class Throttle:
 
         return f'{classname}({parms})'
 
-    ####################################################################
-    # shutdown check
-    ####################################################################
-    @property
-    def shutdown(self) -> bool:
-        """Determine whether we need to shut down.
-
-        Returns:
-            True if we need to start shutdown processing, False
-              otherwise
-        """
-        return self._shutdown
+    # ####################################################################
+    # # shutdown check
+    # ####################################################################
+    # @property
+    # def shutdown(self) -> bool:
+    #     """Determine whether we need to shut down.
+    #
+    #     Returns:
+    #         True if we need to start shutdown processing, False
+    #           otherwise
+    #     """
+    #     return self._shutdown
 
     ####################################################################
     # start_shutdown
@@ -739,8 +739,9 @@ class Throttle:
                                requests from being queued and cleans up
                                the request queue by scheduling any
                                remaining requests at the normal interval
-                               as calculated by the seconds and requests
-                               that were specified during instantiation.
+                               as calculated by the *seconds* and
+                               *requests* arguments specified during
+                               instantiation.
                              * A hard shutdown
                                (Throttle.TYPE_SHUTDOWN_HARD) stops any
                                additional requests from being queued and
@@ -972,7 +973,7 @@ class Throttle:
         # calculated from the requests and seconds arguments when the
         # throttle was instantiated. If shutdown is indicated,
         # the async_q will be cleaned up with any remaining requests
-        # either processes (Throttle.TYPE_SHUTDOWN_SOFT) or dropped
+        # either processed (Throttle.TYPE_SHUTDOWN_SOFT) or dropped
         # (Throttle.TYPE_SHUTDOWN_HARD). Note that async_q.get will only
         # wait for a second to allow us to detect shutdown in a timely
         # fashion.

@@ -3,6 +3,7 @@
 ########################################################################
 # Standard Library
 ########################################################################
+import copy
 from dataclasses import dataclass
 from enum import auto, Flag
 from itertools import accumulate
@@ -1646,9 +1647,6 @@ class TestThrottle:
         Args:
             request_style_arg: chooses which function args to use
 
-        Raises:
-            BadRequestStyleArg: The request style arg must be 0 to 6
-
         """
         ################################################################
         # Instantiate Request Validator
@@ -1858,9 +1856,6 @@ class TestThrottle:
 
         Args:
             request_style_arg: chooses which function args to use
-
-        Raises:
-            BadRequestStyleArg: The request style arg must be 0 to 6
 
         """
         ################################################################
@@ -2077,9 +2072,6 @@ class TestThrottle:
 
         Args:
             request_style_arg: chooses which function args to use
-
-        Raises:
-            BadRequestStyleArg: The request style arg must be 0 to 6
 
         """
         ################################################################
@@ -2308,9 +2300,6 @@ class TestThrottle:
 
         Args:
             request_style_arg: chooses which function args to use
-
-        Raises:
-            BadRequestStyleArg: The request style arg must be 0 to 6
 
         """
         ################################################################
@@ -2572,7 +2561,7 @@ class TestThrottleShutdown:
         for i in range(6):
             a_throttle1.send_request(f1, a_var)
 
-        # the count should not have changed
+        # the count should be updated
         assert a_var[0] == 10
 
     ####################################################################
@@ -2607,42 +2596,24 @@ class TestThrottleShutdown:
                                   pie call
 
         Raises:
-            IncorrectWhichThrottle: which_throttle_arg must be 1 or 2
+            IncorrectWhichThrottle: which_throttle_arg must be 1,2, or 3
 
         """
         @throttle(requests=requests_arg,
                   seconds=seconds_arg,
                   mode=Throttle.MODE_ASYNC)
-        def f1(b: list[IntFloat]) -> None:
-            t = time.time()
-            prev_t = b[1]
-            f_interval = t - prev_t
-            f_interval_str = (time.strftime('%S',
-                                            time.localtime(f_interval))
-                              + ('%.9f' % (f_interval % 1,))[1:6])
-            b[1] = t
-            time_str = (time.strftime('%H:%M:%S', time.localtime(t))
-                        + ('%.9f' % (t % 1,))[1:6])
-            b[0] += 1
-            logger.debug(f'f1 bumped count to {b[0]} at {time_str}, '
-                         f'interval={f_interval_str}')
+        def f1(req_time: ReqTime) -> None:
+            TestThrottleShutdown.issue_shutdown_log_entry(
+                func_name='f1',
+                req_time=req_time)
 
         assert f1.throttle.async_q
         assert f1.throttle.request_scheduler_thread
 
-        def f2(b: list[IntFloat]) -> None:
-            t = time.time()
-            prev_t = b[1]
-            f_interval = t - prev_t
-            f_interval_str = (time.strftime('%S',
-                                            time.localtime(f_interval))
-                              + ('%.9f' % (f_interval % 1,))[1:6])
-            b[1] = t
-            time_str = (time.strftime('%H:%M:%S', time.localtime(t))
-                        + ('%.9f' % (t % 1,))[1:6])
-            b[0] += 1
-            logger.debug(f'f2 bumped count to {b[0]} at {time_str}, '
-                         f'interval={f_interval_str}')
+        def f2(req_time: ReqTime) -> None:
+            TestThrottleShutdown.issue_shutdown_log_entry(
+                func_name='f2',
+                req_time=req_time)
 
         num_reqs_to_make = 32
         b_throttle1 = Throttle(requests=requests_arg,
@@ -2651,17 +2622,20 @@ class TestThrottleShutdown:
 
         assert b_throttle1.async_q
         assert b_throttle1.request_scheduler_thread
-        b_var = [0, time.time()]
-        logger.debug(f'requests_arg = {requests_arg}')
-        logger.debug(f'seconds_arg = {seconds_arg}')
-        logger.debug(f'shutdown1_type_arg = {shutdown1_type_arg}')
-        logger.debug(f'shutdown2_type_arg = {shutdown2_type_arg}')
-        logger.debug(f'timeout1_arg = {timeout1_arg}')
-        logger.debug(f'timeout2_arg = {timeout2_arg}')
-        logger.debug(f'sleep_delay_arg = {sleep_delay_arg}')
+
+        start_time = time.time()
+        a_req_time = ReqTime(num_reqs=0, f_time=start_time)
+
+        logger.debug(f'{requests_arg=}')
+        logger.debug(f'{seconds_arg=}')
+        logger.debug(f'{shutdown1_type_arg=}')
+        logger.debug(f'{shutdown2_type_arg=}')
+        logger.debug(f'{timeout1_arg=}')
+        logger.debug(f'{timeout2_arg=}')
+        logger.debug(f'{sleep_delay_arg=}')
 
         interval = seconds_arg/requests_arg
-        logger.debug(f'interval = {interval}')
+        logger.debug(f'{interval=}')
 
         ################################################################
         # calculate sleep1 times
@@ -2669,15 +2643,15 @@ class TestThrottleShutdown:
         sleep1_reqs_to_do = min(num_reqs_to_make,
                                 math.floor(num_reqs_to_make
                                            * sleep_delay_arg))
-        logger.debug(f'sleep1_reqs_to_do = {sleep1_reqs_to_do}')
+        logger.debug(f'{sleep1_reqs_to_do=}')
         sleep1_sleep_seconds = (((sleep1_reqs_to_do - 1) * interval)
                                 + (interval / 2))
-        logger.debug(f'sleep1_sleep_seconds = {sleep1_sleep_seconds}')
+        logger.debug(f'{sleep1_sleep_seconds=}')
         exp_sleep1_reqs_done = sleep1_reqs_to_do
-        logger.debug(f'exp_sleep1_reqs_done = {exp_sleep1_reqs_done}')
+        logger.debug(f'{exp_sleep1_reqs_done=}')
         sleep1_elapsed_seconds = (((exp_sleep1_reqs_done - 1) * interval)
                                   + (interval / 2))
-        logger.debug(f'sleep1_elapsed_seconds = {sleep1_elapsed_seconds}')
+        logger.debug(f'{sleep1_elapsed_seconds=}')
 
         shutdown1_nonzero_min_time = 1.1
         shutdown2_nonzero_min_time = 1.1
@@ -2730,54 +2704,49 @@ class TestThrottleShutdown:
         ################################################################
         # calculate shutdown1 times
         ################################################################
-        logger.debug(f'shutdown1_reqs_to_do = {shutdown1_reqs_to_do}')
+        logger.debug(f'{shutdown1_reqs_to_do=}')
         shutdown1_timeout_seconds = ((shutdown1_reqs_to_do * interval)
                                      + (interval / 2))
-        logger.debug('shutdown1_timeout_seconds = '
-                     f'{shutdown1_timeout_seconds}')
+        logger.debug(f'{shutdown1_timeout_seconds=}')
 
-        logger.debug(f'exp_shutdown1_reqs_done = {exp_shutdown1_reqs_done}')
+        logger.debug(f'{exp_shutdown1_reqs_done=}')
         shutdown1_elapsed_seconds = (((exp_shutdown1_reqs_done - 1) * interval)
                                      + (interval/2))
-        logger.debug('shutdown1_elapsed_seconds = '
-                     f'{shutdown1_elapsed_seconds}')
+        logger.debug(f'{shutdown1_elapsed_seconds=}')
 
         ################################################################
         # calculate sleep2 times
         ################################################################
-        logger.debug(f'sleep2_reqs_to_do = {sleep2_reqs_to_do}')
+        logger.debug(f'{sleep2_reqs_to_do=}')
         sleep2_sleep_seconds = ((sleep2_reqs_to_do * interval)
                                 + (interval / 2))
-        logger.debug(f'sleep2_sleep_seconds = {sleep2_sleep_seconds}')
+        logger.debug(f'{sleep2_sleep_seconds=}')
 
-        logger.debug(f'exp_sleep2_reqs_done = {exp_sleep2_reqs_done}')
+        logger.debug(f'{exp_sleep2_reqs_done=}')
         sleep2_elapsed_seconds = (((exp_sleep2_reqs_done - 1) * interval)
                                   + (interval / 2))
-        logger.debug(f'sleep2_elapsed_seconds = {sleep2_elapsed_seconds}')
+        logger.debug(f'{sleep2_elapsed_seconds=}')
 
         ################################################################
         # calculate shutdown2 times
         ################################################################
-        logger.debug(f'shutdown2_reqs_to_do = {shutdown2_reqs_to_do}')
+        logger.debug(f'{shutdown2_reqs_to_do=}')
         shutdown2_timeout_seconds = ((shutdown2_reqs_to_do * interval)
                                      + (interval / 2))
-        logger.debug('shutdown2_timeout_seconds = '
-                     f'{shutdown2_timeout_seconds}')
+        logger.debug(f'{shutdown2_timeout_seconds=}')
 
-        logger.debug(f'exp_shutdown2_reqs_done = {exp_shutdown2_reqs_done}')
+        logger.debug(f'{exp_shutdown2_reqs_done=}')
         shutdown2_elapsed_seconds = (((exp_shutdown2_reqs_done - 1)
                                       * interval)
                                      + (interval / 2))
-        logger.debug('shutdown2_elapsed_seconds = '
-                     f'{shutdown2_elapsed_seconds}')
+        logger.debug(f'{shutdown2_elapsed_seconds=}')
 
         ################################################################
         # calculate end times
         ################################################################
-        logger.debug(f'total_reqs_to_do = {exp_total_reqs_done}')
+        logger.debug(f'{exp_total_reqs_done=}')
         total_reqs_elapsed_seconds = (exp_total_reqs_done - 1) * interval
-        logger.debug('total_reqs_elapsed_seconds = '
-                     f'{total_reqs_elapsed_seconds}')
+        logger.debug(f'{total_reqs_elapsed_seconds=}')
 
         logger.debug('start adding requests')
         start_time = time.time()
@@ -2791,13 +2760,15 @@ class TestThrottleShutdown:
             if (which_throttle_arg == WT.PieThrottleDirectShutdown
                     or which_throttle_arg == WT.PieThrottleShutdownFuncs):
                 for i in range(num_reqs_to_make):
-                    assert Throttle.RC_OK == f1(b_var)
+                    assert Throttle.RC_OK == f1(a_req_time)
             elif which_throttle_arg == WT.NonPieThrottle:
                 for i in range(num_reqs_to_make):
-                    assert Throttle.RC_OK == b_throttle1.send_request(f2,
-                                                                      b_var)
+                    assert Throttle.RC_OK == b_throttle1.send_request(
+                        f2,
+                        a_req_time)
             else:
-                raise IncorrectWhichThrottle('which_throttle must be 1 or 2')
+                raise IncorrectWhichThrottle('which_throttle must be 1,2, '
+                                             'or 3')
 
             logger.debug('all requests added, elapsed time = '
                          f'{time.time() - start_time} seconds')
@@ -2807,11 +2778,12 @@ class TestThrottleShutdown:
             ############################################################
             logger.debug(f'first sleep for {sleep1_sleep_seconds} seconds')
             sleep1_target_end_time = (start_time + sleep1_sleep_seconds)
-            time.sleep(max(0, sleep1_target_end_time - time.time()))
-            sleep1_reqs_time = b_var
-            logger.debug(f'sleep1 complete, {sleep1_reqs_time[0]} reqs done, '
+            time.sleep(max(0.0, sleep1_target_end_time - time.time()))
+            sleep1_reqs_time = copy.copy(a_req_time)
+            logger.debug(f'sleep1 complete, {sleep1_reqs_time.num_reqs} '
+                         f'reqs done, '
                          f'elapsed time = {time.time() - start_time} seconds')
-            assert sleep1_reqs_time[0] == exp_sleep1_reqs_done
+            assert sleep1_reqs_time.num_reqs == exp_sleep1_reqs_done
 
             ############################################################
             # first shutdown
@@ -2824,7 +2796,7 @@ class TestThrottleShutdown:
             logger.debug(f'starting shutdown1 {l_msg}')
 
             if timeout1_arg:
-                shutdown1_target_end_time = (sleep1_reqs_time[1]
+                shutdown1_target_end_time = (sleep1_reqs_time.f_time
                                              + shutdown1_timeout_seconds)
                 if shutdown1_type_arg:
                     if which_throttle_arg == WT.PieThrottleDirectShutdown:
@@ -2884,26 +2856,27 @@ class TestThrottleShutdown:
                     else:
                         ret_code = b_throttle1.start_shutdown()
 
-            shutdown1_reqs_time = b_var
+            shutdown1_reqs_time = copy.copy(a_req_time)
             logger.debug(f'shutdown1 complete with ret_code {ret_code}, '
-                         f'{shutdown1_reqs_time[0]} reqs done, '
+                         f'{shutdown1_reqs_time.num_reqs} reqs done, '
                          f'elapsed time = {time.time() - start_time} seconds')
-            assert shutdown1_reqs_time[0] == exp_shutdown1_reqs_done
+            assert shutdown1_reqs_time.num_reqs == exp_shutdown1_reqs_done
             assert ret_code is exp_shutdown1_ret_code
 
             ############################################################
             # second sleep
             ############################################################
-            logger.debug(f'sleep2 for {sleep2_sleep_seconds} seconds')
+            logger.debug(f'{sleep2_sleep_seconds=}')
 
-            sleep2_target_end_time = (shutdown1_reqs_time[1]
+            sleep2_target_end_time = (shutdown1_reqs_time.f_time
                                       + sleep2_sleep_seconds)
 
-            time.sleep(max(0, sleep2_target_end_time - time.time()))
-            sleep2_reqs_time = b_var
-            logger.debug(f'sleep2 complete, {sleep2_reqs_time[0]} reqs done, '
+            time.sleep(max(0.0, sleep2_target_end_time - time.time()))
+            sleep2_reqs_time = copy.copy(a_req_time)
+            logger.debug(f'sleep2 complete, {sleep2_reqs_time.num_reqs} '
+                         f'reqs done, '
                          f'elapsed time = {time.time() - start_time} seconds')
-            assert sleep2_reqs_time[0] == exp_sleep2_reqs_done
+            assert sleep2_reqs_time.num_reqs == exp_sleep2_reqs_done
 
             ############################################################
             # second shutdown will succeed with or without time out
@@ -2916,7 +2889,7 @@ class TestThrottleShutdown:
             logger.debug(f'starting shutdown2 {l_msg}')
 
             if timeout2_arg:
-                shutdown2_target_end_time = (sleep2_reqs_time[1]
+                shutdown2_target_end_time = (sleep2_reqs_time.f_time
                                              + shutdown2_timeout_seconds)
 
                 if which_throttle_arg == WT.PieThrottleDirectShutdown:
@@ -2952,11 +2925,11 @@ class TestThrottleShutdown:
                         shutdown_type=shutdown2_type_arg)
 
             shutdown_complete_secs = time.time() - start_time
-            shutdown2_reqs_time = b_var
+            shutdown2_reqs_time = copy.copy(a_req_time)
             logger.debug(f'shutdown2 complete with ret_code {ret_code}, '
-                         f'{shutdown2_reqs_time[0]} reqs done, '
+                         f'{shutdown2_reqs_time.num_reqs} reqs done, '
                          f'elapsed time = {time.time() - start_time} seconds')
-            assert shutdown2_reqs_time[0] == exp_total_reqs_done
+            assert shutdown2_reqs_time.num_reqs == exp_total_reqs_done
             assert ret_code is True
 
             ############################################################
@@ -2964,8 +2937,7 @@ class TestThrottleShutdown:
             ############################################################
             exp_shutdown_complete_secs = interval * (exp_total_reqs_done - 1)
 
-            logger.debug('exp_shutdown_complete_secs '
-                         f'{exp_shutdown_complete_secs}')
+            logger.debug(f'{exp_shutdown_complete_secs=}')
 
             assert (exp_shutdown_complete_secs
                     <= shutdown_complete_secs
@@ -2977,12 +2949,12 @@ class TestThrottleShutdown:
             ############################################################
             if (which_throttle_arg == WT.PieThrottleDirectShutdown
                     or which_throttle_arg == WT.PieThrottleShutdownFuncs):
-                assert Throttle.RC_SHUTDOWN == f1(b_var)
+                assert Throttle.RC_SHUTDOWN == f1(a_req_time)
                 assert f1.throttle.async_q.empty()
                 assert not f1.throttle.request_scheduler_thread.is_alive()
             else:
                 assert (Throttle.RC_SHUTDOWN
-                        == b_throttle1.send_request(f2, b_var))
+                        == b_throttle1.send_request(f2, a_req_time))
                 assert b_throttle1.async_q.empty()
                 assert not b_throttle1.request_scheduler_thread.is_alive()
 
@@ -2995,8 +2967,35 @@ class TestThrottleShutdown:
         # the following requests should get rejected
         ################################################################
         for i in range(num_reqs_to_make):
-            assert Throttle.RC_SHUTDOWN == b_throttle1.send_request(f2, b_var)
-        # assert Throttle.RC_SHUTDOWN == f1(f1_req_time)
+            assert Throttle.RC_SHUTDOWN == b_throttle1.send_request(
+                f2, a_req_time)
+        # assert Throttle.RC_SHUTDOWN == f1(a_req_time)
+
+    ####################################################################
+    # issue_shutdown_log_entry
+    ####################################################################
+    @staticmethod
+    def issue_shutdown_log_entry(func_name: str,
+                                 req_time: ReqTime) -> None:
+        """Log the shutdown progress message.
+
+        Args:
+            func_name: name of function for log message
+            req_time: number of requests and time
+
+        """
+        t = time.time()
+        prev_t = req_time.f_time
+        f_interval = t - prev_t
+        f_interval_str = (time.strftime('%S',
+                                        time.localtime(f_interval))
+                          + ('%.9f' % (f_interval % 1,))[1:6])
+        req_time.f_time = t
+        time_str = (time.strftime('%H:%M:%S', time.localtime(t))
+                    + ('%.9f' % (t % 1,))[1:6])
+        req_time.num_reqs += 1
+        logger.debug(f'{func_name} bumped count to {req_time.num_reqs} '
+                     f'at {time_str}, interval={f_interval_str}')
 
     ####################################################################
     # test_shutdown_throttle_funcs
@@ -3034,18 +3033,9 @@ class TestThrottleShutdown:
                   seconds=seconds_arg,
                   mode=Throttle.MODE_ASYNC)
         def f1(req_time: ReqTime) -> None:
-            t = time.time()
-            prev_t = req_time.f_time
-            f_interval = t - prev_t
-            f_interval_str = (time.strftime('%S',
-                                            time.localtime(f_interval))
-                              + ('%.9f' % (f_interval % 1,))[1:6])
-            req_time.f_time = t
-            time_str = (time.strftime('%H:%M:%S', time.localtime(t))
-                        + ('%.9f' % (t % 1,))[1:6])
-            req_time.num_reqs += 1
-            logger.debug(f'f1 bumped count to {req_time.num_reqs} '
-                         f'at {time_str}, interval={f_interval_str}')
+            TestThrottleShutdown.issue_shutdown_log_entry(
+                func_name='f1',
+                req_time=req_time)
 
         ################################################################
         # f2
@@ -3054,18 +3044,9 @@ class TestThrottleShutdown:
                   seconds=seconds_arg,
                   mode=Throttle.MODE_ASYNC)
         def f2(req_time: ReqTime) -> None:
-            t = time.time()
-            prev_t = req_time.f_time
-            f_interval = t - prev_t
-            f_interval_str = (time.strftime('%S',
-                                            time.localtime(f_interval))
-                              + ('%.9f' % (f_interval % 1,))[1:6])
-            req_time.f_time = t
-            time_str = (time.strftime('%H:%M:%S', time.localtime(t))
-                        + ('%.9f' % (t % 1,))[1:6])
-            req_time.num_reqs += 1
-            logger.debug(f'f2 bumped count to {req_time.num_reqs} '
-                         f'at {time_str}, interval={f_interval_str}')
+            TestThrottleShutdown.issue_shutdown_log_entry(
+                func_name='f2',
+                req_time=req_time)
 
         ################################################################
         # f3
@@ -3074,18 +3055,9 @@ class TestThrottleShutdown:
                   seconds=seconds_arg,
                   mode=Throttle.MODE_ASYNC)
         def f3(req_time: ReqTime) -> None:
-            t = time.time()
-            prev_t = req_time.f_time
-            f_interval = t - prev_t
-            f_interval_str = (time.strftime('%S',
-                                            time.localtime(f_interval))
-                              + ('%.9f' % (f_interval % 1,))[1:6])
-            req_time.f_time = t
-            time_str = (time.strftime('%H:%M:%S', time.localtime(t))
-                        + ('%.9f' % (t % 1,))[1:6])
-            req_time.num_reqs += 1
-            logger.debug(f'f3 bumped count to {req_time.num_reqs} '
-                         f'at {time_str}, interval={f_interval_str}')
+            TestThrottleShutdown.issue_shutdown_log_entry(
+                func_name='f3',
+                req_time=req_time)
 
         ################################################################
         # f4
@@ -3094,18 +3066,9 @@ class TestThrottleShutdown:
                   seconds=seconds_arg,
                   mode=Throttle.MODE_ASYNC)
         def f4(req_time: ReqTime) -> None:
-            t = time.time()
-            prev_t = req_time.f_time
-            f_interval = t - prev_t
-            f_interval_str = (time.strftime('%S',
-                                            time.localtime(f_interval))
-                              + ('%.9f' % (f_interval % 1,))[1:6])
-            req_time.f_time = t
-            time_str = (time.strftime('%H:%M:%S', time.localtime(t))
-                        + ('%.9f' % (t % 1,))[1:6])
-            req_time.num_reqs += 1
-            logger.debug(f'f4 bumped count to {req_time.num_reqs} '
-                         f'at {time_str}, interval={f_interval_str}')
+            TestThrottleShutdown.issue_shutdown_log_entry(
+                func_name='f4',
+                req_time=req_time)
 
         ################################################################
         # f5
@@ -3151,7 +3114,7 @@ class TestThrottleShutdown:
             shutdown1_type_arg = Throttle.TYPE_SHUTDOWN_HARD
 
         f1_interval = seconds_arg / f1_reqs
-        f2_interval = seconds_arg/f2_reqs
+        f2_interval = seconds_arg / f2_reqs
         f3_interval = seconds_arg / f3_reqs
 
         f1_exp_elapsed_seconds = f1_interval * f1_num_reqs_arg
@@ -3180,7 +3143,7 @@ class TestThrottleShutdown:
             sleep_time = mean_reqs_to_make * sleep2_delay_arg * interval
 
         funcs_to_shutdown = list([f1, f2, f3, f4][0:num_shutdown1_funcs_arg])
-        logger.debug(f'funcs_to_shutdown = {funcs_to_shutdown}')
+        logger.debug(f'{funcs_to_shutdown=}')
         ################################################################
         # start the requests
         ################################################################
