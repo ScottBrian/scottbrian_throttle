@@ -206,6 +206,11 @@ class IncorrectEarlyCountSpecified(ThrottleError):
     pass
 
 
+class IncorrectInputSpecified(ThrottleError):
+    """An incorrect input value was specified."""
+    pass
+
+
 class IncorrectLbThresholdSpecified(ThrottleError):
     """Throttle exception for incorrect lb_threshold specification."""
     pass
@@ -246,16 +251,14 @@ class MissingLbThresholdSpecification(ThrottleError):
     pass
 
 
-class SchedulerThreadIsNoneDuringShutdown(ThrottleError):
-    """Throttle exception for missing schedular thread."""
-    pass
-
-
 class AsyncQIsNoneDuringShutdown(ThrottleError):
     """Throttle exception for missing async queue."""
     pass
 
 
+########################################################################
+# Throttle class
+########################################################################
 class Throttle:
     """Provides a throttle mechanism.
 
@@ -285,14 +288,17 @@ class Throttle:
     RC_OK: Final[int] = 0
     RC_SHUTDOWN: Final[int] = 4
 
+    SECS_2_NS: Final[int] = 1000000000
+    NS_2_SECS: Final[float] = 0.000000001
+
     __slots__ = ('requests', 'seconds', 'mode', 'async_q_size',
-                 'early_count', 'lb_threshold', 'target_interval',
+                 'early_count', 'lb_threshold', '_target_interval',
                  'shutdown_lock', '_shutdown',
                  'do_shutdown', '_next_target_time', '_arrival_time',
                  '_early_arrival_count', 'async_q',
                  'request_scheduler_thread', 'logger',
                  'num_shutdown_timeouts', 'pauser', 'lb_adjustment',
-                 'target_interval_ns', 'lb_adjustment_ns',
+                 '_target_interval_ns', 'lb_adjustment_ns',
                  '_check_async_q_time', 'time_traces', 'stop_times',
                  '_check_async_q_time2')
 
@@ -503,7 +509,7 @@ class Throttle:
         # seconds
         ################################################################
         if isinstance(seconds, (int, float)) and (0 < seconds):
-            self.seconds = timedelta(seconds=seconds)
+            self.seconds = seconds  # timedelta(seconds=seconds)
         else:
             raise IncorrectSecondsSpecified('The seconds specification '
                                             'must be an integer or '
@@ -592,14 +598,14 @@ class Throttle:
         ################################################################
         # Set remainder of vars
         ################################################################
-        self.target_interval = seconds/requests
-        self.target_interval_ns: float = (self.target_interval
-                                          * Pauser.SECS_2_NS)
+        self._target_interval = seconds / requests
+        self._target_interval_ns: float = (self._target_interval
+                                           * Throttle.SECS_2_NS)
         self.lb_adjustment: float = max(0.0,
-                                        (self.target_interval
+                                        (self._target_interval
                                          * self.lb_threshold)
-                                        - self.target_interval)
-        self.lb_adjustment_ns: float = self.lb_adjustment * Pauser.SECS_2_NS
+                                        - self._target_interval)
+        self.lb_adjustment_ns: float = self.lb_adjustment * Throttle.SECS_2_NS
         self.shutdown_lock = threading.Lock()
         self._shutdown = False
         self.do_shutdown = Throttle.TYPE_SHUTDOWN_NONE
@@ -700,132 +706,6 @@ class Throttle:
 
         return f'{classname}({parms})'
 
-    # ####################################################################
-    # # shutdown check
-    # ####################################################################
-    # @property
-    # def shutdown(self) -> bool:
-    #     """Determine whether we need to shut down.
-    #
-    #     Returns:
-    #         True if we need to start shutdown processing, False
-    #           otherwise
-    #     """
-    #     return self._shutdown
-
-    ####################################################################
-    # start_shutdown
-    ####################################################################
-    def start_shutdown(self,
-                       shutdown_type: int = TYPE_SHUTDOWN_SOFT,
-                       timeout: OptIntFloat = None
-                       ) -> bool:
-        """Shutdown the throttle request scheduling.
-
-        Shutdown is used to clean up the request queue and bring the
-        throttle to a halt. This should be done during normal
-        application shutdown or when an error occurs. Once the throttle
-        has completed shutdown it can no longer be used. If a throttle
-        is once again needed after shutdown, a new one will need to be
-        instantiated to replace the old one.
-
-        Args:
-            shutdown_type: specifies whether to do a soft or a hard
-                             shutdown:
-
-                             * A soft shutdown
-                               (Throttle.TYPE_SHUTDOWN_SOFT),
-                               the default, stops any additional
-                               requests from being queued and cleans up
-                               the request queue by scheduling any
-                               remaining requests at the normal interval
-                               as calculated by the *seconds* and
-                               *requests* arguments specified during
-                               instantiation.
-                             * A hard shutdown
-                               (Throttle.TYPE_SHUTDOWN_HARD) stops any
-                               additional requests from being queued and
-                               cleans up the request queue by quickly
-                               removing any remaining requests without
-                               executing them.
-            timeout: number of seconds to allow for shutdown to
-                       complete. Note that a *timeout* of zero or less
-                       is equivalent to a *timeout* of None, meaning
-                       start_shutdown will return when the shutdown is
-                       complete without a timeout.
-
-        .. # noqa: DAR101
-
-        Returns:
-            * ``True`` if *timeout* was not specified, or if it was
-              specified and the ``start_shutdown()`` request completed
-              within the specified number of seconds.
-            * ``False`` if *timeout* was specified and the
-              ``start_shutdown()`` request did not complete within the
-              specified number of seconds.
-
-        Raises:
-            AttemptedShutdownForSyncThrottle: Calling start_shutdown is
-                only valid for a throttle instantiated with a mode of
-                Throttle.MODE_ASYNC
-            IncorrectShutdownTypeSpecified: For start_shutdowm,
-                *shutdownType* must be specified as either
-                Throttle.TYPE_SHUTDOWN_SOFT or
-                Throttle.TYPE_SHUTDOWN_HARD
-            SchedulerThreadIsNoneDuringShutdown: The Throttle
-                start_shutdown method detected that the scheduler thread
-                does not exist.
-
-        """
-        if shutdown_type not in (Throttle.TYPE_SHUTDOWN_SOFT,
-                                 Throttle.TYPE_SHUTDOWN_HARD):
-            raise IncorrectShutdownTypeSpecified(
-                'For start_shutdown, shutdownType must be specified as '
-                'either Throttle.TYPE_SHUTDOWN_SOFT or '
-                'Throttle.TYPE_SHUTDOWN_HARD')
-        if self.mode != Throttle.MODE_ASYNC:
-            raise AttemptedShutdownForSyncThrottle('Calling start_shutdown is '
-                                                   'valid only for a throttle '
-                                                   'instantiated with mode '
-                                                   'Throttle.MODE_ASYNC.')
-        if self.request_scheduler_thread is None:
-            raise SchedulerThreadIsNoneDuringShutdown(
-                'The Throttle start_shutdown method detected that the '
-                'scheduler thread does not exist.'
-            )
-
-        ################################################################
-        # We are good to go for shutdown
-        ################################################################
-        self._shutdown = True  # reject any new send_request calls
-
-        # We use the shutdown lock to block us until any in progress
-        # send_requests are complete
-        # TODO: use se_lock
-        with self.shutdown_lock:
-            self.do_shutdown = shutdown_type
-
-        # join the schedule_requests thread to wait for the shutdown
-        start_time = time.time()
-        if timeout and (timeout > 0):
-            self.request_scheduler_thread.join(timeout=timeout)
-            if self.request_scheduler_thread.is_alive():
-                self.num_shutdown_timeouts += 1
-                if ((self.num_shutdown_timeouts % 1000 == 0)
-                        or (timeout > 10)):
-                    self.logger.debug('timeout of a start_shutdown() request '
-                                      f'{self.num_shutdown_timeouts} '
-                                      f'with timeout={timeout}')
-
-                return False  # we timed out
-        else:
-            self.request_scheduler_thread.join()
-
-        self.logger.debug('start_shutdown() request successfully completed '
-                          f'in {time.time()- start_time} seconds')
-
-        return True  # shutdown was successful
-
     ####################################################################
     # send_request
     ####################################################################
@@ -909,7 +789,7 @@ class Throttle:
                     # than we expect it to be - could be the inaccuracy
                     # of time.time()
                     wait_time = (self._next_target_time
-                                 - self._arrival_time) * Pauser.NS_2_SECS
+                                 - self._arrival_time) * Throttle.NS_2_SECS
                     # the shortest interval is 0.015 seconds
                     # time.sleep(wait_time)
                     self.pauser.pause(wait_time)
@@ -919,7 +799,7 @@ class Throttle:
                                           + self.lb_adjustment_ns
                                           )
                                       - self.lb_adjustment_ns
-                                      + self.target_interval_ns)
+                                      + self._target_interval_ns)
 
             # The caller should protect the function with a try and
             # either raise an exception or pass back a return value that
@@ -951,7 +831,7 @@ class Throttle:
             #                               + self.lb_adjustment_ns
             #                               )
             #                           - self.lb_adjustment_ns
-            #                           + self.target_interval_ns)
+            #                           + self._target_interval_ns)
 
             # return the request return value (might be None)
             return ret_value
@@ -984,7 +864,7 @@ class Throttle:
             #
             #     request_item = self.async_q.get_nowait()
             #     self._next_target_time = (time.perf_counter_ns()
-            #                               + self.target_interval_ns)
+            #                               + self._target_interval_ns)
             #     obtained_nowait = True
             # except queue.Empty:
             try:
@@ -994,7 +874,7 @@ class Throttle:
                                                 timeout=1)
 
                 self._next_target_time = (time.perf_counter_ns()
-                                          + self.target_interval_ns)
+                                          + self._target_interval_ns)
             except queue.Empty:
                 if self.do_shutdown != Throttle.TYPE_SHUTDOWN_NONE:
                     return
@@ -1039,7 +919,7 @@ class Throttle:
                 # Use min to ensure we don't sleep too long and appear
                 # slow to respond to a shutdown request
                 sleep_seconds = (self._next_target_time
-                                 - time.perf_counter_ns()) * Pauser.NS_2_SECS
+                                 - time.perf_counter_ns()) * Throttle.NS_2_SECS
                 if sleep_seconds > 0:  # if still time to go
                     self.pauser.pause(min(1.0, sleep_seconds))
                     # time_trace, stop_time = self.pauser.pause(min(1.0,
@@ -1048,6 +928,190 @@ class Throttle:
                     # self.stop_times.append(stop_time)
                 else:  # we are done sleeping
                     break
+
+    ####################################################################
+    # start_shutdown
+    ####################################################################
+    def start_shutdown(self,
+                       shutdown_type: int = TYPE_SHUTDOWN_SOFT,
+                       timeout: OptIntFloat = None
+                       ) -> bool:
+        """Shutdown the async throttle request scheduling.
+
+        Shutdown is used to stop and clean up any pending requests on
+        the async request queue for a throttle created with
+        mode Throttle.MODE_ASYNC. This should be done during normal
+        application shutdown or when an error occurs. Once the throttle
+        has completed shutdown it can no longer be used. If a throttle
+        is once again needed after shutdown, a new one will need to be
+        instantiated to replace the old one.
+
+        Args:
+            shutdown_type: specifies whether to do a soft or a hard
+                             shutdown:
+
+                             * A soft shutdown
+                               (Throttle.TYPE_SHUTDOWN_SOFT),
+                               the default, stops any additional
+                               requests from being queued and cleans up
+                               the request queue by scheduling any
+                               remaining requests at the normal interval
+                               as calculated by the *seconds* and
+                               *requests* arguments specified during
+                               instantiation.
+                             * A hard shutdown
+                               (Throttle.TYPE_SHUTDOWN_HARD) stops any
+                               additional requests from being queued and
+                               cleans up the request queue by quickly
+                               removing any remaining requests without
+                               executing them.
+            timeout: number of seconds to allow for shutdown to
+                       complete. If the shutdown times out, control is
+                       returned with a return value of False. The
+                       shutdown will continue and a subsequent call to
+                       start_shutdown, with or without a timeout value,
+                       may eventually return control with a return value
+                       of True to indicate that the shutdown has
+                       completed. Note that a *timeout* value of zero or
+                       less is handled as if shutdown None was
+                       specified, whether explicitly or by default, in
+                       which case the shutdown will not timeout and will
+                       control will be returned if and when the shutdown
+                       completes. A very small value, such as 0.001,
+                       can be used to start the shutdown and then get
+                       back control to allow other cleanup activities
+                       to be performed and eventually issue a second
+                       shutdown request to ensure that it is completed.
+
+        .. # noqa: DAR101
+
+        Returns:
+            * ``True`` if *timeout* was not specified, or if it was
+              specified and the ``start_shutdown()`` request completed
+              within the specified number of seconds.
+            * ``False`` if *timeout* was specified and the
+              ``start_shutdown()`` request did not complete within the
+              specified number of seconds.
+
+        Raises:
+            AttemptedShutdownForSyncThrottle: Calling start_shutdown is
+                only valid for a throttle instantiated with a mode of
+                Throttle.MODE_ASYNC
+            IncorrectShutdownTypeSpecified: For start_shutdown,
+                *shutdownType* must be specified as either
+                Throttle.TYPE_SHUTDOWN_SOFT or
+                Throttle.TYPE_SHUTDOWN_HARD
+
+        """
+        ################################################################
+        # Test that the throttle is async first since that is a
+        # more fundamental error to deal with than the shutdown_type or
+        # timeout args.
+        ################################################################
+        if self.mode != Throttle.MODE_ASYNC:
+            raise AttemptedShutdownForSyncThrottle(
+                'Calling start_shutdown is valid only for a throttle '
+                'instantiated with mode  Throttle.MODE_ASYNC.')
+        if shutdown_type not in (Throttle.TYPE_SHUTDOWN_SOFT,
+                                 Throttle.TYPE_SHUTDOWN_HARD):
+            raise IncorrectShutdownTypeSpecified(
+                'For start_shutdown, shutdownType must be specified as '
+                'either Throttle.TYPE_SHUTDOWN_SOFT or '
+                'Throttle.TYPE_SHUTDOWN_HARD')
+
+        ################################################################
+        # We are good to go for shutdown
+        ################################################################
+        self._shutdown = True  # reject any new send_request calls
+
+        # We use the shutdown lock to block us until any in progress
+        # send_requests are complete
+        # TODO: use se_lock
+        with self.shutdown_lock:
+            self.do_shutdown = shutdown_type
+
+        # join the schedule_requests thread to wait for the shutdown
+        start_time = time.time()
+        if timeout and (timeout > 0):
+            self.request_scheduler_thread.join(timeout=timeout)
+            if self.request_scheduler_thread.is_alive():
+                self.num_shutdown_timeouts += 1
+                if ((self.num_shutdown_timeouts % 1000 == 0)
+                        or (timeout > 10)):
+                    self.logger.debug('timeout of a start_shutdown() request '
+                                      f'{self.num_shutdown_timeouts} '
+                                      f'with timeout={timeout}')
+
+                return False  # we timed out
+        else:
+            self.request_scheduler_thread.join()
+
+        self.logger.debug('start_shutdown() request successfully completed '
+                          f'in {time.time() - start_time} seconds')
+
+        return True  # shutdown was successful
+
+    ####################################################################
+    # get_interval
+    ####################################################################
+    def get_interval_secs(self) -> float:
+        """Calculate the interval between requests in seconds."""
+        return self._target_interval
+
+    ####################################################################
+    # get_interval
+    ####################################################################
+    def get_interval_ns(self) -> float:
+        """Calculate the interval between requests in nanoseconds."""
+        return self._target_interval_ns
+
+    ####################################################################
+    # get_completion_time
+    ####################################################################
+    def get_completion_time_secs(self,
+                                 requests: int,
+                                 from_start: bool) -> float:
+        """Calculate completion time secs for given number requests.
+
+        Args:
+            requests: number of requests to do
+            from_start: specifies whether the calculation should be done
+                          for a series that is starting fresh where the
+                          first request has no delay
+
+        Returns:
+            The estimated number of elapsed seconds for the number
+            of requests specified
+
+        """
+        if from_start:
+            return (requests - 1) * self._target_interval
+        else:
+            return requests * self._target_interval
+
+    ####################################################################
+    # get_completion_time
+    ####################################################################
+    def get_completion_time_ns(self,
+                               requests: int,
+                               from_start: bool) -> float:
+        """Calculate completion time ns for given number requests.
+
+        Args:
+            requests: number of requests to do
+            from_start: specifies whether the calculation should be done
+                          for a series that is starting fresh where the
+                          first request has no delay
+
+        Returns:
+            The estimated number of elapsed seconds for the number
+            of requests specified
+
+        """
+        if from_start:
+            return (requests - 1) * self._target_interval_ns
+        else:
+            return requests * self._target_interval_ns
 
 
 ########################################################################
