@@ -300,7 +300,7 @@ class Throttle:
                  'num_shutdown_timeouts', 'pauser', 'lb_adjustment',
                  '_target_interval_ns', 'lb_adjustment_ns',
                  '_check_async_q_time', 'time_traces', 'stop_times',
-                 '_check_async_q_time2')
+                 '_check_async_q_time2', 'shutdown_elapsed_time')
 
     def __init__(self, *,
                  requests: int,
@@ -619,6 +619,7 @@ class Throttle:
         self.logger = logging.getLogger(__name__)
         self.num_shutdown_timeouts = 0  # limit timeout log messages
         self.pauser = Pauser()
+        self.shutdown_elapsed_time = 0.0
         # self.time_traces = []
         # self.stop_times = []
 
@@ -1035,19 +1036,19 @@ class Throttle:
         if timeout and (timeout > 0):
             self.request_scheduler_thread.join(timeout=timeout)
             if self.request_scheduler_thread.is_alive():
-                self.num_shutdown_timeouts += 1
-                if ((self.num_shutdown_timeouts % 1000 == 0)
-                        or (timeout > 10)):
-                    self.logger.debug('timeout of a start_shutdown() request '
-                                      f'{self.num_shutdown_timeouts} '
-                                      f'with timeout={timeout}')
+                # self.num_shutdown_timeouts += 1
+                # if ((self.num_shutdown_timeouts % 1000 == 0)
+                #         or (timeout > 10)):
+                self.logger.debug('start_shutdown request timed out '
+                                  f'with {timeout=:.4f}')
 
                 return False  # we timed out
         else:
             self.request_scheduler_thread.join()
 
-        self.logger.debug('start_shutdown() request successfully completed '
-                          f'in {time.time() - start_time} seconds')
+        self.shutdown_elapsed_time = time.time() - start_time
+        self.logger.debug('start_shutdown request successfully completed '
+                          f'in {self.shutdown_elapsed_time:.4f} seconds')
 
         return True  # shutdown was successful
 
