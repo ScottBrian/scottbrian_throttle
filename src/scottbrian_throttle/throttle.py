@@ -196,6 +196,11 @@ class EarlyCountNotAllowed(ThrottleError):
     pass
 
 
+class IllegalSoftShutdownAfterHard(ThrottleError):
+    """Throttle exception for illegal soft shutdown after hard."""
+    pass
+
+
 class IncorrectAsyncQSizeSpecified(ThrottleError):
     """Throttle exception for incorrect async_q_size specification."""
     pass
@@ -251,11 +256,6 @@ class MissingLbThresholdSpecification(ThrottleError):
     pass
 
 
-class AsyncQIsNoneDuringShutdown(ThrottleError):
-    """Throttle exception for missing async queue."""
-    pass
-
-
 ########################################################################
 # Throttle class
 ########################################################################
@@ -300,7 +300,8 @@ class Throttle:
                  'num_shutdown_timeouts', 'pauser', 'lb_adjustment',
                  '_target_interval_ns', 'lb_adjustment_ns',
                  '_check_async_q_time', 'time_traces', 'stop_times',
-                 '_check_async_q_time2', 'shutdown_elapsed_time')
+                 '_check_async_q_time2', 'shutdown_elapsed_time',
+                 'hard_shutdown_initiated')
 
     def __init__(self, *,
                  requests: int,
@@ -609,6 +610,7 @@ class Throttle:
         self.shutdown_lock = threading.Lock()
         self._shutdown = False
         self.do_shutdown = Throttle.TYPE_SHUTDOWN_NONE
+        self.hard_shutdown_initiated = False
         self._arrival_time = 0.0
         self._check_async_q_time = 0.0
         self._check_async_q_time2 = 0.0
@@ -998,10 +1000,16 @@ class Throttle:
             AttemptedShutdownForSyncThrottle: Calling start_shutdown is
                 only valid for a throttle instantiated with a mode of
                 Throttle.MODE_ASYNC
+            IllegalSoftShutdownAfterHard: A shutdown with shutdown_type
+                Throttle.TYPE_SHUTDOWN_SOFT  was requested after a
+                shutdown with shutdown_type Throttle.TYPE_SHUTDOWN_HARD
+                had already been initiated. Once a hard shutdown has
+                been initiated, a soft shutdown is not allowed.
             IncorrectShutdownTypeSpecified: For start_shutdown,
                 *shutdownType* must be specified as either
                 Throttle.TYPE_SHUTDOWN_SOFT or
                 Throttle.TYPE_SHUTDOWN_HARD
+
 
         """
         ################################################################
@@ -1029,6 +1037,40 @@ class Throttle:
         # send_requests are complete
         # TODO: use se_lock
         with self.shutdown_lock:
+            # It is OK to start a soft shutdown and follow that with
+            # a hard shutdown, but not OK to start a hard shutdown
+            # and then follow that with a soft shutdown. The reason is
+            # that a soft shutdown finishes the queued requests while
+            # also doing the throttling, meaning that a soft shutdown
+            # is done when the queued requests are important and must be
+            # done. Following a soft shutdown with a hard shutdown
+            # would indicate that the soft shutdown was taking too long
+            # and there was a decision to end it with the hard shutdown
+            # for the more important need to bring the system down
+            # quickly. A hard shutdown, on the other hand, is initially
+            # done when rge requests are not important to complete. So,
+            # following a hard shutdown with a soft shutdown would
+            # indicate conflict, and in this case it will be impossible
+            # to retrieve the requests that have already been tossed.
+            # It is thus important to tell the caller via the exception
+            # that the soft request after a hard request is a conflict
+            # that may not have been intended.
+
+            if shutdown_type == Throttle.TYPE_SHUTDOWN_HARD:
+                self.hard_shutdown_initiated = True
+            elif self.hard_shutdown_initiated:  # soft after hard
+                raise IllegalSoftShutdownAfterHard(
+                    'A shutdown with shutdown_type '
+                    'Throttle.TYPE_SHUTDOWN_SOFT was requested after a '
+                    'shutdown with shutdown_type '
+                    'Throttle.TYPE_SHUTDOWN_HARD had already been '
+                    'initiated. Once a hard shutdown has been '
+                    'initiated, a soft shutdown is not allowed.')
+            # now that we are OK with the shutdown type, set do_shutdown
+            # with the type of shutdown to tell the schedule_requests
+            # method how to handle the queued requests (toss for hard
+            # shutdown, complete normally with throttling for soft
+            # shutdown)
             self.do_shutdown = shutdown_type
 
         # join the schedule_requests thread to wait for the shutdown
