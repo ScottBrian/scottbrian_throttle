@@ -1058,6 +1058,11 @@ class Throttle:
 
             if shutdown_type == Throttle.TYPE_SHUTDOWN_HARD:
                 self.hard_shutdown_initiated = True
+
+                # if soft shutdown in progress
+                if self.do_shutdown == Throttle.TYPE_SHUTDOWN_SOFT:
+                    self.logger.debug('Soft shutdown terminated by hard '
+                                      'shutdown request.')
             elif self.hard_shutdown_initiated:  # soft after hard
                 raise IllegalSoftShutdownAfterHard(
                     'A shutdown with shutdown_type '
@@ -1087,6 +1092,9 @@ class Throttle:
                 return False  # we timed out
         else:
             self.request_scheduler_thread.join()
+
+        # indicate shutdown no longer in progress
+        self.do_shutdown = Throttle.TYPE_SHUTDOWN_NONE
 
         self.shutdown_elapsed_time = time.time() - start_time
         self.logger.debug('start_shutdown request successfully completed '

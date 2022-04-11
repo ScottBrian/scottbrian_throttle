@@ -3344,7 +3344,7 @@ class TestThrottleShutdown:
 
         """
         seconds_arg = 0.3
-        num_reqs_to_make = 10000
+        num_reqs_to_make = 100000
         soft_reqs_to_allow = 10
 
         found_hard = False
@@ -3422,7 +3422,7 @@ class TestThrottleShutdown:
         logger.debug(f'{timeout_seconds=}')
 
         logger.debug('start adding requests')
-        start_time = time.time()
+
         ################################################################
         # We need a try/finally to make sure we can shut down the
         # throttle in the event that an assertion fails. In an earlier
@@ -3432,6 +3432,7 @@ class TestThrottleShutdown:
         ################################################################
         try:
             caplog.clear()
+            start_time = time.time()
             for _ in range(num_reqs_to_make):
                 assert Throttle.RC_OK == a_throttle.send_request(
                     f2,
@@ -3444,23 +3445,17 @@ class TestThrottleShutdown:
                             log_msg=log_msg)
             logger.debug(log_msg)
 
-            prev_reqs_done = 0
-
             sleep_time = sleep_seconds - (time.time() - a_req_time.f_time)
             log_msg = f'about to sleep for {sleep_time=}'
             log_ver.add_msg(log_name='test_throttle',
                             log_level=logging.DEBUG,
                             log_msg=log_msg)
             logger.debug(log_msg)
+            sleep_time = sleep_seconds - (time.time() - start_time)
             time.sleep(sleep_time)
 
-            exp_reqs_done = min(num_reqs_to_make,
-                                sleep_reqs_to_do + prev_reqs_done)
+            exp_reqs_done = sleep_reqs_to_do
             assert a_req_time.num_reqs == exp_reqs_done
-
-            prev_reqs_done = exp_reqs_done
-
-            shutdown_start_time = time.time()
 
             ############################################################
             # Cases:
@@ -3499,9 +3494,10 @@ class TestThrottleShutdown:
             # Shutdown2:  Hard Long     all       no          True
             # Shutdown3:  Soft Short    0         na          Exception
 
-            hard_shutdown_issued = False
+            hard_shutdown_issued = 0
             time_out_none_issued = False
-            exp_additional_req_done = 0
+            soft_short_shutdown_issued = False
+            soft_long_shutdown_issued = False
             for short_long, hard_soft in zip(short_long_timeout_arg,
                                              hard_soft_combo_arg):
                 exp_ret_code = False
@@ -3510,7 +3506,9 @@ class TestThrottleShutdown:
                     if short_long == 'Short':
                         timeout = timeout_seconds
                         if not hard_shutdown_issued:
+                            soft_short_shutdown_issued = True
                             if time_out_none_issued:
+                                exp_ret_code = True
                                 exp_reqs_done = num_reqs_to_make
                             else:
                                 exp_reqs_done += soft_reqs_to_allow
@@ -3519,12 +3517,15 @@ class TestThrottleShutdown:
                         if not hard_shutdown_issued:
                             exp_ret_code = True
                             time_out_none_issued = True
+                            soft_long_shutdown_issued = True
                             exp_reqs_done = num_reqs_to_make
                 else:
                     shutdown_type = Throttle.TYPE_SHUTDOWN_HARD
-                    hard_shutdown_issued = True
+                    hard_shutdown_issued += 1
                     if short_long == 'Short':
                         timeout = 0.0001
+                        if time_out_none_issued:
+                            exp_ret_code = True
                     else:
                         timeout = None
                         time_out_none_issued = True
@@ -3543,11 +3544,23 @@ class TestThrottleShutdown:
                             shutdown_type=shutdown_type,
                             timeout=timeout)
                 else:
+                    if (hard_soft == 'Hard'
+                            and soft_short_shutdown_issued
+                            and not soft_long_shutdown_issued
+                            and hard_shutdown_issued == 1):
+                        log_msg = ('Soft shutdown terminated by hard '
+                                   'shutdown request')
+                        log_ver.add_msg(
+                            log_name='scottbrian_throttle.throttle',
+                            log_level=logging.DEBUG,
+                            log_msg=log_msg)
+                    if hard_soft == 'Soft' and timeout:
+                        shutdown_start_time = time.time()
+                        timeout = timeout_seconds - (shutdown_start_time
+                                                     - a_req_time.f_time)
                     ret_code = a_throttle.start_shutdown(
                         shutdown_type=shutdown_type,
                         timeout=timeout)
-
-                shutdown_elapsed_time = time.time() - shutdown_start_time
 
                 assert a_req_time.num_reqs == exp_reqs_done
 
