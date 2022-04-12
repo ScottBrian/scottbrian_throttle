@@ -994,7 +994,8 @@ class Throttle:
               within the specified number of seconds.
             * ``False`` if *timeout* was specified and the
               ``start_shutdown()`` request did not complete within the
-              specified number of seconds.
+              specified number of seconds, or a soft shutdown was
+              terminated by a hard shutdown.
 
         Raises:
             AttemptedShutdownForSyncThrottle: Calling start_shutdown is
@@ -1061,8 +1062,9 @@ class Throttle:
 
                 # if soft shutdown in progress
                 if self.do_shutdown == Throttle.TYPE_SHUTDOWN_SOFT:
-                    self.logger.debug('Soft shutdown terminated by hard '
-                                      'shutdown request.')
+                    self.logger.debug('Hard shutdown request detected soft '
+                                      'shutdown in progress - soft shutdown '
+                                      'will terminate.')
             elif self.hard_shutdown_initiated:  # soft after hard
                 raise IllegalSoftShutdownAfterHard(
                     'A shutdown with shutdown_type '
@@ -1093,12 +1095,20 @@ class Throttle:
         else:
             self.request_scheduler_thread.join()
 
-        # indicate shutdown no longer in progress
-        self.do_shutdown = Throttle.TYPE_SHUTDOWN_NONE
+        with self.shutdown_lock:
+            if (shutdown_type == Throttle.TYPE_SHUTDOWN_SOFT
+                    and self.hard_shutdown_initiated):
+                self.logger.debug('Soft shutdown request detected hard '
+                                  'shutdown initiated - soft shutdown '
+                                  'returning False.')
+                return False  # the soft shutdown was terminated
 
-        self.shutdown_elapsed_time = time.time() - start_time
-        self.logger.debug('start_shutdown request successfully completed '
-                          f'in {self.shutdown_elapsed_time:.4f} seconds')
+            # indicate shutdown no longer in progress
+            self.do_shutdown = Throttle.TYPE_SHUTDOWN_NONE
+
+            self.shutdown_elapsed_time = time.time() - start_time
+            self.logger.debug('start_shutdown request successfully completed '
+                              f'in {self.shutdown_elapsed_time:.4f} seconds')
 
         return True  # shutdown was successful
 
