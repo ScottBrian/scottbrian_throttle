@@ -301,7 +301,7 @@ class Throttle:
                  '_target_interval_ns', 'lb_adjustment_ns',
                  '_check_async_q_time', 'time_traces', 'stop_times',
                  '_check_async_q_time2', 'shutdown_elapsed_time',
-                 'hard_shutdown_initiated')
+                 'hard_shutdown_initiated', 'shutdown_start_time')
 
     def __init__(self, *,
                  requests: int,
@@ -621,6 +621,7 @@ class Throttle:
         self.logger = logging.getLogger(__name__)
         self.num_shutdown_timeouts = 0  # limit timeout log messages
         self.pauser = Pauser()
+        self.shutdown_start_time = 0.0
         self.shutdown_elapsed_time = 0.0
         # self.time_traces = []
         # self.stop_times = []
@@ -1033,6 +1034,8 @@ class Throttle:
         # We are good to go for shutdown
         ################################################################
         self._shutdown = True  # reject any new send_request calls
+        if self.shutdown_start_time == 0.0:
+            self.shutdown_start_time = time.time()
 
         # We use the shutdown lock to block us until any in progress
         # send_requests are complete
@@ -1106,7 +1109,9 @@ class Throttle:
             # indicate shutdown no longer in progress
             self.do_shutdown = Throttle.TYPE_SHUTDOWN_NONE
 
-            self.shutdown_elapsed_time = time.time() - start_time
+            if self.shutdown_elapsed_time == 0.0:
+                self.shutdown_elapsed_time = (time.time()
+                                              - self.shutdown_start_time)
             self.logger.debug('start_shutdown request successfully completed '
                               f'in {self.shutdown_elapsed_time:.4f} seconds')
 
