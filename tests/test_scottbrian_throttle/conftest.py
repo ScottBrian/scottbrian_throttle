@@ -3,7 +3,7 @@
 import threading
 import traceback
 import pytest
-from typing import Any, cast, Generator
+from typing import Any, Generator
 
 import logging
 
