@@ -677,7 +677,7 @@ class _ThrottleSync(_ThrottleBase):
 ########################################################################
 # Throttle class
 ########################################################################
-class _ThrottleEc(_ThrottleBase):
+class _ThrottleEc(_ThrottleSync):
     """Throttle class with early count algo."""
 
     __slots__ = ('early_count', '_early_arrival_count')
@@ -869,7 +869,7 @@ class _ThrottleEc(_ThrottleBase):
 ########################################################################
 # Throttle class
 ########################################################################
-class _ThrottleLb(_ThrottleBase):
+class _ThrottleLb(_ThrottleSync):
     """Throttle class with leaky bucket algo."""
 
     __slots__ = ('lb_threshold', '_next_target_time', 'lb_adjustment',

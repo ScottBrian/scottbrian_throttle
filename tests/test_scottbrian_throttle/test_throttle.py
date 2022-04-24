@@ -1133,6 +1133,114 @@ class TestThrottleDecoratorErrors:
 
 
 ########################################################################
+# TestThrottleDecoratorErrors class
+########################################################################
+class TestThrottleDecoratorRequestErrors:
+    """TestThrottleDecoratorErrors class."""
+    def test_pie_throttle_request_errors(self,
+                                         caplog: pytest.CaptureFixture[str],
+                                         thread_exc) -> None:
+        """test_throttle using request failure.
+
+        Args:
+            caplog: pytest fixture to capture log output
+            thread_exc: contains any uncaptured errors from thread
+
+        """
+        log_ver = LogVer(log_name='test_throttle')
+        alpha_call_seq = (
+            'test_throttle.py::TestThrottleDecoratorRequestErrors'
+            '.test_pie_throttle_request_errors')
+        log_ver.add_call_seq(name='alpha',
+                             seq=alpha_call_seq)
+        ################################################################
+        # sync request failure
+        ################################################################
+        log_msg = ('throttle send_request unhandled '
+                   f'exception in request: division by zero')
+        log_ver.add_msg(
+            log_name='scottbrian_throttle.throttle',
+            log_level=logging.DEBUG,
+            log_msg=log_msg)
+        with pytest.raises(ZeroDivisionError):
+            @throttle(requests=1, seconds=1, mode=Throttle.MODE_SYNC)
+            def f1() -> None:
+                ans = 42/0
+                print(f'{ans=}')
+            f1()
+
+        ################################################################
+        # async request failure
+        ################################################################
+        log_msg = ('throttle schedule_requests unhandled '
+                   f'exception in request: division by zero')
+        log_ver.add_msg(
+            log_name='scottbrian_throttle.throttle',
+            log_level=logging.DEBUG,
+            log_msg=log_msg)
+        with pytest.raises(Exception):
+            @throttle(requests=1, seconds=1, mode=Throttle.MODE_ASYNC)
+            def f1() -> None:
+                ans = 42 / 0
+                print(f'{ans=}')
+            f1()
+            f1.throttle.start_shutdown()
+            log_msg = ('start_shutdown request successfully completed '
+                       f'in {f1.throttle.shutdown_elapsed_time:.4f} '
+                       'seconds')
+            log_ver.add_msg(log_name='scottbrian_throttle.throttle',
+                            log_level=logging.DEBUG,
+                            log_msg=log_msg)
+            for actual_record in caplog.record_tuples:
+                if actual_record[0] == 'conftest':
+                    log_ver.add_msg(log_name='conftest',
+                                    log_level=logging.DEBUG,
+                                    log_msg=actual_record[2])
+
+            thread_exc.raise_exc_if_one()
+
+        ################################################################
+        # sync_ec request failure
+        ################################################################
+        log_msg = ('throttle send_request unhandled '
+                   f'exception in request: division by zero')
+        log_ver.add_msg(
+            log_name='scottbrian_throttle.throttle',
+            log_level=logging.DEBUG,
+            log_msg=log_msg)
+        with pytest.raises(ZeroDivisionError):
+            @throttle(requests=1, seconds=1,
+                      mode=Throttle.MODE_SYNC_EC,
+                      early_count=2)
+            def f1() -> None:
+                ans = 42 / 0
+                print(f'{ans=}')
+            f1()
+
+        ################################################################
+        # sync_lb request failure
+        ################################################################
+        log_msg = ('throttle send_request unhandled '
+                   f'exception in request: division by zero')
+        log_ver.add_msg(
+            log_name='scottbrian_throttle.throttle',
+            log_level=logging.DEBUG,
+            log_msg=log_msg)
+        with pytest.raises(ZeroDivisionError):
+            @throttle(requests=1, seconds=1,
+                      mode=Throttle.MODE_SYNC_LB,
+                      lb_threshold=2)
+            def f1() -> None:
+                ans = 42 / 0
+                print(f'{ans=}')
+            f1()
+
+        match_results = log_ver.get_match_results(caplog=caplog)
+        log_ver.print_match_results(match_results)
+        log_ver.verify_log_results(match_results)
+
+
+########################################################################
 # TestThrottle class
 ########################################################################
 class TestThrottle:
