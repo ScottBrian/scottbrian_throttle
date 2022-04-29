@@ -33,7 +33,7 @@ the Throttle *send_request* method instead of the throttle decorator.
 
 >>> from scottbrian_throttle.throttle import Throttle
 >>> import time
->>> @throttle(requests=1, seconds=1, mode=Throttle.MODE_SYNC)
+>>> @throttle_sync(requests=1, seconds=1)
 ... def make_request() -> None:
 ...     time.sleep(.1)  # simulate request that takes 1/10 second
 >>> start_time = time.time()
@@ -56,9 +56,8 @@ example shows the same code using the throttle decorator instead.
 
 >>> from scottbrian_throttle.throttle import Throttle
 >>> import time
->>> a_throttle = Throttle(requests=1,
-...                       seconds=1,
-...                       mode=Throttle.MODE_SYNC)
+>>> a_throttle = ThrottleSync(requests=1,
+...                           seconds=1)
 >>> def make_request() -> None:
 ...     time.sleep(.1)  # simulate request that takes 1/10 second
 >>> start_time = time.time()
@@ -84,9 +83,8 @@ the Throttle *send_request* method instead of the throttle decorator.
 >>> import time
 >>> def my_request(idx: int, *, life: str) -> None:
 ...     print(f'my_request entered with idx {idx}, and life is {life}')
->>> request_throttle = Throttle(requests=1,
-...                             seconds=1,
-...                             mode=Throttle.MODE_SYNC)
+>>> request_throttle = ThrottleSync(requests=1,
+...                                 seconds=1)
 >>> for i in range(3):
 ...     request_throttle.send_request(my_request, i, life='good')
 my_request entered with idx 0, and life is good
@@ -108,8 +106,7 @@ for 58 seconds before allowing the 21st request to proceed.
 
 >>> from scottbrian_throttle.throttle import Throttle
 >>> import time
->>> @throttle(requests=20, seconds=60, mode=Throttle.MODE_SYNC_EC,
-...           early_count=20)
+>>> @throttle_sync_ec(requests=20, seconds=60, early_count=20)
 ... def make_request():
 ...     time.sleep(.1)  # simulate request that takes 1/10 second
 >>> for i in range(21):
@@ -140,8 +137,9 @@ import queue
 import threading
 import time
 from typing import (Any, Callable, cast, Final, NamedTuple, Optional,
-                    overload, Protocol, TypeVar, Union)
+                    overload, Protocol, TYPE_CHECKING, Type, TypeVar, Union)
 from typing_extensions import TypeAlias
+
 
 ########################################################################
 # Third Party
@@ -154,10 +152,11 @@ from wrapt.decorators import decorator  # type: ignore
 ########################################################################
 
 ########################################################################
-# type aliases
+# type aliases and TypeVars
 ########################################################################
 IntFloat: TypeAlias = Union[int, float]
 OptIntFloat: TypeAlias = Optional[IntFloat]
+# T = TypeVar('T', bound=Throttle)
 
 
 ########################################################################
@@ -208,11 +207,186 @@ class IncorrectShutdownTypeSpecified(ThrottleError):
     pass
 
 
+class MissingEarlyCountSpecification(ThrottleError):
+    """Throttle exception for missing early_count specification."""
+    pass
+
+
+class MissingLbThresholdSpecification(ThrottleError):
+    """Throttle exception for missing lb_threshold specification."""
+    pass
+
+
 ########################################################################
-# Throttle class
+# get_throttle
 ########################################################################
-class Throttle(object):
-    """Throttle class object factory."""
+# def get_throttle(
+#             *,
+#             requests: int,
+#             seconds: IntFloat,
+#             mode: int,
+#             async_q_size: Optional[int] = None,
+#             early_count: Optional[int] = None,
+#             lb_threshold: OptIntFloat = None
+#             ) -> Any:
+#     """Create and return the throttle object given the input mode.
+#
+#     Args:
+#         requests: The number of requests that can be made in
+#                     the interval specified by seconds.
+#         seconds: The number of seconds in which the number of
+#                    requests specified in requests can be made.
+#         mode: Specifies one of four modes for the throttle:
+#
+#             1) **mode=Throttle.MODE_ASYNC** specifies asynchronous
+#                mode. With asynchronous throttling, each request is
+#                placed on a queue and control returns to the caller.
+#                A separate thread then executes each request at a
+#                steady interval to achieve the specified number of
+#                requests per the specified number of seconds. Since
+#                the caller is given back control, any return values
+#                from the request must be handled by an established
+#                protocol between the caller and the request, (e.g.,
+#                a callback method).
+#             2) **mode=Throttle.MODE_SYNC** specifies synchronous
+#                mode. For synchronous throttling, the caller may be
+#                blocked to delay the request in order to achieve the
+#                specified number of requests per the specified number
+#                of seconds. Since the request is handled
+#                synchronously, a return value from the request will
+#                be returned to the caller when the request completes.
+#             3) **mode=Throttle.MODE_SYNC_EC** specifies synchronous
+#                mode using an early arrival algorithm. For
+#                synchronous throttling with the early arrival
+#                algorithm, an *early_count* number of requests are
+#                sent immediately without delay before the throttling
+#                becomes active. The objective is to allow a bursts of
+#                requests while also ensuring that the average arrival
+#                rate is within the limit as specified by the
+#                *requests* and *seconds* arguments.
+#             4) **mode=Throttle.MODE_SYNC_LB** specifies synchronous
+#                mode using a leaky bucket algorithm. For synchronous
+#                throttling with the leaky bucket algorithm, some
+#                number of requests are sent immediately without delay
+#                even though they may have arrived at a quicker pace
+#                than that allowed by the requests and seconds
+#                specification. A lb_threshold specification is
+#                required when mode Throttle.MODE_SYNC_LB is
+#                specified. See the lb_threshold parameter for
+#                details.
+#         async_q_size: Specifies the size of the request
+#                         queue for async requests. When the request
+#                         queue is totally populated, any additional
+#                         calls to send_request will be delayed
+#                         until queued requests are removed and
+#                         scheduled. The default is 4096 requests.
+#         early_count: Specifies the number of requests that are
+#                        allowed to proceed immediately without delay
+#                        for **mode=Throttle.MODE_SYNC_EC**.
+#                        Note that a specification of 0 for
+#                        *early_count* will result in the same
+#                        behavior as if **mode=Throttle.MODE_SYNC**
+#                        had been specified.
+#         lb_threshold: Specifies the threshold for the leaky bucket
+#                         when Throttle.MODE_SYNC_LB is specified for
+#                         mode. This is the number of requests that
+#                         can be in the bucket such that the next
+#                         request is allowed to proceed without delay.
+#                         That request is added to the bucket, and
+#                         then the bucket leaks out the requests.
+#                         When the next request arrives, it will be
+#                         delayed by whatever amount of time is
+#                         needed for the bucket to have leaked enough
+#                         to be at the threshold. Note that a
+#                         specification of 1 for *lb_threshold* will
+#                         result in the same behavior as if
+#                         **mode=Throttle.MODE_SYNC** had been
+#                         specified.
+#
+#     .. # noqa: DAR101
+#
+#     Returns:
+#         The throttle class for the specified mode.
+#
+#     Raises:
+#         IncorrectModeSpecified: The *mode* specification must be an
+#             integer with a value of 1, 2, 3, or 4. Use
+#             Throttle.MODE_ASYNC, Throttle.MODE_SYNC,
+#             Throttle.MODE_SYNC_EC, or Throttle.MODE_SYNC_LB.
+#
+#
+#     :Example: instantiate an async throttle for 1 request per second
+#
+#     >>> from scottbrian_throttle.throttle import Throttle
+#     >>> request_throttle = ThrottleAsync(requests=1,
+#     ...                                  seconds=1)
+#
+#
+#     :Example: instantiate an async throttle for 5 requests per 1/2
+#               second with an async queue size of 256
+#
+#     >>> from scottbrian_throttle.throttle import Throttle
+#     >>> from threading import Event
+#     >>> request_throttle = ThrottleAsync(requests=5,
+#     ...                                  seconds=0.5,
+#     ...                                  async_q_size=256)
+#
+#
+#     :Example: instantiate a throttle for 20 requests per 2 minutes
+#               using the early count algorithm
+#
+#     >>> from scottbrian_throttle.throttle import Throttle
+#     >>> request_throttle = ThrottleSyncEc(requests=5,
+#     ...                                   seconds=120,
+#     ...                                   early_count=3)
+#
+#
+#     :Example: instantiate a throttle for 3 requests per second
+#               using the leaky bucket algorithm
+#
+#     >>> from scottbrian_throttle.throttle import Throttle
+#     >>> request_throttle = ThrottleSyncLb(requests=5,
+#     ...                                   seconds=120,
+#     ...                                   lb_threshold=5)
+#
+#
+#     """
+#     if mode == Throttle.MODE_SYNC:
+#         return ThrottleSync(requests=requests,
+#                             seconds=seconds)
+#     elif mode == Throttle.MODE_ASYNC:
+#         return ThrottleAsync(requests=requests,
+#                              seconds=seconds,
+#                              async_q_size=async_q_size)
+#     elif mode == Throttle.MODE_SYNC_EC:
+#         if early_count is None:
+#             raise MissingEarlyCountSpecification(
+#                 'An argument for early_count must be specified '
+#                 'for mode=Throttle.MODE_SYNC_EC.'
+#             )
+#         return ThrottleSyncEc(requests=requests,
+#                               seconds=seconds,
+#                               early_count=early_count)
+#     elif mode == Throttle.MODE_SYNC_LB:
+#         if lb_threshold is None:
+#             raise MissingLbThresholdSpecification(
+#                 'An argument for lb_threshold must be specified '
+#                 'for mode=Throttle.MODE_SYNC_LB.'
+#             )
+#         return ThrottleSyncLb(requests=requests,
+#                               seconds=seconds,
+#                               lb_threshold=lb_threshold)
+#     else:
+#         raise IncorrectModeSpecified(
+#             'The mode specification must be an '
+#             'integer with value 1, 2, 3, or 4.')
+
+
+########################################################################
+# Throttle Base class
+########################################################################
+class Throttle:
+    """Throttle base class."""
 
     MODE_ASYNC: Final[int] = 1
     MODE_SYNC: Final[int] = 2
@@ -238,165 +412,6 @@ class Throttle(object):
 
     SECS_2_NS: Final[int] = 1000000000
     NS_2_SECS: Final[float] = 0.000000001
-
-    def __new__(cls,
-                *,
-                requests: int,
-                seconds: IntFloat,
-                mode: int,
-                async_q_size: Optional[int] = None,
-                early_count: Optional[int] = None,
-                lb_threshold: OptIntFloat = None
-                ) -> Union["_ThrottleSync", "_ThrottleEc", "_ThrottleLb",
-                           "_ThrottleAsync"]:
-        """Create and return the throttle object given the input mode.
-
-        Args:
-            requests: The number of requests that can be made in
-                        the interval specified by seconds.
-            seconds: The number of seconds in which the number of
-                       requests specified in requests can be made.
-            mode: Specifies one of four modes for the throttle:
-
-                1) **mode=Throttle.MODE_ASYNC** specifies asynchronous
-                   mode. With asynchronous throttling, each request is
-                   placed on a queue and control returns to the caller.
-                   A separate thread then executes each request at a
-                   steady interval to achieve the specified number of
-                   requests per the specified number of seconds. Since
-                   the caller is given back control, any return values
-                   from the request must be handled by an established
-                   protocol between the caller and the request, (e.g.,
-                   a callback method).
-                2) **mode=Throttle.MODE_SYNC** specifies synchronous
-                   mode. For synchronous throttling, the caller may be
-                   blocked to delay the request in order to achieve the
-                   specified number of requests per the specified number
-                   of seconds. Since the request is handled
-                   synchronously, a return value from the request will
-                   be returned to the caller when the request completes.
-                3) **mode=Throttle.MODE_SYNC_EC** specifies synchronous
-                   mode using an early arrival algorithm. For
-                   synchronous throttling with the early arrival
-                   algorithm, an *early_count* number of requests are
-                   sent immediately without delay before the throttling
-                   becomes active. The objective is to allow a bursts of
-                   requests while also ensuring that the average arrival
-                   rate is within the limit as specified by the
-                   *requests* and *seconds* arguments.
-                4) **mode=Throttle.MODE_SYNC_LB** specifies synchronous
-                   mode using a leaky bucket algorithm. For synchronous
-                   throttling with the leaky bucket algorithm, some
-                   number of requests are sent immediately without delay
-                   even though they may have arrived at a quicker pace
-                   than that allowed by the requests and seconds
-                   specification. A lb_threshold specification is
-                   required when mode Throttle.MODE_SYNC_LB is
-                   specified. See the lb_threshold parameter for
-                   details.
-            async_q_size: Specifies the size of the request
-                            queue for async requests. When the request
-                            queue is totally populated, any additional
-                            calls to send_request will be delayed
-                            until queued requests are removed and
-                            scheduled. The default is 4096 requests.
-            early_count: Specifies the number of requests that are
-                           allowed to proceed immediately without delay
-                           for **mode=Throttle.MODE_SYNC_EC**.
-                           Note that a specification of 0 for the
-                           *early_count* will result in the same
-                           behavior as if **mode=Throttle.MODE_SYNC**
-                           had been chosen.
-            lb_threshold: Specifies the threshold for the leaky bucket
-                            when Throttle.MODE_SYNC_LB is specified for
-                            mode. This is the number of requests that
-                            can be in the bucket such that the next
-                            request is allowed to proceed without delay.
-                            That request is added to the bucket, and
-                            then the bucket leaks out the requests.
-                            When the next request arrives, it will be
-                            delayed by whatever amount of time is
-                            needed for the bucket to have leaked enough
-                            to be at the threshold. A specification of
-                            zero for the lb_threshold will effectively
-                            cause all requests that are early to be
-                            delayed.
-
-        .. # noqa: DAR101
-
-        Raises:
-            IncorrectModeSpecified: The *mode* specification must be an
-                integer with a value of 1, 2, 3, or 4. Use
-                Throttle.MODE_ASYNC, Throttle.MODE_SYNC,
-                Throttle.MODE_SYNC_EC, or Throttle.MODE_SYNC_LB.
-
-
-        :Example: instantiate an async throttle for 1 request per second
-
-        >>> from scottbrian_throttle.throttle import Throttle
-        >>> request_throttle = Throttle(requests=1,
-        ...                             seconds=1,
-        ...                             mode=Throttle.MODE_ASYNC)
-
-
-        :Example: instantiate an async throttle for 5 requests per 1/2
-                  second with an async queue size of 256
-
-        >>> from scottbrian_throttle.throttle import Throttle
-        >>> from threading import Event
-        >>> request_throttle = Throttle(requests=5,
-        ...                             seconds=0.5,
-        ...                             mode=Throttle.MODE_ASYNC,
-        ...                             async_q_size=256)
-
-
-        :Example: instantiate a throttle for 20 requests per 2 minutes
-                  using the early count algorithm
-
-        >>> from scottbrian_throttle.throttle import Throttle
-        >>> request_throttle = Throttle(requests=5,
-        ...                             seconds=120,
-        ...                             mode=Throttle.MODE_SYNC_EC,
-        ...                             early_count=3)
-
-
-        :Example: instantiate a throttle for 3 requests per second
-                  using the leaky bucket algorithm
-
-        >>> from scottbrian_throttle.throttle import Throttle
-        >>> request_throttle = Throttle(requests=5,
-        ...                             seconds=120,
-        ...                             mode=Throttle.MODE_SYNC_LB,
-        ...                             lb_threshold=5)
-
-
-        """
-        if mode == Throttle.MODE_SYNC:
-            return _ThrottleSync(requests=requests,
-                                 seconds=seconds)
-        elif mode == Throttle.MODE_ASYNC:
-            return _ThrottleAsync(requests=requests,
-                                  seconds=seconds,
-                                  async_q_size=async_q_size)
-        elif mode == Throttle.MODE_SYNC_EC:
-            return _ThrottleEc(requests=requests,
-                               seconds=seconds,
-                               early_count=early_count)
-        elif mode == Throttle.MODE_SYNC_LB:
-            return _ThrottleLb(requests=requests,
-                               seconds=seconds,
-                               lb_threshold=lb_threshold)
-        else:
-            raise IncorrectModeSpecified(
-                'The mode specification must be an '
-                'integer with value 1, 2, 3, or 4.')
-
-
-########################################################################
-# Throttle Base class
-########################################################################
-class _ThrottleBase:
-    """Throttle base class."""
 
     __slots__ = ('requests', 'seconds', '_target_interval',
                  '_target_interval_ns', 'sync_lock', '_arrival_time',
@@ -467,7 +482,7 @@ class _ThrottleBase:
                                            * Throttle.SECS_2_NS)
         self.sync_lock = threading.Lock()
         self._arrival_time = 0.0
-        self._next_target_time = time.perf_counter_ns()
+        self._next_target_time: float = time.perf_counter_ns()
         self.logger = logging.getLogger(__name__)
         self.pauser = Pauser()
 
@@ -546,7 +561,7 @@ class _ThrottleBase:
 ########################################################################
 # Throttle Base class
 ########################################################################
-class _ThrottleSync(_ThrottleBase):
+class ThrottleSync(Throttle):
     """Throttle class for sync mode."""
 
     ####################################################################
@@ -580,17 +595,17 @@ class _ThrottleSync(_ThrottleBase):
         :Example: instantiate a throttle for 1 requests every 2 seconds
 
          >>> from scottbrian_throttle.throttle import Throttle
-        >>> request_throttle = Throttle(requests=1,
-        ...                             seconds=2,
-        ...                             mode=Throttle.MODE_SYNC)
+        >>> request_throttle = ThrottleSync(requests=1,
+        ...                                 seconds=2)
         >>> repr(request_throttle)
-        'Throttle(requests=1, seconds=2.0, mode=Throttle.MODE_SYNC)'
+        'ThrottleSync(requests=1, seconds=2.0)'
 
         """
-        classname = 'Throttle'  # Throttle object factory is name used
+        if TYPE_CHECKING:
+            __class__: Type[ThrottleSync]
+        classname = self.__class__.__name__
         parms = (f'requests={self.requests}, '
-                 f'seconds={float(self.seconds)}, '
-                 'mode=Throttle.MODE_SYNC')
+                 f'seconds={float(self.seconds)}')
 
         return f'{classname}({parms})'
 
@@ -611,6 +626,10 @@ class _ThrottleSync(_ThrottleBase):
 
         Returns:
               The return code from the request function (may be None)
+
+        Raises:
+            Exception: An exception occurred in the request target. It
+                will be logged and re-raised.
 
         """
         ################################################################
@@ -677,7 +696,7 @@ class _ThrottleSync(_ThrottleBase):
 ########################################################################
 # Throttle class
 ########################################################################
-class _ThrottleEc(_ThrottleSync):
+class ThrottleSyncEc(ThrottleSync):
     """Throttle class with early count algo."""
 
     __slots__ = ('early_count', '_early_arrival_count')
@@ -740,18 +759,21 @@ class _ThrottleEc(_ThrottleSync):
         :Example: instantiate a throttle for 2 requests per second
 
          >>> from scottbrian_throttle.throttle import Throttle
-        >>> request_throttle = ThrottleEc(requests=30,
-        ...                               seconds=30,
-        ...                               mode=Throttle.MODE_SYNC_EC,
-        ...                               early_count=3)
+        >>> request_throttle = ThrottleSyncEc(requests=2,
+        ...                                   seconds=1,
+        ...                                   early_count=3)
         >>> repr(request_throttle)
-        'ThrottleEc(requests=2, seconds=1.0, mode=Throttle.MODE_SYNC_EC, early_count=3)'
+        'ThrottleSyncEc(requests=2, seconds=1.0, early_count=3)'
+
+
+        .. # noqa: W505, E501
 
         """
-        classname = 'Throttle'  # Throttle object factory is name used
+        if TYPE_CHECKING:
+            __class__: Type[ThrottleSyncEc]
+        classname = self.__class__.__name__
         parms = (f'requests={self.requests}, '
                  f'seconds={float(self.seconds)}, '
-                 'mode=Throttle.MODE_SYNC_EC, '
                  f'early_count={self.early_count}')
 
         return f'{classname}({parms})'
@@ -773,6 +795,11 @@ class _ThrottleEc(_ThrottleSync):
 
         Returns:
               The return code from the request function (may be None)
+
+
+        Raises:
+            Exception: An exception occurred in the request target. It
+                will be logged and re-raised.
 
         """
         ################################################################
@@ -869,7 +896,7 @@ class _ThrottleEc(_ThrottleSync):
 ########################################################################
 # Throttle class
 ########################################################################
-class _ThrottleLb(_ThrottleSync):
+class ThrottleSyncLb(ThrottleSync):
     """Throttle class with leaky bucket algo."""
 
     __slots__ = ('lb_threshold', '_next_target_time', 'lb_adjustment',
@@ -948,18 +975,21 @@ class _ThrottleLb(_ThrottleSync):
         :Example: instantiate a throttle for 20 requests per 1/2 minute
 
         >>> from scottbrian_throttle.throttle import Throttle
-        >>> request_throttle = Throttle(requests=20,
-        ...                             seconds=30,
-        ...                             mode=Throttle.MODE_SYNC_LB,
-        ...                             lb_threshold=4)
+        >>> request_throttle = ThrottleSyncLb(requests=20,
+        ...                                   seconds=30,
+        ...                                   lb_threshold=4)
         >>> repr(request_throttle)
-        'Throttle(requests=20, seconds=30.0, mode=Throttle.MODE_SYNC_LB, lb_threshold=4)'
+        'ThrottleSyncLb(requests=20, seconds=30.0, lb_threshold=4.0)'
+
+
+        .. # noqa: W505, E501
 
         """
-        classname = 'Throttle'  # Throttle object factory is name used
+        if TYPE_CHECKING:
+            __class__: Type[ThrottleSyncLb]
+        classname = self.__class__.__name__
         parms = (f'requests={self.requests}, '
                  f'seconds={float(self.seconds)}, '
-                 'mode=Throttle.MODE_SYNC_LB, '
                  f'lb_threshold={self.lb_threshold}')
 
         return f'{classname}({parms})'
@@ -981,6 +1011,10 @@ class _ThrottleLb(_ThrottleSync):
 
         Returns:
               The return value from the request function (perhaps None)
+
+        Raises:
+            Exception: An exception occurred in the request target. It
+                will be logged and re-raised.
 
         """
         ################################################################
@@ -1064,7 +1098,7 @@ class _ThrottleLb(_ThrottleSync):
 ########################################################################
 # Throttle class
 ########################################################################
-class _ThrottleAsync(_ThrottleBase):
+class ThrottleAsync(Throttle):
     """An asynchronous throttle mechanism."""
 
     __slots__ = ('async_q_size', 'shutdown_lock', '_shutdown',
@@ -1187,9 +1221,8 @@ class _ThrottleAsync(_ThrottleBase):
         >>> import time
         >>> def my_request():
         ...     pass
-        >>> request_throttle = Throttle(requests=1,
-        ...                             seconds=1,
-        ...                             mode=Throttle.MODE_ASYNC)
+        >>> request_throttle = ThrottleAsync(requests=1,
+        ...                                  seconds=1)
         >>> for i in range(3):  # quickly queue up 3 items
         ...     _ = request_throttle.send_request(my_request)
         >>> time.sleep(0.5)  # allow first request to be dequeued
@@ -1211,17 +1244,17 @@ class _ThrottleAsync(_ThrottleBase):
         :Example: instantiate a throttle for 20 requests per 1/2 minute
 
          >>> from scottbrian_throttle.throttle import Throttle
-        >>> request_throttle = Throttle(requests=30,
-        ...                             seconds=30,
-        ...                             mode=Throttle.MODE_ASYNC)
+        >>> request_throttle = ThrottleAsync(requests=30,
+        ...                                  seconds=30)
         >>> repr(request_throttle)
-        'Throttle(requests=30, seconds=30.0, async_q_size=4096)'
+        'ThrottleAsync(requests=30, seconds=30.0, async_q_size=4096)'
 
         """
-        classname = 'Throttle'  # Throttle object factory is name used
+        if TYPE_CHECKING:
+            __class__: Type[ThrottleAsync]
+        classname = self.__class__.__name__
         parms = (f'requests={self.requests}, '
                  f'seconds={float(self.seconds)}, '
-                 'mode=Throttle.MODE_ASYNC, '
                  f'async_q_size={self.async_q_size}')
 
         return f'{classname}({parms})'
@@ -1309,7 +1342,7 @@ class _ThrottleAsync(_ThrottleBase):
             try:
                 # self._check_async_q_time2 = time.perf_counter_ns()
 
-                request_item = self.async_q.get(block=True,  # type: ignore
+                request_item = self.async_q.get(block=True,
                                                 timeout=1)
 
                 self._next_target_time = (time.perf_counter_ns()
@@ -1549,15 +1582,15 @@ F = TypeVar('F', bound=Callable[..., Any])
 
 
 ########################################################################
-# FuncWithThrottleAttr class
+# FuncWithThrottleSyncAttr class
 ########################################################################
-class FuncWithThrottleAttr(Protocol[F]):
+class FuncWithThrottleSyncAttr(Protocol[F]):
     """Class to allow type checking on function with attribute."""
-    throttle: _ThrottleAsync
+    throttle: ThrottleSync
     __call__: F
 
 
-def add_throttle_attr(func: F) -> FuncWithThrottleAttr[F]:
+def add_throttle_sync_attr(func: F) -> FuncWithThrottleSyncAttr[F]:
     """Wrapper to add throttle attribute to function.
 
     Args:
@@ -1567,259 +1600,80 @@ def add_throttle_attr(func: F) -> FuncWithThrottleAttr[F]:
         input function with throttle attached as attribute
 
     """
-    func_with_throttle_attr = cast(FuncWithThrottleAttr[F], func)
-    return func_with_throttle_attr
+    return cast(FuncWithThrottleSyncAttr[F], func)
 
 
-@overload
-def throttle(wrapped: F, *,
-             requests: int,
-             seconds: IntFloat,
-             mode: int,
-             async_q_size: Optional[int] = None,
-             early_count: Optional[int] = None,
-             lb_threshold: OptIntFloat = None
-             ) -> FuncWithThrottleAttr[F]:  # F:
-    pass
+########################################################################
+# FuncWithThrottleSyncEcAttr class
+########################################################################
+class FuncWithThrottleSyncEcAttr(Protocol[F]):
+    """Class to allow type checking on function with attribute."""
+    throttle: ThrottleSyncEc
+    __call__: F
 
 
-@overload
-def throttle(*,
-             requests: int,
-             seconds: IntFloat,
-             mode: int,
-             async_q_size: Optional[int] = None,
-             early_count: Optional[int] = None,
-             lb_threshold: OptIntFloat = None
-             ) -> Callable[[F], FuncWithThrottleAttr[F]]:
-    pass
-
-
-def throttle(wrapped: Optional[F] = None, *,
-             requests: int,
-             seconds: Any,  # : IntFloat,
-             mode: int,
-             async_q_size: Optional[Any] = None,
-             early_count: Optional[Any] = None,
-             lb_threshold: Optional[Any] = None
-             ) -> Union[F, FuncWithThrottleAttr[F]]:  # F:
-    """Decorator to wrap a function in a throttle.
-
-    The throttle wraps code around a function that is typically used to
-    issue requests to an online service. Some services state a limit as
-    to how many requests can be made per some time interval (e.g., 3
-    requests per second). The throttle code ensures that the limit is
-    not exceeded.
+def add_throttle_sync_ec_attr(func: F) -> FuncWithThrottleSyncEcAttr[F]:
+    """Wrapper to add throttle attribute to function.
 
     Args:
-        wrapped: Any callable function that accepts optional positional
-                   and/or optional keyword arguments, and optionally
-                   returns a value. The default is None, which will be
-                   the case when the pie decorator version is used with
-                   any of the following arguments specified.
-        requests: The number of requests that can be made in
-                    the interval specified by seconds.
-        seconds: The number of seconds in which the number of requests
-                   specified in requests can be made.
-        mode: Specifies one of four modes for the throttle:
-
-            1) **mode=Throttle.MODE_ASYNC** specifies asynchronous mode.
-               With asynchoneous throttling,
-               each request is placed on a queue and control returns
-               to the caller. A separate thread then executes each
-               request at a steady interval to acheieve the specified
-               number of requests per the specified number of seconds.
-               Since the caller is given back control, any return
-               values from the request must be handled by an
-               established protocol between the caller and the request,
-               (e.g., a callback method).
-            2) **mode=Throttle.MODE_SYNC** specifies synchonous mode.
-               For synchronous throttling, the caller may be blocked to
-               delay the request in order to achieve the specified
-               number of requests per the specified number of seconds.
-               Since the request is handled synchronously on the same
-               thread, any return value from the request will be
-               immediately returned to the caller when the request
-               completes.
-            3) **mode=Throttle.MODE_SYNC_EC** specifies synchronous mode
-               using an early arrival algorithm.
-               For synchronous throttleing with the early
-               arrival algorithm, some number of requests are sent
-               immediatly without delay even though they may have
-               arrived at a quicker pace than that allowed by the
-               the requests and seconds specification. An early_count
-               specification is required when mode Throttle.MODE_SYNC_EC
-               is specified. See the early_count parameter for details.
-            4) **mode=Throttle.MODE_SYNC_LB** specifies synchronous mode
-               using a leaky bucket algorithm.
-               For synchronous throttleing with the leaky bucket
-               algorithm, some number of requests are sent
-               immediatly without delay even though they may have
-               arrived at a quicker pace than that allowed by the
-               the requests and seconds specification. A
-               lb_threshold specification is required when mode
-               Throttle.MODE_SYNC_LB is specified. See the
-               lb_threshold parameter for details.
-
-        async_q_size: Specifies the size of the request
-                        queue for async requests. When the request
-                        queue is totaly populated, any additional
-                        calls to send_request will be delayed
-                        until queued requests are removed and
-                        scheduled. The default is 4096 requests.
-        early_count: Specifies the number of requests that are allowed
-                       to proceed that arrive earlier than the
-                       allowed interval. The count of early requests
-                       is incremented, and when it exceeds the
-                       early_count, the request will be delayed to
-                       align it with its expected arrival time. Any
-                       request that arrives at or beyond the
-                       allowed interval will cause the count to be
-                       reset (included the request that was delayed
-                       since it will now be sent at the allowed
-                       interval). A specification of zero for the
-                       *early_count* will effectively cause all requests
-                       that are early to be delayed.
-        lb_threshold: Specifies the threshold for the leaky bucket when
-                        Throttle.MODE_SYNC_LB is specified for mode.
-                        This is the number of requests that can be in
-                        the bucket such that the next request is allowed
-                        to proceed without delay. That request is
-                        added to the bucket, and then the bucket leaks
-                        out the requests. When the next request arrives,
-                        it will be delayed by whatever amount of time is
-                        needed for the bucket to have leaked enough to
-                        be at the threshold. A specification of zero for
-                        the *lb_threshold* will effectively cause all
-                        requests that are early to be delayed.
-
-    .. # noqa: DAR101
+        func: function that has the attribute added
 
     Returns:
-        A callable function that, for mode Throttle.MODE_ASYNC, queues
-        the request to be scheduled in accordance with the specified
-        limits, or, for all other modes, delays the request as needed in
-        accordance with the specified limits.
-
-        :Example: wrap a function with an async throttle for 1 request
-                  per second
-
-        >>> from scottbrian_throttle.throttle import Throttle
-        >>> @throttle(requests=1, seconds=1, mode=Throttle.MODE_ASYNC)
-        ... def f1() -> None:
-        ...     print('example 1 request function')
-
-
-        :Example: wrap a function with a throttle for 20 requests per 2
-                  minutes using the early count algo
-
-        >>> from scottbrian_throttle.throttle import Throttle
-        >>> @throttle(requests=5,
-        ...           seconds=120,
-        ...           mode=Throttle.MODE_SYNC_EC,
-        ...           early_count=3)
-        ... def f3(b=3) -> int:
-        ...     print(f'example 3 request function with arg {b}')
-        ...     return b * 5
-
-
-        :Example: wrap a function with a throttle for 3 requests per
-                  second using the leaky bucket algo
-
-        >>> from scottbrian_throttle.throttle import Throttle
-        >>> @throttle(requests=5,
-        ...           seconds=120,
-        ...           mode=Throttle.MODE_SYNC_LB,
-        ...           lb_threshold=5)
-        ... def f4(a, *, b=4) -> int:
-        ...     print(f'example request function with args {a} and {b}')
-        ...     return b * 7
-
+        input function with throttle attached as attribute
 
     """
-    # ==================================================================
-    #  The following code covers cases where throttle is used with or
-    #  without the pie character, where the decorated function has or
-    #  does not have parameters.
-    #
-    #     Here's an example of throttle with a function that has no
-    #         args:
-    #         @throttle(requests=1, seconds=1, mode=Throttle.MODE_SYNC)
-    #         def aFunc():
-    #             print('42')
-    #
-    #     This is what essentially happens under the covers:
-    #         def aFunc():
-    #             print('42')
-    #         aFunc = throttle(requests=1,
-    #                          seconds=1,
-    #                          mode=Throttle.MODE_SYNC)(aFunc)
-    #
-    #     The call to throttle results in a function being returned that
-    #     takes as its first argument the aFunc specification that we
-    #     see in parens immediately following the throttle call.
-    #
-    #     Note that we can also code the above as shown and get the same
-    #     result.
-    #
-    #     Also, we can code the following and get the same result:
-    #         def aFunc():
-    #             print('42')
-    #         aFunc = throttle(aFunc,
-    #                          requests=1,
-    #                          seconds=1,
-    #                          mode=Throttle.MODE_SYNC)
-    #
-    #     What happens is throttle gets control and tests whether aFunc
-    #     was specified, and if not returns a call to functools.partial
-    #     which is the function that accepts the aFunc
-    #     specification and then calls throttle with aFunc as the first
-    #     argument with the other args for requests, seconds, and mode).
-    #
-    #     One other complication is that we are also using the
-    #     wrapt.decorator for the inner wrapper function which does some
-    #     more smoke and mirrors to ensure introspection will work as
-    #     expected.
-    # ==================================================================
+    return cast(FuncWithThrottleSyncEcAttr[F], func)
 
-    if wrapped is None:
-        return cast(FuncWithThrottleAttr[F],
-                    functools.partial(throttle,
-                                      requests=requests,
-                                      seconds=seconds,
-                                      mode=mode,
-                                      async_q_size=async_q_size,
-                                      early_count=early_count,
-                                      lb_threshold=lb_threshold))
 
-    a_throttle = Throttle(requests=requests,
-                          seconds=seconds,
-                          mode=mode,
-                          async_q_size=async_q_size,
-                          early_count=early_count,
-                          lb_threshold=lb_threshold)
+########################################################################
+# FuncWithThrottleSyncLbAttr class
+########################################################################
+class FuncWithThrottleSyncLbAttr(Protocol[F]):
+    """Class to allow type checking on function with attribute."""
+    throttle: ThrottleSyncLb
+    __call__: F
 
-    @decorator  # type: ignore
-    def wrapper(func_to_wrap: F, instance: Optional[Any],
-                args: tuple[Any, ...],
-                kwargs2: dict[str, Any]) -> Any:
 
-        ret_value = a_throttle.send_request(func_to_wrap, *args, **kwargs2)
-        return ret_value
+def add_throttle_sync_lb_attr(func: F) -> FuncWithThrottleSyncLbAttr[F]:
+    """Wrapper to add throttle attribute to function.
 
-    wrapper = wrapper(wrapped)
+    Args:
+        func: function that has the attribute added
 
-    wrapper = add_throttle_attr(wrapper)
-    wrapper.throttle = a_throttle
+    Returns:
+        input function with throttle attached as attribute
 
-    return cast(FuncWithThrottleAttr[F], wrapper)
+    """
+    return cast(FuncWithThrottleSyncLbAttr[F], func)
+
+
+########################################################################
+# FuncWithThrottleAsyncAttr class
+########################################################################
+class FuncWithThrottleAsyncAttr(Protocol[F]):
+    """Class to allow type checking on function with attribute."""
+    throttle: ThrottleAsync
+    __call__: F
+
+
+def add_throttle_async_attr(func: F) -> FuncWithThrottleAsyncAttr[F]:
+    """Wrapper to add throttle attribute to function.
+
+    Args:
+        func: function that has the attribute added
+
+    Returns:
+        input function with throttle attached as attribute
+
+    """
+    return cast(FuncWithThrottleAsyncAttr[F], func)
 
 
 ########################################################################
 # shutdown_throttle_funcs
 ########################################################################
 def shutdown_throttle_funcs(
-        *args: FuncWithThrottleAttr[Callable[..., Any]],
+        *args: FuncWithThrottleAsyncAttr[Callable[..., Any]],
         # *args: FuncWithThrottleAttr[Protocol[F]],
         shutdown_type: int = Throttle.TYPE_SHUTDOWN_SOFT,
         timeout: OptIntFloat = None
@@ -1901,3 +1755,574 @@ def shutdown_throttle_funcs(
 
     # if we are here then all shutdowns are complete
     return True
+
+
+########################################################################
+# @throttle_sync
+########################################################################
+@overload
+def throttle_sync(wrapped: F, *,
+                  requests: int,
+                  seconds: IntFloat
+                  ) -> FuncWithThrottleSyncAttr[F]:
+    pass
+
+
+@overload
+def throttle_sync(*,
+                  requests: int,
+                  seconds: IntFloat
+                  ) -> Callable[[F], FuncWithThrottleSyncAttr[F]]:
+    pass
+
+
+def throttle_sync(wrapped: Optional[F] = None, *,
+                  requests: int,
+                  seconds: Any
+                  ) -> Union[F, FuncWithThrottleSyncAttr[F]]:
+    """Decorator to wrap a function in a sync throttle.
+
+    The throttle wraps code around a function that is typically used to
+    issue requests to an online service. Some services state a limit as
+    to how many requests can be made per some time interval (e.g., 3
+    requests per second). The throttle code ensures that the limit is
+    not exceeded.
+
+    Args:
+        wrapped: Any callable function that accepts optional positional
+                   and/or optional keyword arguments, and optionally
+                   returns a value. The default is None, which will be
+                   the case when the pie decorator version is used with
+                   any of the following arguments specified.
+        requests: The number of requests that can be made in
+                    the interval specified by seconds.
+        seconds: The number of seconds in which the number of requests
+                   specified in requests can be made.
+
+    Returns:
+        A callable function that, for mode Throttle.MODE_ASYNC, queues
+        the request to be scheduled in accordance with the specified
+        limits, or, for all other modes, delays the request as needed in
+        accordance with the specified limits.
+
+    :Example: wrap a function with an async throttle for 1 request
+                  per second
+
+    >>> from scottbrian_throttle.throttle import Throttle
+    >>> @throttle_sync(requests=1, seconds=1)
+    ... def f1() -> None:
+    ...     print('example 1 request function')
+
+
+    """
+    # ==================================================================
+    #  The following code covers cases where throttle is used with or
+    #  without the pie character, where the decorated function has or
+    #  does not have parameters.
+    #
+    #     Here's an example of throttle with a function that has no
+    #         args:
+    #         @throttle(requests=1, seconds=1, mode=Throttle.MODE_SYNC)
+    #         def aFunc():
+    #             print('42')
+    #
+    #     This is what essentially happens under the covers:
+    #         def aFunc():
+    #             print('42')
+    #         aFunc = throttle(requests=1,
+    #                          seconds=1,
+    #                          mode=Throttle.MODE_SYNC)(aFunc)
+    #
+    #     The call to throttle results in a function being returned that
+    #     takes as its first argument the aFunc specification that we
+    #     see in parens immediately following the throttle call.
+    #
+    #     Note that we can also code the above as shown and get the same
+    #     result.
+    #
+    #     Also, we can code the following and get the same result:
+    #         def aFunc():
+    #             print('42')
+    #         aFunc = throttle(aFunc,
+    #                          requests=1,
+    #                          seconds=1,
+    #                          mode=Throttle.MODE_SYNC)
+    #
+    #     What happens is throttle gets control and tests whether aFunc
+    #     was specified, and if not returns a call to functools.partial
+    #     which is the function that accepts the aFunc
+    #     specification and then calls throttle with aFunc as the first
+    #     argument with the other args for requests, seconds, and mode).
+    #
+    #     One other complication is that we are also using the
+    #     wrapt.decorator for the inner wrapper function which does some
+    #     more smoke and mirrors to ensure introspection will work as
+    #     expected.
+    # ==================================================================
+
+    if wrapped is None:
+        return cast(FuncWithThrottleSyncAttr[F],
+                    functools.partial(throttle_sync,
+                                      requests=requests,
+                                      seconds=seconds))
+
+    a_throttle_sync = ThrottleSync(requests=requests,
+                                   seconds=seconds)
+
+    @decorator  # type: ignore
+    def wrapper(func_to_wrap: F, instance: Optional[Any],
+                args: tuple[Any, ...],
+                kwargs2: dict[str, Any]) -> Any:
+
+        return a_throttle_sync.send_request(func_to_wrap,
+                                            *args,
+                                            **kwargs2)
+
+    wrapper = wrapper(wrapped)
+
+    wrapper = add_throttle_sync_attr(wrapper)
+    wrapper.throttle = a_throttle_sync
+
+    return cast(FuncWithThrottleSyncAttr[F], wrapper)
+
+
+########################################################################
+# @throttle_sync_ec
+########################################################################
+@overload
+def throttle_sync_ec(wrapped: F, *,
+                     requests: int,
+                     seconds: IntFloat,
+                     early_count: int
+                     ) -> FuncWithThrottleSyncEcAttr[F]:
+    pass
+
+
+@overload
+def throttle_sync_ec(*,
+                     requests: int,
+                     seconds: IntFloat,
+                     early_count: int
+                     ) -> Callable[[F], FuncWithThrottleSyncEcAttr[F]]:
+    pass
+
+
+def throttle_sync_ec(wrapped: Optional[F] = None, *,
+                     requests: int,
+                     seconds: Any,  # : IntFloat,
+                     early_count: int
+                     ) -> Union[F, FuncWithThrottleSyncEcAttr[F]]:
+    """Decorator to wrap a function in a sync ec throttle.
+
+    The throttle wraps code around a function that is typically used to
+    issue requests to an online service. Some services state a limit as
+    to how many requests can be made per some time interval (e.g., 3
+    requests per second). The throttle code ensures that the limit is
+    not exceeded.
+
+    Args:
+        wrapped: Any callable function that accepts optional positional
+                   and/or optional keyword arguments, and optionally
+                   returns a value. The default is None, which will be
+                   the case when the pie decorator version is used with
+                   any of the following arguments specified.
+        requests: The number of requests that can be made in
+                    the interval specified by seconds.
+        seconds: The number of seconds in which the number of requests
+                   specified in requests can be made.
+        early_count: Specifies the number of requests that are allowed
+                       to proceed that arrive earlier than the
+                       allowed interval. The count of early requests
+                       is incremented, and when it exceeds the
+                       early_count, the request will be delayed to
+                       align it with its expected arrival time. Any
+                       request that arrives at or beyond the
+                       allowed interval will cause the count to be
+                       reset (included the request that was delayed
+                       since it will now be sent at the allowed
+                       interval). A specification of zero for the
+                       *early_count* will effectively cause all requests
+                       that are early to be delayed.
+
+    Returns:
+        A callable function that, for mode Throttle.MODE_SYNC_EC, queues
+        the request to be scheduled in accordance with the specified
+        limits, or, for all other modes, delays the request as needed in
+        accordance with the specified limits.
+
+
+    :Example: wrap a function with a throttle for 20 requests per 2
+              minutes using the early count algo
+
+    >>> from scottbrian_throttle.throttle import Throttle
+    >>> @throttle_sync_ec(requests=5,
+    ...                   seconds=120,
+    ...                   early_count=3)
+    ... def f3(b=3) -> int:
+    ...     print(f'example 3 request function with arg {b}')
+    ...     return b * 5
+
+
+    """
+    # ==================================================================
+    #  The following code covers cases where throttle is used with or
+    #  without the pie character, where the decorated function has or
+    #  does not have parameters.
+    #
+    #     Here's an example of throttle with a function that has no
+    #         args:
+    #         @throttle(requests=1, seconds=1, mode=Throttle.MODE_SYNC)
+    #         def aFunc():
+    #             print('42')
+    #
+    #     This is what essentially happens under the covers:
+    #         def aFunc():
+    #             print('42')
+    #         aFunc = throttle(requests=1,
+    #                          seconds=1,
+    #                          mode=Throttle.MODE_SYNC)(aFunc)
+    #
+    #     The call to throttle results in a function being returned that
+    #     takes as its first argument the aFunc specification that we
+    #     see in parens immediately following the throttle call.
+    #
+    #     Note that we can also code the above as shown and get the same
+    #     result.
+    #
+    #     Also, we can code the following and get the same result:
+    #         def aFunc():
+    #             print('42')
+    #         aFunc = throttle(aFunc,
+    #                          requests=1,
+    #                          seconds=1,
+    #                          mode=Throttle.MODE_SYNC)
+    #
+    #     What happens is throttle gets control and tests whether aFunc
+    #     was specified, and if not returns a call to functools.partial
+    #     which is the function that accepts the aFunc
+    #     specification and then calls throttle with aFunc as the first
+    #     argument with the other args for requests, seconds, and mode).
+    #
+    #     One other complication is that we are also using the
+    #     wrapt.decorator for the inner wrapper function which does some
+    #     more smoke and mirrors to ensure introspection will work as
+    #     expected.
+    # ==================================================================
+
+    if wrapped is None:
+        return cast(FuncWithThrottleSyncEcAttr[F],
+                    functools.partial(throttle_sync_ec,
+                                      requests=requests,
+                                      seconds=seconds,
+                                      early_count=early_count))
+
+    a_throttle_sync_ec = ThrottleSyncEc(requests=requests,
+                                        seconds=seconds,
+                                        early_count=early_count)
+
+    @decorator  # type: ignore
+    def wrapper(func_to_wrap: F, instance: Optional[Any],
+                args: tuple[Any, ...],
+                kwargs2: dict[str, Any]) -> Any:
+
+        return a_throttle_sync_ec.send_request(func_to_wrap,
+                                               *args,
+                                               **kwargs2)
+
+    wrapper = wrapper(wrapped)
+
+    wrapper = add_throttle_sync_ec_attr(wrapper)
+    wrapper.throttle = a_throttle_sync_ec
+
+    return cast(FuncWithThrottleSyncEcAttr[F], wrapper)
+
+
+########################################################################
+# @throttle_sync_lb
+########################################################################
+@overload
+def throttle_sync_lb(wrapped: F, *,
+                     requests: int,
+                     seconds: IntFloat,
+                     lb_threshold: float
+                     ) -> FuncWithThrottleSyncLbAttr[F]:
+    pass
+
+
+@overload
+def throttle_sync_lb(*,
+                     requests: int,
+                     seconds: IntFloat,
+                     lb_threshold: float
+                     ) -> Callable[[F], FuncWithThrottleSyncLbAttr[F]]:
+    pass
+
+
+def throttle_sync_lb(wrapped: Optional[F] = None, *,
+                     requests: int,
+                     seconds: Any,  # : IntFloat,
+                     lb_threshold: float
+                     ) -> Union[F, FuncWithThrottleSyncLbAttr[F]]:
+    """Decorator to wrap a function in a sync lb throttle.
+
+    The throttle wraps code around a function that is typically used to
+    issue requests to an online service. Some services state a limit as
+    to how many requests can be made per some time interval (e.g., 3
+    requests per second). The throttle code ensures that the limit is
+    not exceeded.
+
+    Args:
+        wrapped: Any callable function that accepts optional positional
+                   and/or optional keyword arguments, and optionally
+                   returns a value. The default is None, which will be
+                   the case when the pie decorator version is used with
+                   any of the following arguments specified.
+        requests: The number of requests that can be made in
+                    the interval specified by seconds.
+        seconds: The number of seconds in which the number of requests
+                   specified in requests can be made.
+        lb_threshold: Specifies the threshold for the leaky bucket when
+                        Throttle.MODE_SYNC_LB is specified for mode.
+                        This is the number of requests that can be in
+                        the bucket such that the next request is allowed
+                        to proceed without delay. That request is
+                        added to the bucket, and then the bucket leaks
+                        out the requests. When the next request arrives,
+                        it will be delayed by whatever amount of time is
+                        needed for the bucket to have leaked enough to
+                        be at the threshold. A specification of zero for
+                        the *lb_threshold* will effectively cause all
+                        requests that are early to be delayed.
+
+    Returns:
+        A callable function that, for mode Throttle.MODE_ASYNC, queues
+        the request to be scheduled in accordance with the specified
+        limits, or, for all other modes, delays the request as needed in
+        accordance with the specified limits.
+
+
+    :Example: wrap a function with a throttle for 3 requests per
+              second using the leaky bucket algo
+
+    >>> from scottbrian_throttle.throttle import Throttle
+    >>> @throttle_sync_lb(requests=5,
+    ...                   seconds=120,
+    ...                   lb_threshold=5)
+    ... def f4(a, *, b=4) -> int:
+    ...     print(f'example request function with args {a} and {b}')
+    ...     return b * 7
+
+
+    """
+    # ==================================================================
+    #  The following code covers cases where throttle is used with or
+    #  without the pie character, where the decorated function has or
+    #  does not have parameters.
+    #
+    #     Here's an example of throttle with a function that has no
+    #         args:
+    #         @throttle(requests=1, seconds=1, mode=Throttle.MODE_SYNC)
+    #         def aFunc():
+    #             print('42')
+    #
+    #     This is what essentially happens under the covers:
+    #         def aFunc():
+    #             print('42')
+    #         aFunc = throttle(requests=1,
+    #                          seconds=1,
+    #                          mode=Throttle.MODE_SYNC)(aFunc)
+    #
+    #     The call to throttle results in a function being returned that
+    #     takes as its first argument the aFunc specification that we
+    #     see in parens immediately following the throttle call.
+    #
+    #     Note that we can also code the above as shown and get the same
+    #     result.
+    #
+    #     Also, we can code the following and get the same result:
+    #         def aFunc():
+    #             print('42')
+    #         aFunc = throttle(aFunc,
+    #                          requests=1,
+    #                          seconds=1,
+    #                          mode=Throttle.MODE_SYNC)
+    #
+    #     What happens is throttle gets control and tests whether aFunc
+    #     was specified, and if not returns a call to functools.partial
+    #     which is the function that accepts the aFunc
+    #     specification and then calls throttle with aFunc as the first
+    #     argument with the other args for requests, seconds, and mode).
+    #
+    #     One other complication is that we are also using the
+    #     wrapt.decorator for the inner wrapper function which does some
+    #     more smoke and mirrors to ensure introspection will work as
+    #     expected.
+    # ==================================================================
+
+    if wrapped is None:
+        return cast(FuncWithThrottleSyncLbAttr[F],
+                    functools.partial(throttle_sync_lb,
+                                      requests=requests,
+                                      seconds=seconds,
+                                      lb_threshold=lb_threshold))
+
+    a_throttle_sync_lb = ThrottleSyncLb(requests=requests,
+                                        seconds=seconds,
+                                        lb_threshold=lb_threshold)
+
+    @decorator  # type: ignore
+    def wrapper(func_to_wrap: F, instance: Optional[Any],
+                args: tuple[Any, ...],
+                kwargs2: dict[str, Any]) -> Any:
+
+        return a_throttle_sync_lb.send_request(func_to_wrap,
+                                               *args,
+                                               **kwargs2)
+
+    wrapper = wrapper(wrapped)
+
+    wrapper = add_throttle_sync_lb_attr(wrapper)
+    wrapper.throttle = a_throttle_sync_lb
+
+    return cast(FuncWithThrottleSyncLbAttr[F], wrapper)
+
+
+########################################################################
+# @throttle_async
+########################################################################
+@overload
+def throttle_async(wrapped: F, *,
+                   requests: int,
+                   seconds: IntFloat,
+                   async_q_size: Optional[Any] = None
+                   ) -> FuncWithThrottleAsyncAttr[F]:
+    pass
+
+
+@overload
+def throttle_async(*,
+                   requests: int,
+                   seconds: IntFloat,
+                   async_q_size: Optional[Any] = None
+                   ) -> Callable[[F], FuncWithThrottleAsyncAttr[F]]:
+    pass
+
+
+def throttle_async(wrapped: Optional[F] = None, *,
+                   requests: int,
+                   seconds: Any,  # : IntFloat,
+                   async_q_size: Optional[Any] = None
+                   ) -> Union[F, FuncWithThrottleAsyncAttr[F]]:
+    """Decorator to wrap a function in an async throttle.
+
+    The throttle wraps code around a function that is typically used to
+    issue requests to an online service. Some services state a limit as
+    to how many requests can be made per some time interval (e.g., 3
+    requests per second). The throttle code ensures that the limit is
+    not exceeded.
+
+    Args:
+        wrapped: Any callable function that accepts optional positional
+                   and/or optional keyword arguments, and optionally
+                   returns a value. The default is None, which will be
+                   the case when the pie decorator version is used with
+                   any of the following arguments specified.
+        requests: The number of requests that can be made in
+                    the interval specified by seconds.
+        seconds: The number of seconds in which the number of requests
+                   specified in requests can be made.
+        async_q_size: Specifies the size of the request
+                        queue for async requests. When the request
+                        queue is totaly populated, any additional
+                        calls to send_request will be delayed
+                        until queued requests are removed and
+                        scheduled. The default is 4096 requests.
+
+    Returns:
+        A callable function that, for mode Throttle.MODE_ASYNC, queues
+        the request to be scheduled in accordance with the specified
+        limits, or, for all other modes, delays the request as needed in
+        accordance with the specified limits.
+
+
+    :Example: wrap a function with an async throttle for 1 request
+                  per second
+
+    >>> from scottbrian_throttle.throttle import Throttle
+    >>> @throttle_async(requests=1, seconds=1)
+    ... def f1() -> None:
+    ...     print('example 1 request function')
+
+
+    """
+    # ==================================================================
+    #  The following code covers cases where throttle is used with or
+    #  without the pie character, where the decorated function has or
+    #  does not have parameters.
+    #
+    #     Here's an example of throttle with a function that has no
+    #         args:
+    #         @throttle(requests=1, seconds=1, mode=Throttle.MODE_SYNC)
+    #         def aFunc():
+    #             print('42')
+    #
+    #     This is what essentially happens under the covers:
+    #         def aFunc():
+    #             print('42')
+    #         aFunc = throttle(requests=1,
+    #                          seconds=1,
+    #                          mode=Throttle.MODE_SYNC)(aFunc)
+    #
+    #     The call to throttle results in a function being returned that
+    #     takes as its first argument the aFunc specification that we
+    #     see in parens immediately following the throttle call.
+    #
+    #     Note that we can also code the above as shown and get the same
+    #     result.
+    #
+    #     Also, we can code the following and get the same result:
+    #         def aFunc():
+    #             print('42')
+    #         aFunc = throttle(aFunc,
+    #                          requests=1,
+    #                          seconds=1,
+    #                          mode=Throttle.MODE_SYNC)
+    #
+    #     What happens is throttle gets control and tests whether aFunc
+    #     was specified, and if not returns a call to functools.partial
+    #     which is the function that accepts the aFunc
+    #     specification and then calls throttle with aFunc as the first
+    #     argument with the other args for requests, seconds, and mode).
+    #
+    #     One other complication is that we are also using the
+    #     wrapt.decorator for the inner wrapper function which does some
+    #     more smoke and mirrors to ensure introspection will work as
+    #     expected.
+    # ==================================================================
+
+    if wrapped is None:
+        return cast(FuncWithThrottleAsyncAttr[F],
+                    functools.partial(throttle_async,
+                                      requests=requests,
+                                      seconds=seconds,
+                                      async_q_size=async_q_size))
+
+    a_throttle_async = ThrottleAsync(requests=requests,
+                                     seconds=seconds,
+                                     async_q_size=async_q_size)
+
+    @decorator  # type: ignore
+    def wrapper(func_to_wrap: F, instance: Optional[Any],
+                args: tuple[Any, ...],
+                kwargs2: dict[str, Any]) -> Any:
+
+        return a_throttle_async.send_request(func_to_wrap,
+                                             *args,
+                                             **kwargs2)
+
+    wrapper = wrapper(wrapped)
+
+    wrapper = add_throttle_async_attr(wrapper)
+    wrapper.throttle = a_throttle_async
+
+    return cast(FuncWithThrottleAsyncAttr[F], wrapper)

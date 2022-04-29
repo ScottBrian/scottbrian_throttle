@@ -49,9 +49,9 @@ throttle behavior:
 In the following code, make_request will be called 10 times in rapid succession. The first request will be sent
 immediately, and the remaining requests will each be delayed by 1/2 second.
 
->>> from scottbrian_throttle.throttle import Throttle, throttle
+>>> from scottbrian_throttle.throttle import throttle_sync
 >>> import time
->>> @throttle(requests=2, seconds=1, mode=Throttle.MODE_SYNC)
+>>> @throttle_sync(requests=2, seconds=1)
 ... def make_request(request_number, time_of_start):
 ...     print(f'request {request_number} sent at elapsed time: {time.time() - time_of_start:0.1f}')
 >>> start_time = time.time()
