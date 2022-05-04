@@ -4,49 +4,204 @@
 Throttle
 ========
 
-You can use the Throttle class or the @throttle decorator to limit the
-execution rate of a method as specified by the *requests* and
-*seconds* arguments. One example method where this is useful is one that
-makes requests to a server that has a limit, such as "no more than one
-request per second".
+The throttle allows you to limit the rate at which a function is
+executed. This is helpful to avoid exceeding a limit, such as when
+sending requests to an internet service that specifies a limit as to the
+number of requests that can be sent in a specific time interval.
 
-The @throttle decorator wraps a method that will ensure that the method
-executes within the specified limit. The @throttle keeps track of the
-time for each request and will delay as needed to stay within the
-limit.
+The throttle package include four different algorithms for the limiting
+control, each provided as a decorator or as a class:
 
-The Throttle class provides the same service to allow the use of the
-throttle where a decorator is not the optimal choice.
+  1. **@throttle_sync** decorator and **ThrottleSync** class provide a
+     synchronous algorithm.
 
-Following are examples of using both the @throttle decorator and the
-Throttle class methods.
+       For synchronous throttling, you specify the *requests* and
+       *seconds* which determine the send rate limit. The throttle
+       keeps track of the intervals between each request and will block
+       only as needed to ensure the send rate limit is not exceeded.
+       This algorithm provides a strict adherence to the send rate limit
+       for those cases that need it.
 
-:Example: use @throttle decorator for a limit of one request per second
+  2. **@throttle_sync_ec** decorator and **ThrottleSyncEc** class
+     provide an early arrival algorithm.
 
-In the example code below, the @throttle decorator code will allow the
-first request to proceed immediately. Each subsequent call will be
-delayed to ensure that the limit is not exceeded. Thus, of the 10 calls,
-9 calls will be delayed for 1 second each, and the make_request
-function sleeps for 1/10 second, resulting is a total elapsed time of
-9.1 seconds. The next example after this will show the same code using
-the Throttle *send_request* method instead of the throttle decorator.
+       For synchronous throttling with the early arrival algorithm, you
+       specify the *requests* and *seconds* which determine the send
+       rate limit. You also specify an *early_count*, the number of
+       requests the throttle will send immediately without delay. Once
+       the *early_count* is reached, the throttle kicks in and, if
+       needed, delays the next request by a cumulative amount that
+       reflects the current request and the requests that were sent
+       early. This will ensure that the average send rate for all
+       requests stay within the send rate limit. This algorithm is best
+       used when you have a steady stream of requests within the send
+       rate limit, and an occasional burst of requests that the target
+       service will tolerate.
 
->>> from scottbrian_throttle.throttle import Throttle
+  3. **@throttle_sync_lb** decorator and **ThrottleSyncLb** class
+     provide a leaky bucket algorithm.
+
+       For synchronous throttling with the leaky bucket algorithm, you
+       specify the *requests* and *seconds* which determine the send
+       rate limit. You also specify an *lb_threshold* value, the number
+       of requests that will fit into a conceptual bucket. As each
+       request is received, if it fits, it is placed into the bucket and
+       is sent. The bucket leaks at a fixed rate that reflects the send
+       rate limit such such that each new request will fit given it does
+       not exceed the send rate limit. If the bucket becomes full, the
+       next request will be delayed until the bucket has leaked enough
+       to hold it, at which time it will be sent. Unlike the early count
+       algorithm, the leaky bucket algorithm results in an average send
+       rate that slightly exceeds the send rate limit. This algorithm is
+       best used when you have a steady stream of requests within the
+       send rate limit, and an occasional burst of requests that the
+       target service will tolerate.
+
+  4. **@throttle_async** decorator and **ThrottleAsync** class provide
+     an asynchronous algorithm.
+
+       With asynchronous throttling, you specify the *requests* and
+       *seconds* which determine the send rate limit. As each request is
+       received, it is placed on a queue and control returns to the
+       caller. A separate request schedular thread pulls the requests
+       from the queue and sends them at a steady interval to achieve the
+       specified send rate limit. You may also specify an *async_q_size*
+       that determines the number of requests that can build up on the
+       queue before the caller is blocked while trying to add requests.
+       This algorithm provides a strict adherence to the send rate limit
+       without having the delay the user (unless the queue become full).
+       This is best used when you have a steady stream of requests
+       within the send rate limit, and an occasional burst of requests
+       that you do not want to be delayed for. It has an added
+       responsibility that you need to perform a shutdown of the
+       throttle when your program ends to ensure that request schedular
+       thread is properly ended.
+
+
+:Example: 1) Wrapping a function with the **@throttle_sync** decorator
+
+Here we are using the **@throttle_sync** decorator to wrap a function
+that needs to be limited to no more than 2 executions per second. In the
+following code, make_request will be called 10 times in rapid
+succession. The **@throttle_sync** keeps track of the time for each
+invocation and will insert a wait as needed to stay within the limit.
+The first execution of make_request will be done immediately while the
+remaining executions will each be delayed by 1/2 second as seen in the
+output messages.
+
+>>> from scottbrian_throttle.throttle import throttle_sync
 >>> import time
->>> @throttle_sync(requests=1, seconds=1)
-... def make_request() -> None:
-...     time.sleep(.1)  # simulate request that takes 1/10 second
+>>> @throttle_sync(requests=2, seconds=1)
+... def make_request(request_number, time_of_start):
+...     print(f'request {request_number} sent at elapsed time: '
+...           f'{time.time() - time_of_start:0.1f}')
 >>> start_time = time.time()
 >>> for i in range(10):
-...     make_request()
->>> elapsed_time = time.time() - start_time
->>> print (f'total time for 10 requests: {elapsed_time:0.1f} seconds')
-total time for 10 requests: 9.1 seconds
+...     make_request(i, start_time)
+request 0 sent at elapsed time: 0.0
+request 1 sent at elapsed time: 0.5
+request 2 sent at elapsed time: 1.0
+request 3 sent at elapsed time: 1.5
+request 4 sent at elapsed time: 2.0
+request 5 sent at elapsed time: 2.5
+request 6 sent at elapsed time: 3.0
+request 7 sent at elapsed time: 3.5
+request 8 sent at elapsed time: 4.0
+request 9 sent at elapsed time: 4.5
 
 
-:Example: use Throttle methods for a limit of one request per second
+:Example: 2) Using the **ThrottleSync** class
 
-In the example code below, my_request is passed to the throttle via the
+Here's the same example using the **ThrottleSync** class. Note that the
+loop now calls send_request, passing in the make_request function and
+its arguments:
+
+>>> from scottbrian_throttle.throttle import ThrottleSync
+>>> import time
+>>> def make_request(request_number, time_of_start):
+...     print(f'request {request_number} sent at elapsed time: '
+...           f'{time.time() - time_of_start:0.1f}')
+>>> a_throttle = ThrottleSync(requests=2, seconds=1)
+>>> start_time = time.time()
+>>> for i in range(10):
+...     a_throttle.send_request(make_request, i, start_time)
+request 0 sent at elapsed time: 0.0
+request 1 sent at elapsed time: 0.5
+request 2 sent at elapsed time: 1.0
+request 3 sent at elapsed time: 1.5
+request 4 sent at elapsed time: 2.0
+request 5 sent at elapsed time: 2.5
+request 6 sent at elapsed time: 3.0
+request 7 sent at elapsed time: 3.5
+request 8 sent at elapsed time: 4.0
+request 9 sent at elapsed time: 4.5
+
+
+
+:Example: 3) Wrapping a function with the **@throttle_sync_ec**
+  decorator
+
+Here we continue with the same example, only this time using the
+**@throttle_sync_ec** decorator to see how its algorithm in action.
+We will use the same *requests* of 2 and *seconds* of 1, and an
+*early_count* of 2. The make_request function will again be called 10
+times in rapid succession. The **@throttle_sync_ec** will allow the
+first request to proceed immediately. The next two requests are cconsidered
+early, so they will be allowed to proceed as well. The third request
+will be delayed to allow the throttle to catch up to where we should be,
+and then the process will repeat with some requests going early
+followed by a catch-up delay. We can see this behavior in the messages
+that show the intervals.
+
+>>> from scottbrian_throttle.throttle import throttle_sync_ec
+>>> import time
+>>> @throttle_sync_ec(requests=2, seconds=1, early_count=2)
+... def make_request(request_number, time_of_start):
+...     print(f'request {request_number} sent at elapsed time: '
+...           f'{time.time() - time_of_start:0.1f}')
+>>> start_time = time.time()
+>>> for i in range(10):
+...     make_request(i, start_time)
+request 0 sent at elapsed time: 0.0
+request 1 sent at elapsed time: 0.0
+request 2 sent at elapsed time: 0.0
+request 3 sent at elapsed time: 1.5
+request 4 sent at elapsed time: 1.5
+request 5 sent at elapsed time: 1.5
+request 6 sent at elapsed time: 3.0
+request 7 sent at elapsed time: 3.0
+request 8 sent at elapsed time: 3.0
+request 9 sent at elapsed time: 4.5
+
+
+:Example: Using the **ThrottleSyncEc** class
+
+Here's the same early count example using the **ThrottleSyncEc** class:
+
+>>> from scottbrian_throttle.throttle import ThrottleSyncEc
+>>> import time
+>>> def make_request(request_number, time_of_start):
+...     print(f'request {request_number} sent at elapsed time: '
+...           f'{time.time() - time_of_start:0.1f}')
+>>> a_throttle = ThrottleSyncEc(requests=2, seconds=1, early_count=2)
+>>> start_time = time.time()
+>>> for i in range(10):
+...     a_throttle.send_request(make_request, i, start_time)
+request 0 sent at elapsed time: 0.0
+request 1 sent at elapsed time: 0.0
+request 2 sent at elapsed time: 0.0
+request 3 sent at elapsed time: 1.5
+request 4 sent at elapsed time: 1.5
+request 5 sent at elapsed time: 1.5
+request 6 sent at elapsed time: 3.0
+request 7 sent at elapsed time: 3.0
+request 8 sent at elapsed time: 3.0
+request 9 sent at elapsed time: 4.5
+
+:Example: an example
+
+In the example code below, my_request is passed to the
+throttle via the
 *send_request* method. The throttle will allow the first request to
 proceed immediately. Each subsequent call will be delayed to ensure that
 the limit is not exceeded. Thus, of the 10 calls, 9 calls will be
@@ -388,12 +543,6 @@ class MissingLbThresholdSpecification(ThrottleError):
 class Throttle:
     """Throttle base class."""
 
-    MODE_ASYNC: Final[int] = 1
-    MODE_SYNC: Final[int] = 2
-    MODE_SYNC_EC: Final[int] = 3
-    MODE_SYNC_LB: Final[int] = 4
-    MODE_MAX: Final[int] = MODE_SYNC_LB
-
     DEFAULT_ASYNC_Q_SIZE: Final[int] = 4096
 
     TYPE_SHUTDOWN_NONE: Final[int] = 0
@@ -485,6 +634,89 @@ class Throttle:
         self._next_target_time: float = time.perf_counter_ns()
         self.logger = logging.getLogger(__name__)
         self.pauser = Pauser()
+
+    ####################################################################
+    # send_request
+    ####################################################################
+    def send_request(self,
+                     func: Callable[..., Any],
+                     *args: Any,
+                     **kwargs: Any
+                     ) -> Any:
+        """Send the request.
+
+        Args:
+            func: the request function to be run
+            args: the request function positional arguments
+            kwargs: the request function keyword arguments
+
+        Returns:
+              The return code from the request function (may be None)
+
+        Raises:
+            Exception: An exception occurred in the request target. It
+                will be logged and re-raised.
+
+        """
+        ################################################################
+        # SYNC_MODE
+        ################################################################
+        ################################################################
+        # The SYNC_MODE Throttle algorithm works as follows:
+        # 1) during throttle instantiation:
+        #    a) a target interval is calculated as seconds/requests.
+        #       For example, with a specification of 4 requests per 1
+        #       second, the target interval will be 0.25 seconds.
+        #    b) _next_target_time is set to a current time reference via
+        #       time.perf_counter_ns
+        # 2) as each request arrives, it is checked against the
+        #    _next_target_time and:
+        #    a) if it arrived at or after _next_target_time, it is
+        #       allowed to proceed without delay
+        #    b) if it arrived before the _next_target_time the request
+        #       is delayed until _next_target_time is reached
+        # 3) _next_target_time is increased by the target_interval
+        #
+        ################################################################
+        with self.sync_lock:
+            # set the time that this request is being made
+            self._arrival_time = time.perf_counter_ns()
+
+            if self._arrival_time < self._next_target_time:
+                wait_time = (self._next_target_time
+                             - self._arrival_time) * Throttle.NS_2_SECS
+                self.pauser.pause(wait_time)
+
+            ############################################################
+            # Update the expected arrival time for the next request by
+            # adding the request interval to our current time or the
+            # next arrival time, whichever is later. Note that we update
+            # the target time before we send the request which means we
+            # face a possible scenario where we send a request that gets
+            # delayed en route to the service, but out next request
+            # arrives at the updated expected arrival time and is sent
+            # out immediately, but it now arrives early relative to the
+            # previous request, as observed by the service. If we update
+            # the target time after sending the request we avoid that
+            # scenario, but we would then be adding in the request
+            # processing time to the throttle delay with the undesirable
+            # effect that all requests will now be throttled more than
+            # they need to be.
+            ############################################################
+            self._next_target_time = (time.perf_counter_ns()
+                                      + self._target_interval_ns)
+
+            ############################################################
+            # Call the request function and return with the request
+            # return value. We use try/except to log and re-raise any
+            # unhandled errors.
+            ############################################################
+            try:
+                return func(*args, **kwargs)
+            except Exception as e:
+                self.logger.debug('throttle send_request unhandled '
+                                  f'exception in request: {e}')
+                raise
 
     ####################################################################
     # get_interval
@@ -1124,7 +1356,7 @@ class ThrottleAsync(Throttle):
                        requests specified in requests can be made.
             async_q_size: Specifies the size of the request
                             queue for async requests. When the request
-                            queue is totaly populated, any additional
+                            queue is totally populated, any additional
                             calls to send_request will be delayed
                             until queued requests are removed and
                             scheduled. The default is 4096 requests.
@@ -1229,6 +1461,8 @@ class ThrottleAsync(Throttle):
         >>> print(len(request_throttle))
         2
 
+        >>> request_throttle.start_shutdown()
+
         """
         return self.async_q.qsize()
 
@@ -1246,8 +1480,11 @@ class ThrottleAsync(Throttle):
          >>> from scottbrian_throttle.throttle import Throttle
         >>> request_throttle = ThrottleAsync(requests=30,
         ...                                  seconds=30)
+        ...
         >>> repr(request_throttle)
         'ThrottleAsync(requests=30, seconds=30.0, async_q_size=4096)'
+
+        >>> request_throttle.start_shutdown()
 
         """
         if TYPE_CHECKING:
@@ -1275,7 +1512,7 @@ class ThrottleAsync(Throttle):
             kwargs: the request function keyword arguments
 
         Returns:
-            * ``Throttle.RC_OK'' (0) request scheduled
+            * ``Throttle.RC_OK`` (0) request scheduled
             * ``Throttle.RC_SHUTDOWN`` (4) - the request was rejected
               because the throttle was shut down.
 
@@ -1667,94 +1904,6 @@ def add_throttle_async_attr(func: F) -> FuncWithThrottleAsyncAttr[F]:
 
     """
     return cast(FuncWithThrottleAsyncAttr[F], func)
-
-
-########################################################################
-# shutdown_throttle_funcs
-########################################################################
-def shutdown_throttle_funcs(
-        *args: FuncWithThrottleAsyncAttr[Callable[..., Any]],
-        # *args: FuncWithThrottleAttr[Protocol[F]],
-        shutdown_type: int = Throttle.TYPE_SHUTDOWN_SOFT,
-        timeout: OptIntFloat = None
-                            ) -> bool:
-    """Shutdown the throttle request scheduling for decorated functions.
-
-    The shutdown_throttle_funcs function is used to shutdown one or more
-    function that were decorated with the throttle. The arguments apply
-    to each of the functions that are specified to be shutdown. If
-    timeout is specified, then True is returned iff all functions
-    shutdown within the timeout number of second specified.
-
-    Args:
-        args: one or more functions to be shutdown
-        shutdown_type: specifies whether to do a soft or a hard
-                         shutdown:
-
-                         * A soft shutdown
-                           (Throttle.TYPE_SHUTDOWN_SOFT), the default,
-                           stops any additional requests from being
-                           queued and cleans up the request queue by
-                           scheduling any remaining requests at the
-                           normal interval as calculated by the seconds
-                           and requests that were specified during
-                           instantiation.
-                         * A hard shutdown (Throttle.TYPE_SHUTDOWN_HARD)
-                           stops any additional requests from being
-                           queued and cleans up the request queue by
-                           quickly removing any remaining requests
-                           without executing them.
-        timeout: number of seconds to allow for shutdown to complete for
-                   all functions specified to be shutdown.
-                   Note that a *timeout* of zero or less is equivalent
-                   to a *timeout* of None, meaning start_shutdown will
-                   return when the shutdown is complete without a
-                   timeout.
-
-    .. # noqa: DAR101
-
-    Returns:
-        * ``True`` if *timeout* was not specified, or if it was
-          specified and all of the specified functions completed
-          shutdown within the specified number of seconds.
-        * ``False`` if *timeout* was specified and at least one of the
-          functions specified to shutdown did not complete within the
-          specified number of seconds.
-
-    """
-    start_time = time.time()  # start the clock
-    ####################################################################
-    # get all shutdowns started
-    ####################################################################
-    for func in args:
-        func.throttle.start_shutdown(
-            shutdown_type=shutdown_type,
-            timeout=0.01)
-
-    ####################################################################
-    # check each shutdown
-    # Note that if timeout was not specified, then we simply call
-    # shutdown for each func and hope that each one eventually
-    # completes. If timeout was specified, then we will call each
-    # shutdown with whatever timeout time remains and bail on the first
-    # timeout we get.
-    ####################################################################
-    if timeout is None or timeout <= 0:
-        for func in args:
-            func.throttle.start_shutdown(shutdown_type=shutdown_type)
-    else:  # timeout specified and is a non-zero positive value
-        for func in args:
-            # use min to ensure non-zero positive timeout value
-            if not func.throttle.start_shutdown(
-                    shutdown_type=shutdown_type,
-                    timeout=max(0.01, start_time + timeout - time.time())):
-                func.throttle.logger.debug('timeout of '
-                                           'shutdown_throttle_funcs '
-                                           f'with timeout={timeout}')
-                return False  # we timed out
-
-    # if we are here then all shutdowns are complete
-    return True
 
 
 ########################################################################
@@ -2194,7 +2343,7 @@ def throttle_sync_lb(wrapped: Optional[F] = None, *,
 def throttle_async(wrapped: F, *,
                    requests: int,
                    seconds: IntFloat,
-                   async_q_size: Optional[Any] = None
+                   async_q_size: Optional[int] = None
                    ) -> FuncWithThrottleAsyncAttr[F]:
     pass
 
@@ -2203,7 +2352,7 @@ def throttle_async(wrapped: F, *,
 def throttle_async(*,
                    requests: int,
                    seconds: IntFloat,
-                   async_q_size: Optional[Any] = None
+                   async_q_size: Optional[int] = None
                    ) -> Callable[[F], FuncWithThrottleAsyncAttr[F]]:
     pass
 
@@ -2211,7 +2360,7 @@ def throttle_async(*,
 def throttle_async(wrapped: Optional[F] = None, *,
                    requests: int,
                    seconds: Any,  # : IntFloat,
-                   async_q_size: Optional[Any] = None
+                   async_q_size: Optional[int] = None
                    ) -> Union[F, FuncWithThrottleAsyncAttr[F]]:
     """Decorator to wrap a function in an async throttle.
 
@@ -2252,6 +2401,7 @@ def throttle_async(wrapped: Optional[F] = None, *,
     >>> @throttle_async(requests=1, seconds=1)
     ... def f1() -> None:
     ...     print('example 1 request function')
+    >>> shutdown_throttle_funcs(f1)
 
 
     """
@@ -2326,3 +2476,91 @@ def throttle_async(wrapped: Optional[F] = None, *,
     wrapper.throttle = a_throttle_async
 
     return cast(FuncWithThrottleAsyncAttr[F], wrapper)
+
+
+########################################################################
+# shutdown_throttle_funcs
+########################################################################
+def shutdown_throttle_funcs(
+        *args: FuncWithThrottleAsyncAttr[Callable[..., Any]],
+        # *args: FuncWithThrottleAttr[Protocol[F]],
+        shutdown_type: int = Throttle.TYPE_SHUTDOWN_SOFT,
+        timeout: OptIntFloat = None
+                            ) -> bool:
+    """Shutdown the throttle request scheduling for decorated functions.
+
+    The shutdown_throttle_funcs function is used to shutdown one or more
+    function that were decorated with the throttle. The arguments apply
+    to each of the functions that are specified to be shutdown. If
+    timeout is specified, then True is returned iff all functions
+    shutdown within the timeout number of second specified.
+
+    Args:
+        args: one or more functions to be shutdown
+        shutdown_type: specifies whether to do a soft or a hard
+                         shutdown:
+
+                         * A soft shutdown
+                           (Throttle.TYPE_SHUTDOWN_SOFT), the default,
+                           stops any additional requests from being
+                           queued and cleans up the request queue by
+                           scheduling any remaining requests at the
+                           normal interval as calculated by the seconds
+                           and requests that were specified during
+                           instantiation.
+                         * A hard shutdown (Throttle.TYPE_SHUTDOWN_HARD)
+                           stops any additional requests from being
+                           queued and cleans up the request queue by
+                           quickly removing any remaining requests
+                           without executing them.
+        timeout: number of seconds to allow for shutdown to complete for
+                   all functions specified to be shutdown.
+                   Note that a *timeout* of zero or less is equivalent
+                   to a *timeout* of None, meaning start_shutdown will
+                   return when the shutdown is complete without a
+                   timeout.
+
+    .. # noqa: DAR101
+
+    Returns:
+        * ``True`` if *timeout* was not specified, or if it was
+          specified and all of the specified functions completed
+          shutdown within the specified number of seconds.
+        * ``False`` if *timeout* was specified and at least one of the
+          functions specified to shutdown did not complete within the
+          specified number of seconds.
+
+    """
+    start_time = time.time()  # start the clock
+    ####################################################################
+    # get all shutdowns started
+    ####################################################################
+    for func in args:
+        func.throttle.start_shutdown(
+            shutdown_type=shutdown_type,
+            timeout=0.01)
+
+    ####################################################################
+    # check each shutdown
+    # Note that if timeout was not specified, then we simply call
+    # shutdown for each func and hope that each one eventually
+    # completes. If timeout was specified, then we will call each
+    # shutdown with whatever timeout time remains and bail on the first
+    # timeout we get.
+    ####################################################################
+    if timeout is None or timeout <= 0:
+        for func in args:
+            func.throttle.start_shutdown(shutdown_type=shutdown_type)
+    else:  # timeout specified and is a non-zero positive value
+        for func in args:
+            # use min to ensure non-zero positive timeout value
+            if not func.throttle.start_shutdown(
+                    shutdown_type=shutdown_type,
+                    timeout=max(0.01, start_time + timeout - time.time())):
+                func.throttle.logger.debug('timeout of '
+                                           'shutdown_throttle_funcs '
+                                           f'with timeout={timeout}')
+                return False  # we timed out
+
+    # if we are here then all shutdowns are complete
+    return True

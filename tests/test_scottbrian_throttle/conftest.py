@@ -121,6 +121,10 @@ def thread_exc(monkeypatch: Any) -> Generator[ExcHook, None, None]:
     new_hook = threading.excepthook
 
     yield exc_hook
+
+    # the following check ensures that the test case waited via join for
+    # any started threads to come home
+    assert threading.active_count() == 1
     exc_hook.raise_exc_if_one()
 
     # the following assert ensures -p no:threadexception was specified
