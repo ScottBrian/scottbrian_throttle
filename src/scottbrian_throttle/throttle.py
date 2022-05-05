@@ -112,9 +112,9 @@ request 9 sent at elapsed time: 4.5
 
 :Example: 2) Using the **ThrottleSync** class
 
-Here's the same example using the **ThrottleSync** class. Note that the
-loop now calls send_request, passing in the make_request function and
-its arguments:
+Here's the same example from above, but instead of the decorator we use
+the **ThrottleSync** class. Note that the loop now calls send_request,
+passing in the make_request function and its arguments:
 
 >>> from scottbrian_throttle.throttle import ThrottleSync
 >>> import time
@@ -146,12 +146,12 @@ Here we continue with the same example, only this time using the
 We will use the same *requests* of 2 and *seconds* of 1, and an
 *early_count* of 2. The make_request function will again be called 10
 times in rapid succession. The **@throttle_sync_ec** will allow the
-first request to proceed immediately. The next two requests are cconsidered
-early, so they will be allowed to proceed as well. The third request
-will be delayed to allow the throttle to catch up to where we should be,
-and then the process will repeat with some requests going early
-followed by a catch-up delay. We can see this behavior in the messages
-that show the intervals.
+first request to proceed immediately. The next two requests are
+considered early, so they will be allowed to proceed as well. The third
+request will be delayed to allow the throttle to catch up to where we
+should be, and then the process will repeat with some requests going
+early followed by a catch-up delay. We can see this behavior in the
+messages that show the intervals.
 
 >>> from scottbrian_throttle.throttle import throttle_sync_ec
 >>> import time
@@ -174,9 +174,9 @@ request 8 sent at elapsed time: 3.0
 request 9 sent at elapsed time: 4.5
 
 
-:Example: Using the **ThrottleSyncEc** class
+:Example: 4) Using the **ThrottleSyncEc** class
 
-Here's the same early count example using the **ThrottleSyncEc** class:
+Here we show the early count with the **ThrottleSyncEc** class:
 
 >>> from scottbrian_throttle.throttle import ThrottleSyncEc
 >>> import time
@@ -198,83 +198,135 @@ request 7 sent at elapsed time: 3.0
 request 8 sent at elapsed time: 3.0
 request 9 sent at elapsed time: 4.5
 
-:Example: an example
 
-In the example code below, my_request is passed to the
-throttle via the
-*send_request* method. The throttle will allow the first request to
-proceed immediately. Each subsequent call will be delayed to ensure that
-the limit is not exceeded. Thus, of the 10 calls, 9 calls will be
-delayed for 1 second each, and the make_request function sleeps for 1/10
-second, resulting is a total elapsed time of 9.1 seconds. The previous
-example shows the same code using the throttle decorator instead.
+:Example: 5) Wrapping a function with the **@throttle_sync_lb**
+decorator
 
->>> from scottbrian_throttle.throttle import Throttle
+We now take the early count example from above and switch in the leaky
+bucket algorithm instead. We will use the *requests* of 2,  *seconds* of
+1, and *lb_threshold* of 3. The make_request function will again be
+called 10 times in rapid succession. The **@throttle_sync_lb** will
+be able to fit the first three requests into the bucket and send them
+immediately. The fourth request will not fit into the bucket which now
+causes the throttle to delay to allow the bucket to leak out one of the
+requests. After the delay, the fourth request is placed into the bucket
+and sent, follwed immediately by the fifth and sunsequent requests, each
+of which are delayed to allow the bucket to accomodate them. We can see
+this behavior in the messages that show the intervals.
+
+>>> from scottbrian_throttle.throttle import throttle_sync_lb
 >>> import time
->>> a_throttle = ThrottleSync(requests=1,
-...                           seconds=1)
->>> def make_request() -> None:
-...     time.sleep(.1)  # simulate request that takes 1/10 second
+>>> @throttle_sync_lb(requests=2, seconds=1, lb_threshold=3)
+... def make_request(request_number, time_of_start):
+...     print(f'request {request_number} sent at elapsed time: '
+...           f'{time.time() - time_of_start:0.1f}')
 >>> start_time = time.time()
 >>> for i in range(10):
-...     a_throttle.send_request(make_request)
->>> elapsed_time = time.time() - start_time
->>> print (f'total time for 10 requests: {elapsed_time:0.1f} seconds')
-total time for 10 requests: 9.1 seconds
+...     make_request(i, start_time)
+request 0 sent at elapsed time: 0.0
+request 1 sent at elapsed time: 0.0
+request 2 sent at elapsed time: 0.0
+request 3 sent at elapsed time: 0.5
+request 4 sent at elapsed time: 1.0
+request 5 sent at elapsed time: 1.5
+request 6 sent at elapsed time: 2.0
+request 7 sent at elapsed time: 2.5
+request 8 sent at elapsed time: 3.0
+request 9 sent at elapsed time: 3.5
 
 
-:Example: use Throttle methods for a limit of one request per second
+:Example: 6) Using the **ThrottleSyncLb** class
 
-In the example code below, my_request is passed to the throttle via the
-*send_request* method. The throttle will allow the first request to
-proceed immediately. Each subsequent call will be delayed to ensure that
-the limit is not exceeded. Thus, of the 10 calls, 9 calls will be
-delayed for 1 second each, and the make_request function sleeps for 1/10
-second, resulting is a total elapsed time of 9.1 seconds. The previous
-example shows the same code using the throttle decorator instead.
-the Throttle *send_request* method instead of the throttle decorator.
+Here we show the leaky bucket example using the **ThrottleSyncLb**
+class:
 
->>> from scottbrian_throttle.throttle import Throttle
+>>> from scottbrian_throttle.throttle import ThrottleSyncLb
 >>> import time
->>> def my_request(idx: int, *, life: str) -> None:
-...     print(f'my_request entered with idx {idx}, and life is {life}')
->>> request_throttle = ThrottleSync(requests=1,
-...                                 seconds=1)
->>> for i in range(3):
-...     request_throttle.send_request(my_request, i, life='good')
-my_request entered with idx 0, and life is good
-my_request entered with idx 1, and life is good
-my_request entered with idx 2, and life is good
+>>> def make_request(request_number, time_of_start):
+...     print(f'request {request_number} sent at elapsed time: '
+...           f'{time.time() - time_of_start:0.1f}')
+>>> a_throttle = ThrottleSyncLb(requests=2, seconds=1, lb_threshold=3)
+>>> start_time = time.time()
+>>> for i in range(10):
+...     a_throttle.send_request(make_request, i, start_time)
+request 0 sent at elapsed time: 0.0
+request 1 sent at elapsed time: 0.0
+request 2 sent at elapsed time: 0.0
+request 3 sent at elapsed time: 0.5
+request 4 sent at elapsed time: 1.0
+request 5 sent at elapsed time: 1.5
+request 6 sent at elapsed time: 2.0
+request 7 sent at elapsed time: 2.5
+request 8 sent at elapsed time: 3.0
+request 9 sent at elapsed time: 3.5
 
 
+:Example: 7) Wrapping a function with the **@throttle_async** decorator
 
-Example: use @throttle decorator for a limit of 20 requests per minute
-         with the early count algorithm
+We now continue with the same setup from above, only now we are using
+the **@throttle_async** decorator.  We will again specify *requests* of
+2 and *seconds* of 1. The make_request function will be called 10
+times in rapid succession. The **@throttle_aync_lb** will queue the
+requests to the request queue and the schedule_request method running
+under a separate thread will dequeue and execute them at the send rate
+interval determined by the requests and seconds arguments (in this case,
+1/2 second). This will have similar behavior to the throttle_sync
+algorithm, except that the request are executed from a separate thread.
 
-In this example, we are allowing up to 20 requests per minute. In this
-case the @throttle decorator code will allow the first 20 requests to go
-through without waiting. When the 21st request is made, the @throttle
-code will wait to ensure we remain within the limit. More specifically,
-with each request being made approximately every .1 seconds, the first
-20 requests took approximately 2 seconds. Thus, @throttle code will wait
-for 58 seconds before allowing the 21st request to proceed.
-
->>> from scottbrian_throttle.throttle import Throttle
+>>> from scottbrian_throttle.throttle import throttle_async
 >>> import time
->>> @throttle_sync_ec(requests=20, seconds=60, early_count=20)
-... def make_request():
-...     time.sleep(.1)  # simulate request that takes 1/10 second
->>> for i in range(21):
-...     make_request()
+>>> @throttle_async(requests=2, seconds=1)
+... def make_request(request_number, time_of_start):
+...     results.append(f'request {request_number} sent at elapsed time: '
+...                    f'{time.time() - time_of_start:0.1f}')
+>>> results = []
+>>> start_time = time.time()
+>>> for i in range(10):
+...     _ = make_request(i, start_time)
+>>> shutdown_throttle_funcs(make_request)
+>>> for line in results:
+...     print(line)
+request 0 sent at elapsed time: 0.0
+request 1 sent at elapsed time: 0.5
+request 2 sent at elapsed time: 1.0
+request 3 sent at elapsed time: 1.5
+request 4 sent at elapsed time: 2.0
+request 5 sent at elapsed time: 2.5
+request 6 sent at elapsed time: 3.0
+request 7 sent at elapsed time: 3.5
+request 8 sent at elapsed time: 4.0
+request 9 sent at elapsed time: 4.5
 
 
-As can be seen with the above example, we were able to allow a burst of
-20 requests and still remain within the limit (i.e., if the service in
-stating no more than 20 requests per minutes is OK with getting a burst
-of 20 each minute). Uing mode Throttle.MODE_ASYNC or Throttle.MODE_SYNC
-without the early count algorithm will simply delay the requests by a
-uniform 3 seconds each to ensure we remain with the 60 second limit for
-20 requests.
+:Example: 8) Using the **ThrottleSyncAsync** class
+
+Here we continue with the same setup, only now using the
+**ThrottleSyncAsync** class:
+
+>>> from scottbrian_throttle.throttle import ThrottleAsync
+>>> import time
+>>> def make_request(request_number, time_of_start):
+...     results.append(f'request {request_number} sent at elapsed time: '
+...                    f'{time.time() - time_of_start:0.1f}')
+>>> a_throttle = ThrottleAsync(requests=2, seconds=1)
+>>> results = []
+>>> start_time = time.time()
+>>> for i in range(10):
+...     _ = a_throttle.send_request(make_request, i, start_time)
+>>> _ = a_throttle.start_shutdown()
+>>> for line in results:
+...     print(line)
+request 0 sent at elapsed time: 0.0
+request 1 sent at elapsed time: 0.5
+request 2 sent at elapsed time: 1.0
+request 3 sent at elapsed time: 1.5
+request 4 sent at elapsed time: 2.0
+request 5 sent at elapsed time: 2.5
+request 6 sent at elapsed time: 3.0
+request 7 sent at elapsed time: 3.5
+request 8 sent at elapsed time: 4.0
+request 9 sent at elapsed time: 4.5
+
 
 The throttle module contains:
 
