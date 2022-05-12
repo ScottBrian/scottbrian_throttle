@@ -200,7 +200,7 @@ request 9 sent at elapsed time: 4.5
 
 
 :Example: 5) Wrapping a function with the **@throttle_sync_lb**
-decorator
+             decorator
 
 We now take the early count example from above and switch in the leaky
 bucket algorithm instead. We will use the *requests* of 2,  *seconds* of
@@ -277,8 +277,8 @@ algorithm, except that the request are executed from a separate thread.
 >>> import time
 >>> @throttle_async(requests=2, seconds=1)
 ... def make_request(request_number, time_of_start):
-...     results.append(f'request {request_number} sent at elapsed time: '
-...                    f'{time.time() - time_of_start:0.1f}')
+...     results.append(f'request {request_number} sent at elapsed time:'
+...                    f' {time.time() - time_of_start:0.1f}')
 >>> results = []
 >>> start_time = time.time()
 >>> for i in range(10):
@@ -306,8 +306,8 @@ Here we continue with the same setup, only now using the
 >>> from scottbrian_throttle.throttle import ThrottleAsync
 >>> import time
 >>> def make_request(request_number, time_of_start):
-...     results.append(f'request {request_number} sent at elapsed time: '
-...                    f'{time.time() - time_of_start:0.1f}')
+...     results.append(f'request {request_number} sent at elapsed time:'
+...                    f' {time.time() - time_of_start:0.1f}')
 >>> a_throttle = ThrottleAsync(requests=2, seconds=1)
 >>> results = []
 >>> start_time = time.time()

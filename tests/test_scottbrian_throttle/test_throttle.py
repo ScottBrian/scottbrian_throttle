@@ -5,12 +5,14 @@
 ########################################################################
 from dataclasses import dataclass
 from enum import auto, Flag
+import inspect
 from itertools import accumulate
 import logging
 import math
 import random
 import re
 import statistics as stats
+import sys
 import threading
 import time
 from time import perf_counter_ns
@@ -54,7 +56,12 @@ from scottbrian_throttle.throttle import (
 IntFloat: TypeAlias = Union[int, float]
 OptIntFloat: TypeAlias = Optional[IntFloat]
 
+########################################################################
+# set up logging
+########################################################################
 logger = logging.getLogger(__name__)
+
+test_log_name: str = __name__
 
 
 ########################################################################
@@ -732,6 +739,39 @@ class TestThrottleBasic:
     """Test basic functions of Throttle."""
 
     ####################################################################
+    # test_throttle_correct_source
+    ####################################################################
+    def test_throttle_correct_source(self) -> None:
+        """Test timer correct source."""
+        print('\nmainline entered')
+        print(f'{inspect.getsourcefile(Throttle)=}')
+        if sys.version_info.minor == 9:
+            exp1 = (
+                'C:\\Users\\Tiger\\PycharmProjects\\scottbrian_throttle\\.tox'
+                '\\py39-pytest\\lib\\site-packages\\scottbrian_throttle'
+                '\\throttle.py')
+            exp2 = (
+                'C:\\Users\\Tiger\\PycharmProjects\\scottbrian_throttle\\.tox'
+                '\\py39-coverage\\lib\\site-packages\\scottbrian_throttle'
+                '\\throttle.py')
+        elif sys.version_info.minor == 10:
+            exp1 = (
+                'C:\\Users\\Tiger\\PycharmProjects\\scottbrian_throttle\\.tox'
+                '\\py310-pytest\\lib\\site-packages\\scottbrian_throttle'
+                '\\throttle.py')
+            exp2 = (
+                'C:\\Users\\Tiger\\PycharmProjects\\scottbrian_throttle\\.tox'
+                '\\py310-coverage\\lib\\site-packages\\scottbrian_throttle'
+                '\\throttle.py')
+        else:
+            exp1 = ''
+            exp2 = ''
+
+        actual = inspect.getsourcefile(Throttle)
+        assert (actual == exp1) or (actual == exp2)
+        print('mainline exiting')
+
+    ####################################################################
     # len checks
     ####################################################################
     def test_throttle_len_async(self,
@@ -1049,7 +1089,7 @@ class TestThrottleDecoratorRequestErrors:
             thread_exc: contains any uncaptured errors from thread
 
         """
-        log_ver = LogVer(log_name='test_throttle')
+        log_ver = LogVer(log_name=test_log_name)
         alpha_call_seq = (
             'test_throttle.py::TestThrottleDecoratorRequestErrors'
             '.test_pie_throttle_request_errors')
@@ -1103,8 +1143,8 @@ class TestThrottleDecoratorRequestErrors:
             # expected log records. This will allow this test case to
             # succeed.
             for actual_record in caplog.record_tuples:
-                if actual_record[0] == 'conftest':
-                    log_ver.add_msg(log_name='conftest',
+                if 'conftest' in actual_record[0]:
+                    log_ver.add_msg(log_name=actual_record[0],
                                     log_level=logging.DEBUG,
                                     log_msg=re.escape(actual_record[2]))
 
@@ -3206,7 +3246,7 @@ class TestThrottleShutdown:
         sleep_delay_arg = 0.0001
         num_reqs_to_make = 100000
 
-        log_ver = LogVer(log_name='test_throttle')
+        log_ver = LogVer(log_name=test_log_name)
         alpha_call_seq = ('test_throttle.py::TestThrottleShutdown'
                           '.test_throttle_hard_shutdown_timeout')
         log_ver.add_call_seq(name='alpha',
@@ -3283,8 +3323,7 @@ class TestThrottleShutdown:
 
             log_msg = ('all requests added, elapsed time = '
                        f'{time.time() - start_time} seconds')
-            log_ver.add_msg(log_name='test_throttle',
-                            log_level=logging.DEBUG,
+            log_ver.add_msg(log_level=logging.DEBUG,
                             log_msg=log_msg)
             logger.debug(log_msg)
 
@@ -3292,8 +3331,7 @@ class TestThrottleShutdown:
 
             sleep_time = sleep_seconds - (time.time() - start_time)
             log_msg = f'about to sleep for {sleep_time=}'
-            log_ver.add_msg(log_name='test_throttle',
-                            log_level=logging.DEBUG,
+            log_ver.add_msg(log_level=logging.DEBUG,
                             log_msg=log_msg)
             logger.debug(log_msg)
             time.sleep(sleep_time)
@@ -3313,8 +3351,7 @@ class TestThrottleShutdown:
                     exp_ret_code = True
 
                 log_msg = f'about to shutdown with {timeout=}'
-                log_ver.add_msg(log_name='test_throttle',
-                                log_level=logging.DEBUG,
+                log_ver.add_msg(log_level=logging.DEBUG,
                                 log_msg=log_msg)
                 logger.debug(log_msg)
 
@@ -3349,8 +3386,7 @@ class TestThrottleShutdown:
             log_msg = (f'shutdown complete with {ret_code=}, '
                        f'{a_req_time.num_reqs} reqs done, '
                        f'{elapsed_time=:.4f} seconds')
-            log_ver.add_msg(log_name='test_throttle',
-                            log_level=logging.DEBUG,
+            log_ver.add_msg(log_level=logging.DEBUG,
                             log_msg=log_msg)
             logger.debug(log_msg)
 
@@ -3402,7 +3438,7 @@ class TestThrottleShutdown:
         seconds_arg = 0.3
         num_reqs_to_make = 100
 
-        log_ver = LogVer(log_name='test_throttle')
+        log_ver = LogVer(log_name=test_log_name)
         alpha_call_seq = ('test_throttle.py::TestThrottleShutdown'
                           '.test_throttle_soft_shutdown_timeout')
         log_ver.add_call_seq(name='alpha',
@@ -3492,8 +3528,7 @@ class TestThrottleShutdown:
 
             log_msg = ('all requests added, elapsed time = '
                        f'{time.time() - start_time} seconds')
-            log_ver.add_msg(log_name='test_throttle',
-                            log_level=logging.DEBUG,
+            log_ver.add_msg(log_level=logging.DEBUG,
                             log_msg=log_msg)
             logger.debug(log_msg)
 
@@ -3502,8 +3537,7 @@ class TestThrottleShutdown:
             while True:
                 sleep_time = sleep_seconds - (time.time() - a_req_time.f_time)
                 log_msg = f'about to sleep for {sleep_time=}'
-                log_ver.add_msg(log_name='test_throttle',
-                                log_level=logging.DEBUG,
+                log_ver.add_msg(log_level=logging.DEBUG,
                                 log_msg=log_msg)
                 logger.debug(log_msg)
                 time.sleep(sleep_time)
@@ -3523,8 +3557,7 @@ class TestThrottleShutdown:
                                              - a_req_time.f_time)
 
                 log_msg = f'about to shutdown with {timeout=}'
-                log_ver.add_msg(log_name='test_throttle',
-                                log_level=logging.DEBUG,
+                log_ver.add_msg(log_level=logging.DEBUG,
                                 log_msg=log_msg)
                 logger.debug(log_msg)
 
@@ -3562,8 +3595,7 @@ class TestThrottleShutdown:
             log_msg = (f'shutdown complete with {ret_code=}, '
                        f'{a_req_time.num_reqs} reqs done, '
                        f'{elapsed_time=:.4f} seconds')
-            log_ver.add_msg(log_name='test_throttle',
-                            log_level=logging.DEBUG,
+            log_ver.add_msg(log_level=logging.DEBUG,
                             log_msg=log_msg)
             logger.debug(log_msg)
 
@@ -3612,7 +3644,7 @@ class TestThrottleShutdown:
         sleep_delay_arg = 0.1
         num_reqs_to_make = 100
 
-        log_ver = LogVer(log_name='test_throttle')
+        log_ver = LogVer(log_name=test_log_name)
         alpha_call_seq = ('test_throttle.py::TestThrottleShutdown'
                           '.test_throttle_hard_shutdown_timeout')
         log_ver.add_call_seq(name='alpha',
@@ -3641,8 +3673,7 @@ class TestThrottleShutdown:
                 timeout=timeout)
 
             l_msg = f'soft shutdown {rc=}'
-            log_ver.add_msg(log_name='test_throttle',
-                            log_level=logging.DEBUG,
+            log_ver.add_msg(log_level=logging.DEBUG,
                             log_msg=l_msg)
             logger.debug(l_msg)
             if timeout == 0.0 or timeout == no_timeout_secs:
@@ -3736,8 +3767,7 @@ class TestThrottleShutdown:
 
             log_msg = ('all requests added, elapsed time = '
                        f'{time.time() - start_time} seconds')
-            log_ver.add_msg(log_name='test_throttle',
-                            log_level=logging.DEBUG,
+            log_ver.add_msg(log_level=logging.DEBUG,
                             log_msg=log_msg)
             logger.debug(log_msg)
 
@@ -3746,8 +3776,7 @@ class TestThrottleShutdown:
             ############################################################
             sleep_time = sleep_seconds - (time.time() - a_req_time.f_time)
             log_msg = f'about to sleep for {sleep_time=}'
-            log_ver.add_msg(log_name='test_throttle',
-                            log_level=logging.DEBUG,
+            log_ver.add_msg(log_level=logging.DEBUG,
                             log_msg=log_msg)
             logger.debug(log_msg)
 
@@ -3766,8 +3795,7 @@ class TestThrottleShutdown:
                                      args=(timeout,)))
 
                 log_msg = f'about to shutdown with {timeout=}'
-                log_ver.add_msg(log_name='test_throttle',
-                                log_level=logging.DEBUG,
+                log_ver.add_msg(log_level=logging.DEBUG,
                                 log_msg=log_msg)
                 logger.debug(log_msg)
 
@@ -3789,8 +3817,7 @@ class TestThrottleShutdown:
             log_msg = (f'shutdown complete, '
                        f'{a_req_time.num_reqs} reqs done, '
                        f'{elapsed_time=:.4f} seconds')
-            log_ver.add_msg(log_name='test_throttle',
-                            log_level=logging.DEBUG,
+            log_ver.add_msg(log_level=logging.DEBUG,
                             log_msg=log_msg)
             logger.debug(log_msg)
 
@@ -3851,7 +3878,7 @@ class TestThrottleShutdown:
             else:
                 found_hard = True
 
-        log_ver = LogVer(log_name='test_throttle')
+        log_ver = LogVer(log_name=test_log_name)
         alpha_call_seq = ('test_throttle.py::TestThrottleShutdown'
                           '.test_throttle_hard_shutdown_timeout')
         log_ver.add_call_seq(name='alpha',
@@ -3933,16 +3960,14 @@ class TestThrottleShutdown:
 
             log_msg = ('all requests added, elapsed time = '
                        f'{time.time() - start_time} seconds')
-            log_ver.add_msg(log_name='test_throttle',
-                            log_level=logging.DEBUG,
+            log_ver.add_msg(log_level=logging.DEBUG,
                             log_msg=log_msg)
             logger.debug(log_msg)
 
             # calculate sleep_time for log message
             sleep_time = sleep_seconds - (time.time() - start_time)
             log_msg = f'about to sleep for {sleep_time=}'
-            log_ver.add_msg(log_name='test_throttle',
-                            log_level=logging.DEBUG,
+            log_ver.add_msg(log_level=logging.DEBUG,
                             log_msg=log_msg)
             logger.debug(log_msg)
 
@@ -4029,8 +4054,7 @@ class TestThrottleShutdown:
 
                 log_msg = (f'about to shutdown with {timeout=} and '
                            f'{shutdown_type=}')
-                log_ver.add_msg(log_name='test_throttle',
-                                log_level=logging.DEBUG,
+                log_ver.add_msg(log_level=logging.DEBUG,
                                 log_msg=log_msg)
                 logger.debug(log_msg)
 
@@ -4083,8 +4107,7 @@ class TestThrottleShutdown:
             log_msg = (f'shutdown complete with {ret_code=}, '
                        f'{a_req_time.num_reqs} reqs done, '
                        f'{elapsed_time=:.4f} seconds')
-            log_ver.add_msg(log_name='test_throttle',
-                            log_level=logging.DEBUG,
+            log_ver.add_msg(log_level=logging.DEBUG,
                             log_msg=log_msg)
             logger.debug(log_msg)
 
@@ -4136,7 +4159,7 @@ class TestThrottleShutdown:
         num_reqs_to_make = 100
         soft_reqs_to_allow = 10
 
-        log_ver = LogVer(log_name='test_throttle')
+        log_ver = LogVer(log_name=test_log_name)
         alpha_call_seq = ('test_throttle.py::TestThrottleShutdown'
                           '.test_throttle_hard_shutdown_timeout')
         log_ver.add_call_seq(name='alpha',
@@ -4168,8 +4191,7 @@ class TestThrottleShutdown:
                 rc = a_throttle.start_shutdown(
                     shutdown_type=Throttle.TYPE_SHUTDOWN_SOFT)
             l_msg = f'soft shutdown {rc=}'
-            log_ver.add_msg(log_name='test_throttle',
-                            log_level=logging.DEBUG,
+            log_ver.add_msg(log_level=logging.DEBUG,
                             log_msg=l_msg)
             logger.debug(l_msg)
             assert rc is False
@@ -4251,16 +4273,14 @@ class TestThrottleShutdown:
 
             log_msg = ('all requests added, elapsed time = '
                        f'{time.time() - start_time} seconds')
-            log_ver.add_msg(log_name='test_throttle',
-                            log_level=logging.DEBUG,
+            log_ver.add_msg(log_level=logging.DEBUG,
                             log_msg=log_msg)
             logger.debug(log_msg)
 
             # calculate sleep_time for log message
             sleep_time = sleep_seconds - (time.time() - start_time)
             log_msg = f'about to sleep for {sleep_time=}'
-            log_ver.add_msg(log_name='test_throttle',
-                            log_level=logging.DEBUG,
+            log_ver.add_msg(log_level=logging.DEBUG,
                             log_msg=log_msg)
             logger.debug(log_msg)
 
@@ -4273,8 +4293,7 @@ class TestThrottleShutdown:
 
             # get the soft shutdown started
             log_msg = 'about to do soft shutdown'
-            log_ver.add_msg(log_name='test_throttle',
-                            log_level=logging.DEBUG,
+            log_ver.add_msg(log_level=logging.DEBUG,
                             log_msg=log_msg)
             logger.debug(log_msg)
             soft_shutdown_thread.start()
@@ -4289,8 +4308,7 @@ class TestThrottleShutdown:
 
             # issue hard shutdown to terminate the soft shutdown
             log_msg = 'about to do hard shutdown'
-            log_ver.add_msg(log_name='test_throttle',
-                            log_level=logging.DEBUG,
+            log_ver.add_msg(log_level=logging.DEBUG,
                             log_msg=log_msg)
             logger.debug(log_msg)
 
@@ -4367,7 +4385,7 @@ class TestThrottleShutdown:
             f4_num_reqs_arg: number of reqs to make
 
         """
-        log_ver = LogVer(log_name='test_throttle')
+        log_ver = LogVer(log_name=test_log_name)
         alpha_call_seq = ('test_throttle.py::TestThrottleShutdown'
                           '.test_throttle_hard_shutdown_timeout')
         log_ver.add_call_seq(name='alpha',
