@@ -1,12 +1,43 @@
+[project]
+name = "scottbrian_throttle"
+version = "1.0.0"
+description = "Miscellaneous utilities"
+readme = "README.rst"
+requires-python = "~=3.12"
+license = {file = "LICENSE.txt"}
+keywords = ["utilities"]
+authors = [{name = "Scott Tuttle", email = "sbtuttle@outlook.com"}]
+classifiers = [
+    "License :: OSI Approved :: MIT License",
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: System :: Recovery Tools",
+    "Topic :: Utilities",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Operating System :: Microsoft :: Windows :: Windows 10"]
+dependencies = [
+    "more-itertools ~=10.7",
+    "pandas ~=2.2",
+#    "scottbrian-utils ~=4.2",
+    "scottbrian_utils @  file://C:/Users/Tiger/PycharmProjects/scottbrian_utils/dist/scottbrian_utils-4.2.0-py3-none-any.whl",
+    "typing_extensions ~=4.13",
+    "wrapt ~=1.17",
+]
+
+[tool.setuptools]
+packages = ["scottbrian_throttle"]
+package-dir = {"" = "src"}
+
+[project.urls]
+Documentation = "https://scottbrian-throttle.readthedocs.io/en/latest/"
+Source = "https://github.com/ScottBrian/scottbrian_throttle.git"
+
 [build-system]
 requires = [
-    "setuptools >= 59",
-#    "setuptools_scm[toml] >= 6.0",
-#    "setuptools_scm_git_archive",
-    "wheel >= 0.37"
+    "setuptools ~=69.5",
+    "wheel ~=0.43"
 ]
 build-backend = 'setuptools.build_meta'
-
-#[tool.setuptools_scm]
-#write_to = "scottbrian_throttle/version.py"
-#git_describe_command = "git_describe --dirty --tags --long --match v* --first-parent"
