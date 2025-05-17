@@ -630,7 +630,7 @@ class Throttle:
                 return func(*args, **kwargs)
             except Exception as e:
                 self.logger.debug(
-                    "throttle send_request unhandled " f"exception in request: {e}"
+                    f"throttle send_request unhandled exception in request: {e}"
                 )
                 raise
 
@@ -841,7 +841,7 @@ class ThrottleSync(Throttle):
                 return func(*args, **kwargs)
             except Exception as e:
                 self.logger.debug(
-                    "throttle send_request unhandled " f"exception in request: {e}"
+                    f"throttle send_request unhandled exception in request: {e}"
                 )
                 raise
 
@@ -1036,7 +1036,7 @@ class ThrottleSyncEc(ThrottleSync):
                 return func(*args, **kwargs)
             except Exception as e:
                 self.logger.debug(
-                    "throttle send_request unhandled " f"exception in request: {e}"
+                    f"throttle send_request unhandled exception in request: {e}"
                 )
                 raise
 
@@ -1239,7 +1239,7 @@ class ThrottleSyncLb(ThrottleSync):
                 return func(*args, **kwargs)
             except Exception as e:
                 self.logger.debug(
-                    "throttle send_request unhandled " f"exception in request: {e}"
+                    f"throttle send_request unhandled exception in request: {e}"
                 )
                 raise
 
@@ -1519,7 +1519,7 @@ class ThrottleAsync(Throttle):
                     # obtained_nowait=obtained_nowait)
             except Exception as e:
                 self.logger.debug(
-                    "throttle schedule_requests unhandled exception in request: {e}"
+                    f"throttle schedule_requests unhandled exception in request: {e}"
                 )
                 raise
 
@@ -1559,6 +1559,7 @@ class ThrottleAsync(Throttle):
         self,
         shutdown_type: int = Throttle.TYPE_SHUTDOWN_SOFT,
         timeout: OptIntFloat = None,
+        suppress_timeout_msg: bool = False,
     ) -> bool:
         """Shutdown the async throttle request scheduling.
 
@@ -1613,6 +1614,9 @@ class ThrottleAsync(Throttle):
                        back control to allow other cleanup activities
                        to be performed and eventually issue a second
                        shutdown request to ensure that it is completed.
+            suppress_timeout_msg: used by shutdown_throttle_funcs to
+                       prevent the timeout log message since it will
+                       issue its own log message
 
         .. # noqa: DAR101
 
@@ -1688,9 +1692,8 @@ class ThrottleAsync(Throttle):
                 # if soft shutdown in progress
                 if self.do_shutdown == Throttle.TYPE_SHUTDOWN_SOFT:
                     self.logger.debug(
-                        "Hard shutdown request detected soft "
-                        "shutdown in progress - soft shutdown "
-                        "will terminate."
+                        "Hard shutdown request now replacing "
+                        "previously started soft shutdown."
                     )
             elif self.hard_shutdown_initiated:  # soft after hard
                 raise IllegalSoftShutdownAfterHard(
@@ -1712,15 +1715,21 @@ class ThrottleAsync(Throttle):
         if timeout and (timeout > 0):
             self.request_scheduler_thread.join(timeout=timeout)
             if self.request_scheduler_thread.is_alive():
-                self.logger.debug(
-                    "start_shutdown request timed out " f"with {timeout=:.4f}"
-                )
+                if not suppress_timeout_msg:
+                    self.logger.debug(
+                        f"start_shutdown request timed out with {timeout=:.4f}"
+                    )
 
                 return False  # we timed out
         else:
             self.request_scheduler_thread.join()
 
         with self.shutdown_lock:
+            # @sbt - the following code seems wrong - we should have
+            # detected the soft attempt with hard in progress and raise
+            # an error per above, so how can we get here? Is it because
+            # we might have been soft stuck behind the lock while
+            # another thread replaced the soft with the hard?
             if (
                 shutdown_type == Throttle.TYPE_SHUTDOWN_SOFT
                 and self.hard_shutdown_initiated
@@ -2435,8 +2444,8 @@ def shutdown_throttle_funcs(
     The shutdown_throttle_funcs function is used to shutdown one or more
     function that were decorated with the throttle. The arguments apply
     to each of the functions that are specified to be shutdown. If
-    timeout is specified, then True is returned iff all functions
-    shutdown within the timeout number of second specified.
+    timeout is specified, then True is returned if all functions
+    were shutdown within the timeout number of second specified.
 
     Args:
         args: one or more functions to be shutdown
@@ -2474,35 +2483,37 @@ def shutdown_throttle_funcs(
           specified number of seconds.
 
     """
+    funcs = [func for func in args]
     start_time = time.time()  # start the clock
-    ####################################################################
-    # get all shutdowns started
-    ####################################################################
-    for func in args:
-        func.throttle.start_shutdown(shutdown_type=shutdown_type, timeout=0.01)
 
     ####################################################################
-    # check each shutdown
-    # Note that if timeout was not specified, then we simply call
-    # shutdown for each func and hope that each one eventually
-    # completes. If timeout was specified, then we will call each
-    # shutdown with whatever timeout time remains and bail on the first
-    # timeout we get.
+    # In the following code we loop until we all funcs are shutdown or
+    # until we time out when timeout is specified. We call shutdown for
+    # each func with a very short timeout value. The first attempt for
+    # each func will get its shutdown started and very likely result in
+    # a timeout retcode. This is OK since we suppress the timeout log
+    # message. Even though the timeout happens, the shutdone, once
+    # started, will continue processing. Each subsequent attempt will
+    # either timeout again or come back with a completed retcode. We
+    # remove each completed func from the list and keep trying the
+    # remining funcs.
     ####################################################################
-    if timeout is None or timeout <= 0:
-        for func in args:
-            func.throttle.start_shutdown(shutdown_type=shutdown_type)
-    else:  # timeout specified and is a non-zero positive value
-        for func in args:
-            # use min to ensure non-zero positive timeout value
-            if not func.throttle.start_shutdown(
-                shutdown_type=shutdown_type,
-                timeout=max(0.01, start_time + timeout - time.time()),
+    while funcs:
+        funcs_remaining = [func for func in funcs]
+        for func in funcs_remaining:
+            if func.throttle.start_shutdown(
+                shutdown_type=shutdown_type, timeout=0.01, suppress_timeout_msg=True
             ):
-                func.throttle.logger.debug(
-                    "timeout of " "shutdown_throttle_funcs " f"with timeout={timeout}"
-                )
-                return False  # we timed out
+                funcs.remove(func)
 
-    # if we are here then all shutdowns are complete
+        if funcs and timeout and timeout > 0 and time.time() > start_time + timeout:
+            for func in funcs:
+                func.throttle.logger.debug(
+                    f"Throttle ID {id(func.throttle)} shutdown_throttle_funcs request "
+                    f"timed out with {timeout=:.4f}"
+                )
+            return False  # we timed out
+        time.sleep(0.1)  # allow shutdowns to progress
+
+    # if here, all funcs successfully shutdown
     return True
