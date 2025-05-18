@@ -6,7 +6,9 @@
 from dataclasses import dataclass
 from enum import auto, Flag
 import inspect
-from itertools import accumulate
+import itertools as it
+
+# from itertools import accumulate
 import logging
 import math
 import random
@@ -124,7 +126,6 @@ if smoke_test:
     single_early_count_arg: Optional[int] = 3
     single_lb_threshold_arg: OptIntFloat = 3
     single_send_interval_mult_arg: Optional[float] = 0.0
-    single_multi_timeout_arg: Optional[tuple[float, float, float]] = (0.00, 0.10, 0.10)
 
 else:
     single_requests_arg = None
@@ -132,7 +133,6 @@ else:
     single_early_count_arg = None
     single_lb_threshold_arg = None
     single_send_interval_mult_arg = None
-    single_multi_timeout_arg = None
 
 ########################################################################
 # requests_arg fixture
@@ -461,73 +461,31 @@ def timeout3_arg(request: Any) -> float:
 
 
 ########################################################################
-# timeout_arg fixture
-########################################################################
-multi_timeout_arg_list: tuple[tuple[float, float, float], ...]
-multi_timeout_arg_list = (
-    (0.00, 0.00, 0.00),
-    (0.00, 0.00, 0.10),
-    (0.00, 0.10, 0.10),
-    (0.00, 0.10, 0.75),
-    (0.00, 0.10, 1.25),
-    (0.00, 0.75, 0.75),
-    (0.00, 0.75, 1.25),
-    (0.00, 1.25, 1.25),
-    (0.10, 0.10, 0.10),
-    (0.10, 0.10, 0.75),
-    (0.10, 0.10, 1.25),
-    (0.10, 0.75, 0.75),
-    (0.10, 0.75, 1.25),
-    (0.10, 1.25, 1.25),
-    (0.75, 0.75, 0.75),
-    (0.75, 0.75, 1.25),
-    (0.75, 1.25, 1.25),
-    (1.25, 1.25, 1.25),
-)
-if single_multi_timeout_arg is not None:
-    multi_timeout_arg_list = (single_multi_timeout_arg,)
-
-
-@pytest.fixture(params=multi_timeout_arg_list)  # type: ignore
-def multi_timeout_arg(request: Any) -> tuple[float, float, float]:
-    """Whether to use timeout.
-
-    Args:
-        request: special fixture that returns the fixture params
-
-    Returns:
-        The params values are returned one at a time
-
-    """
-    return cast(tuple[float, float, float], request.param)
-
-
-########################################################################
 # short_long_timeout_arg
 ########################################################################
-short_long_timeout_arg_list = (
-    ("Short", "Short", "Long"),
-    ("Short", "Long", "Short"),
-    ("Short", "Long", "Long"),
-    ("Long", "Short", "Short"),
-    ("Long", "Short", "Long"),
-    ("Long", "Long", "Short"),
-    ("Long", "Long", "Long"),
-)
-
-
-@pytest.fixture(params=short_long_timeout_arg_list)  # type: ignore
-def short_long_timeout_arg(request: Any) -> tuple[str, str, str]:
-    """Whether to use timeout.
-
-    Args:
-        request: special fixture that returns the fixture params
-
-    Returns:
-        The params values are returned one at a time
-
-    """
-    return cast(tuple[str, str, str], request.param)
+# short_long_timeout_arg_list = (
+#     ("Short", "Short", "Long"),
+#     ("Short", "Long", "Short"),
+#     ("Short", "Long", "Long"),
+#     ("Long", "Short", "Short"),
+#     ("Long", "Short", "Long"),
+#     ("Long", "Long", "Short"),
+#     ("Long", "Long", "Long"),
+# )
+#
+#
+# @pytest.fixture(params=short_long_timeout_arg_list)  # type: ignore
+# def short_long_timeout_arg(request: Any) -> tuple[str, str, str]:
+#     """Whether to use timeout.
+#
+#     Args:
+#         request: special fixture that returns the fixture params
+#
+#     Returns:
+#         The params values are returned one at a time
+#
+#     """
+#     return cast(tuple[str, str, str], request.param)
 
 
 ########################################################################
@@ -3413,6 +3371,10 @@ class TestThrottleShutdown:
     ####################################################################
     # test_throttle_shutdown
     ####################################################################
+    short_long_items = ("Short", "Long")
+    short_long_combos = it.product(short_long_items, repeat=3)
+
+    @pytest.mark.parametrize("short_long_timeout_arg", short_long_combos)
     def test_throttle_hard_shutdown_timeout(
         self,
         requests_arg: int,
@@ -3508,25 +3470,34 @@ class TestThrottleShutdown:
                 f"{time.time() - start_time} seconds"
             )
 
-            prev_reqs_done = 0
-
             sleep_time = sleep_seconds - (time.time() - start_time)
 
             log_ver.test_msg(f"about to sleep for {sleep_time=}")
             time.sleep(sleep_time)
+            num_reqs_done = a_req_time.num_reqs
+            arrival_time = a_req_time.arrival_time
+            elapsed_time_from_arrival = arrival_time - start_time
+            exp_reqs_done = a_throttle.get_expected_num_completed_reqs(
+                interval=elapsed_time_from_arrival
+            )
 
-            exp_reqs_done = min(num_reqs_to_make, sleep_reqs_to_do + prev_reqs_done)
-            assert a_req_time.num_reqs == exp_reqs_done
+            assert num_reqs_done == exp_reqs_done
 
-            prev_reqs_done = exp_reqs_done
+            num_reqs_remaining = a_throttle.async_q.qsize()
+            log_ver.test_msg(f"remaining requests on asynq: {num_reqs_remaining}")
 
-            exp_ret_code = False
+            long_shutdown_done = False
             for short_long in short_long_timeout_arg:
                 if short_long == "Short":
                     timeout = 0.001
+                    exp_ret_code = False
                 else:
                     timeout = 10
-                    exp_ret_code = True
+                    if long_shutdown_done:
+                        exp_ret_code = False
+                    else:
+                        exp_ret_code = True
+                    long_shutdown_done = True
 
                 log_ver.test_msg(f"about to shutdown with {timeout=}")
 
@@ -3535,11 +3506,16 @@ class TestThrottleShutdown:
                 )
 
                 # expect no additional reqs done since hard shutdown
-                exp_reqs_done = prev_reqs_done
+                num_reqs_done = a_req_time.num_reqs
+                arrival_time = a_req_time.arrival_time
+                elapsed_time_from_arrival = arrival_time - start_time
+                exp_reqs_done = a_throttle.get_expected_num_completed_reqs(
+                    interval=elapsed_time_from_arrival
+                )
 
-                assert a_req_time.num_reqs == exp_reqs_done
+                assert num_reqs_done == exp_reqs_done
 
-                if exp_ret_code:
+                if exp_ret_code is True:
                     log_msg = (
                         "start_shutdown request successfully completed "
                         f"in {a_throttle.shutdown_elapsed_time:.4f} "
@@ -3553,14 +3529,50 @@ class TestThrottleShutdown:
                     assert ret_code is True
                     assert a_throttle.async_q.empty()
                 else:
-                    log_msg = "start_shutdown request timed out " f"with {timeout=:.4f}"
+                    if long_shutdown_done:
+                        log_msg = (
+                            f"Hard shutdown request detected "
+                            "that the throttle has already been "
+                            "shutdown by an earlier shutdown request "
+                            "- returning False."
+                        )
+                        assert a_throttle.async_q.empty()
+                    else:
+                        log_msg = (
+                            "start_shutdown request timed out with " f"{timeout=:.4f}"
+                        )
+                        num_reqs_remaining = a_throttle.async_q.qsize()
+                        log_ver.test_msg(
+                            f"remaining requests on asynq: {num_reqs_remaining}"
+                        )
+                        async_q_empty = a_throttle.async_q.empty()
+                        num_reqs_remaining = a_throttle.async_q.qsize()
+                        log_ver.test_msg(
+                            f"{async_q_empty=} with remaining requests "
+                            f"on asynq: {num_reqs_remaining}"
+                        )
+                        assert not a_throttle.async_q.empty()
                     log_ver.add_msg(
                         log_name="scottbrian_throttle.throttle",
                         log_level=logging.DEBUG,
                         log_msg=log_msg,
                     )
                     assert ret_code is False
-                    assert not a_throttle.async_q.empty()
+
+            if not long_shutdown_done:  # if long shutdown was not done
+                ret_code = a_throttle.start_shutdown(
+                    shutdown_type=Throttle.TYPE_SHUTDOWN_HARD, timeout=10
+                )
+                log_msg = (
+                    "start_shutdown request successfully completed "
+                    f"in {a_throttle.shutdown_elapsed_time:.4f} "
+                    "seconds"
+                )
+                log_ver.add_msg(
+                    log_name="scottbrian_throttle.throttle",
+                    log_level=logging.DEBUG,
+                    log_msg=log_msg,
+                )
 
             elapsed_time = time.time() - start_time
 
@@ -3569,6 +3581,9 @@ class TestThrottleShutdown:
                 f"{a_req_time.num_reqs} reqs done, "
                 f"{elapsed_time=:.4f} seconds"
             )
+
+            num_reqs_remaining = a_throttle.async_q.qsize()
+            log_ver.test_msg(f"remaining requests on asynq: {num_reqs_remaining}")
 
             ############################################################
             # verify new requests are rejected, q empty, and thread is
@@ -3798,6 +3813,10 @@ class TestThrottleShutdown:
     ####################################################################
     # test_throttle_shutdown
     ####################################################################
+    timeout_items = (0.0, 0.10, 0.75, 1.25)
+    multi_timeout_combos = it.combinations_with_replacement(timeout_items, 3)
+
+    @pytest.mark.parametrize("multi_timeout_arg", multi_timeout_combos)
     def test_throttle_mutil_soft_shutdown(
         self,
         requests_arg: int,
@@ -5406,7 +5425,7 @@ class RequestValidator:
         self.target_intervals = [0.0] + [
             self.target_interval for _ in range(len(self.req_times) - 1)
         ]
-        self.target_times = list(accumulate(self.target_intervals))
+        self.target_times = list(it.accumulate(self.target_intervals))
         base_time: float = -1.0
         ################################################################
         # create list of start times and intervals
@@ -5550,8 +5569,8 @@ class RequestValidator:
         elif self.mode == MODE_SYNC_LB:
             self.build_sync_lb_exp_list()
 
-        self.expected_times = list(accumulate(self.expected_intervals))
-        self.send_times = list(accumulate(self.send_intervals))
+        self.expected_times = list(it.accumulate(self.expected_intervals))
+        self.send_times = list(it.accumulate(self.send_intervals))
 
         ################################################################
         # create list of diff and diff pct on req_intervals/exp_req_int
