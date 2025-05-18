@@ -1255,7 +1255,9 @@ class ThrottleAsync(Throttle):
         "shutdown_lock",
         "_shutdown",
         "do_shutdown",
+        "shutdown_complete",
         "hard_shutdown_initiated",
+        "hard_shutdown_replaced_soft_shutdown",
         "_check_async_q_time",
         "_check_async_q_time2",
         "shutdown_start_time",
@@ -1342,7 +1344,9 @@ class ThrottleAsync(Throttle):
         self.shutdown_lock = threading.Lock()
         self._shutdown = False
         self.do_shutdown = Throttle.TYPE_SHUTDOWN_NONE
+        self.shutdown_complete = False
         self.hard_shutdown_initiated = False
+        self.hard_shutdown_replaced_soft_shutdown = False
         self._check_async_q_time = 0.0
         self._check_async_q_time2 = 0.0
         self.shutdown_start_time = 0.0
@@ -1514,7 +1518,7 @@ class ThrottleAsync(Throttle):
             ############################################################
             try:
                 if self.do_shutdown != Throttle.TYPE_SHUTDOWN_HARD:
-                    # self._arrival_time = request_item.arrival_time
+                    self._arrival_time = request_item.arrival_time
                     request_item.request_func(*request_item.args, **request_item.kwargs)
                     # obtained_nowait=obtained_nowait)
             except Exception as e:
@@ -1627,7 +1631,9 @@ class ThrottleAsync(Throttle):
             * ``False`` if *timeout* was specified and the
               ``start_shutdown()`` request did not complete within the
               specified number of seconds, or a soft shutdown was
-              terminated by a hard shutdown.
+              terminated by a hard shutdown, or the throttle was found
+              to have already been shutdown by an earlier shutdown
+              request.
 
         Raises:
             IllegalSoftShutdownAfterHard: A shutdown with shutdown_type
@@ -1651,6 +1657,15 @@ class ThrottleAsync(Throttle):
                 "Throttle.TYPE_SHUTDOWN_HARD"
             )
 
+        if shutdown_type == Throttle.TYPE_SHUTDOWN_HARD:
+            msg_fillin = "Hard"
+        else:
+            msg_fillin = "Soft"
+        shutdown_complete_msg = (
+            f"{msg_fillin} shutdown request detected that the "
+            "throttle has already been shutdown by an earlier "
+            "shutdown request - returning False."
+        )
         ################################################################
         # We are good to go for shutdown
         ################################################################
@@ -1686,6 +1701,10 @@ class ThrottleAsync(Throttle):
             # after a hard request is a conflict that may not have been
             # intended.
 
+            if self.shutdown_complete:
+                self.logger.debug(shutdown_complete_msg)
+                return False  # the soft shutdown was terminated
+
             if shutdown_type == Throttle.TYPE_SHUTDOWN_HARD:
                 self.hard_shutdown_initiated = True
 
@@ -1695,6 +1714,7 @@ class ThrottleAsync(Throttle):
                         "Hard shutdown request now replacing "
                         "previously started soft shutdown."
                     )
+                    self.hard_shutdown_replaced_soft_shutdown = True
             elif self.hard_shutdown_initiated:  # soft after hard
                 raise IllegalSoftShutdownAfterHard(
                     "A shutdown with shutdown_type "
@@ -1741,6 +1761,10 @@ class ThrottleAsync(Throttle):
                 )
                 return False  # the soft shutdown was terminated
 
+            if self.shutdown_complete:
+                self.logger.debug(shutdown_complete_msg)
+                return False  # the soft shutdown was terminated
+
             # indicate shutdown no longer in progress
             self.do_shutdown = Throttle.TYPE_SHUTDOWN_NONE
 
@@ -1750,6 +1774,7 @@ class ThrottleAsync(Throttle):
                 "start_shutdown request successfully completed "
                 f"in {self.shutdown_elapsed_time:.4f} seconds"
             )
+            self.shutdown_complete = True
 
         return True  # shutdown was successful
 
