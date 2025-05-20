@@ -460,8 +460,11 @@ class Throttle:
     TYPE_SHUTDOWN_SOFT: Final[int] = 4
     TYPE_SHUTDOWN_HARD: Final[int] = 8
 
+    ####################################################################
+    # send_request return codes
+    ####################################################################
     RC_OK: Final[int] = 0
-    RC_SHUTDOWN: Final[int] = 4
+    RC_THROTTLE_IS_SHUTDOWN: Final[int] = 4
 
     class Request(NamedTuple):
         """NamedTuple for the request queue item."""
@@ -1250,6 +1253,16 @@ class ThrottleSyncLb(ThrottleSync):
 class ThrottleAsync(Throttle):
     """An asynchronous throttle mechanism."""
 
+    ####################################################################
+    # start_shutdown return codes
+    ####################################################################
+    RC_SHUTDOWN_COMPLETED_OK: Final[int] = 0
+    RC_SHUTDOWN_PREVIOUSLY_COMPLETED: Final[int] = 4
+    RC_SHUTDOWN_TIMED_OUT: Final[int] = 8
+    RC_SHUTDOWN_SOFT_IN_PROGRESS: Final[int] = 12
+    RC_SHUTDOWN_HARD_IN_PROGRESS: Final[int] = 16
+    RC_SHUTDOWN_SOFT_REPLACED_BY_HARD: Final[int] = 20
+
     __slots__ = (
         "async_q_size",
         "shutdown_lock",
@@ -1441,12 +1454,12 @@ class ThrottleAsync(Throttle):
 
         Returns:
             * ``Throttle.RC_OK`` (0) request scheduled
-            * ``Throttle.RC_SHUTDOWN`` (4) - the request was rejected
+            * ``Throttle.RC_THROTTLE_IS_SHUTDOWN`` (4) - the request was rejected
               because the throttle was shut down.
 
         """
         if self._shutdown:
-            return Throttle.RC_SHUTDOWN
+            return Throttle.RC_THROTTLE_IS_SHUTDOWN
 
         # TODO: use se_lock
         # We obtain the shutdown lock to protect against the following
@@ -1468,7 +1481,7 @@ class ThrottleAsync(Throttle):
                     return Throttle.RC_OK
                 except queue.Full:
                     continue  # no need to wait since we already did
-            return Throttle.RC_SHUTDOWN
+            return Throttle.RC_THROTTLE_IS_SHUTDOWN
 
     ####################################################################
     # schedule_requests
@@ -1564,89 +1577,190 @@ class ThrottleAsync(Throttle):
         shutdown_type: int = Throttle.TYPE_SHUTDOWN_SOFT,
         timeout: OptIntFloat = None,
         suppress_timeout_msg: bool = False,
-    ) -> bool:
+    ) -> int:
         """Shutdown the async throttle request scheduling.
 
-        Shutdown is used to stop and clean up any pending requests on
-        the async request queue for a throttle created with
-        mode Throttle.MODE_ASYNC. This should be done during normal
-        application shutdown or when an error occurs. Once the throttle
-        has completed shutdown it can no longer be used. If a throttle
-        is once again needed after shutdown, a new one will need to be
-        instantiated to replace the old one.
+            Shutdown is used to stop and clean up any pending requests on
+            the async request queue for a throttle created with
+            mode Throttle.MODE_ASYNC. This should be done during normal
+            application shutdown or when an error occurs. Once the throttle
+            has completed shutdown it can no longer be used. If a throttle
+            is once again needed after shutdown, a new one will need to be
+            instantiated to replace the old one.
 
-        Note that a soft shutdown can be started and eventually be
-        followed by a hard shutdown to force shutdown to complete
-        quickly. A hard shutdown, however, can not be followed by a
-        soft shutdown since there is no way to retrieve and run any
-        of the requests that were already removed and tossed by the
-        hard shutdown.
+            Note that a soft shutdown can be started and eventually be
+            followed by a hard shutdown to force shutdown to complete
+            quickly. A hard shutdown, however, can not be followed by a
+            soft shutdown since there is no way to retrieve and run any
+            of the requests that were already removed and tossed by the
+            hard shutdown.
 
-        Args:
-            shutdown_type: specifies whether to do a soft or a hard
-                             shutdown:
+            Args:
+                shutdown_type: specifies whether to do a soft or a hard
+                                 shutdown:
 
-                             * A soft shutdown
-                               (Throttle.TYPE_SHUTDOWN_SOFT),
-                               the default, stops any additional
-                               requests from being queued and cleans up
-                               the request queue by scheduling any
-                               remaining requests at the normal interval
-                               as calculated by the *seconds* and
-                               *requests* arguments specified during
-                               throttle instantiation.
-                             * A hard shutdown
-                               (Throttle.TYPE_SHUTDOWN_HARD) stops any
-                               additional requests from being queued and
-                               cleans up the request queue by quickly
-                               removing any remaining requests without
-                               executing them.
-            timeout: number of seconds to allow for shutdown to
-                       complete. If the shutdown times out, control is
-                       returned with a return value of False. The
-                       shutdown will continue and a subsequent call to
-                       start_shutdown, with or without a timeout value,
-                       may eventually return control with a return value
-                       of True to indicate that the shutdown has
-                       completed. Note that a *timeout* value of zero or
-                       less is handled as if shutdown None was
-                       specified, whether explicitly or by default, in
-                       which case the shutdown will not timeout and will
-                       control will be returned if and when the shutdown
-                       completes. A very small value, such as 0.001,
-                       can be used to start the shutdown and then get
-                       back control to allow other cleanup activities
-                       to be performed and eventually issue a second
-                       shutdown request to ensure that it is completed.
-            suppress_timeout_msg: used by shutdown_throttle_funcs to
-                       prevent the timeout log message since it will
-                       issue its own log message
+                                 * A soft shutdown
+                                   (Throttle.TYPE_SHUTDOWN_SOFT),
+                                   the default, stops any additional
+                                   requests from being queued and cleans up
+                                   the request queue by scheduling any
+                                   remaining requests at the normal interval
+                                   as calculated by the *seconds* and
+                                   *requests* arguments specified during
+                                   throttle instantiation.
+                                 * A hard shutdown
+                                   (Throttle.TYPE_SHUTDOWN_HARD) stops any
+                                   additional requests from being queued and
+                                   cleans up the request queue by quickly
+                                   removing any remaining requests without
+                                   executing them.
+                timeout: number of seconds to allow for shutdown to
+                           complete. If the shutdown times out, control is
+                           returned with a return value of False. The
+                           shutdown will continue and a subsequent call to
+                           start_shutdown, with or without a timeout value,
+                           may eventually return control with a return value
+                           of True to indicate that the shutdown has
+                           completed. Note that a *timeout* value of zero or
+                           less is handled as if shutdown None was
+                           specified, whether explicitly or by default, in
+                           which case the shutdown will not timeout and will
+                           control will be returned if and when the shutdown
+                           completes. A very small value, such as 0.001,
+                           can be used to start the shutdown and then get
+                           back control to allow other cleanup activities
+                           to be performed and eventually issue a second
+                           shutdown request to ensure that it is completed.
+                suppress_timeout_msg: used by shutdown_throttle_funcs to
+                           prevent the timeout log message since it will
+                           issue its own log message
 
-        .. # noqa: DAR101
+            .. # noqa: DAR101
 
-        Returns:
-            * ``True`` if *timeout* was not specified, or if it was
-              specified and the ``start_shutdown()`` request completed
-              within the specified number of seconds.
-            * ``False`` if *timeout* was specified and the
-              ``start_shutdown()`` request did not complete within the
-              specified number of seconds, or a soft shutdown was
-              terminated by a hard shutdown, or the throttle was found
-              to have already been shutdown by an earlier shutdown
-              request.
+            Returns:
+                * RC_SHUTDOWN_COMPLETED_OK: the ``start_shutdown()`` request
+                  completed successfully
+                * RC_SHUTDOWN_PREVIOUSLY_COMPLETED (4): the
+                  ``start_shutdown()`` request was rejected because the
+                  throttle was already shutdown by a previous
+                  ``start_shutdown()`` request
+                * RC_SHUTDOWN_TIMED_OUT (8): the ``start_shutdown()``
+                  request with a non-zero positive *timeout* value was
+                  specified and did not complete within the specified number
+                  of seconds
+                * RC_SHUTDOWN_SOFT_IN_PROGRESS (12): the
+                  ``start_shutdown()`` request with a specified
+                  shutdown_type of Throttle.TYPE_SHUTDOWN_SOFT detected that
+                  a soft shutdown is already in progress
+                * RC_SHUTDOWN_HARD_IN_PROGRESS (12): the
+                  ``start_shutdown()`` request with a specified
+                  shutdown_type of either Throttle.TYPE_SHUTDOWN_SOFT or
+                  Throttle.TYPE_SHUTDOWN_HARD detected that a hard shutdown
+                  is already in progress
+                * RC_SHUTDOWN_SOFT_REPLACED_BY HARD: the
+                  ``start_shutdown()`` request with a specified
+                  shutdown_type of Throttle.TYPE_SHUTDOWN_SOFT detected
+                  while running that a ``start_shutdown()`` with a
+                  shutdown_type of Throttle.TYPE_SHUTDOWN_HARD was initiated
 
-        Raises:
-            IllegalSoftShutdownAfterHard: A shutdown with shutdown_type
-                Throttle.TYPE_SHUTDOWN_SOFT  was requested after a
-                shutdown with shutdown_type Throttle.TYPE_SHUTDOWN_HARD
-                had already been initiated. Once a hard shutdown has
-                been initiated, a soft shutdown is not allowed.
-            IncorrectShutdownTypeSpecified: For start_shutdown,
-                *shutdownType* must be specified as either
-                Throttle.TYPE_SHUTDOWN_SOFT or
-                Throttle.TYPE_SHUTDOWN_HARD
+            Raises:
+                IllegalSoftShutdownAfterHard: A shutdown with shutdown_type
+                    Throttle.TYPE_SHUTDOWN_SOFT  was requested after a
+                    shutdown with shutdown_type Throttle.TYPE_SHUTDOWN_HARD
+                    had already been initiated. Once a hard shutdown has
+                    been initiated, a soft shutdown is not allowed.
+                IncorrectShutdownTypeSpecified: For start_shutdown,
+                    *shutdownType* must be specified as either
+                    Throttle.TYPE_SHUTDOWN_SOFT or
+                    Throttle.TYPE_SHUTDOWN_HARD
+
+            ####################################################################
+        # start_shutdown return codes
+        ####################################################################
+        RC_SHUTDOWN_COMPLETED_OK: Final[int] = 0
+        RC_SHUTDOWN_PREVIOUSLY_COMPLETED: Final[int] = 4
+        RC_SHUTDOWN_TIMED_OUT: Final[int] = 8
+        RC_SHUTDOWN_SOFT_IN_PROGRESS: Final[int] = 12
+        RC_SHUTDOWN_HARD_IN_PROGRESS: Final[int] = 16
+        RC_SHUTDOWN_SOFT_REPLACED_BY HARD: Final[int] = 20
 
         """
+        ################################################################
+        # throttle shutdown states:
+        #     0) shutdown not yet requested
+        #     1) soft shutdown initiated
+        #     2) soft shutdown in progress
+        #     3) hard shutdown initiated
+        #     4) hard shutdown in progress
+        #     5) shutdown completed
+        #
+        #     get lock
+        #     if soft shutdown requested:
+        #         if shutdown state is 0:
+        #             initiate soft shutdown - set state to 2
+        #         elif shutdown state is 1:
+        #             set state to 2
+        #         elif shutdown state is 2:
+        #             return RC_SHUTDOWN_SOFT_IN_PROGRESS
+        #         elif shutdown state is 3:
+        #             return RC_SHUTDOWN_HARD_IN_PROGRESS
+        #         elif shutdown state is 4:
+        #             return RC_SHUTDOWN_HARD_IN_PROGRESS
+        #         elif shutdown state is 5:
+        #             return RC_SHUTDOWN_PREVIOUSLY_COMPLETED
+        #
+        #     if hard shutdown requested:
+        #         if shutdown state is 0:
+        #             initiate hard shutdown - set state to 4
+        #         elif shutdown state is 1:
+        #             set state to 4
+        #         elif shutdown state is 2:
+        #             set state to 4
+        #         elif shutdown state is 3:
+        #             set state to 4
+        #         elif shutdown state is 4:
+        #             return RC_SHUTDOWN_HARD_IN_PROGRESS
+        #         elif shutdown state is 5:
+        #             return RC_SHUTDOWN_PREVIOUSLY_COMPLETED
+        #
+        #     drop lock
+        #     loop forever
+        #        if not request_scheduler_thread.is_alive()
+        #            set completed and break out of loop
+        #        if timeout
+        #            set timeout and break out of loop
+        #        if soft and state is 3, 4, or 5
+        #            set state_changed and break out of loop
+        #
+        #     get lock
+        #     if soft shutdown requested:
+        #         if shutdown state is 0:
+        #             error
+        #         elif shutdown state is 1:
+        #             set state to 2
+        #         elif shutdown state is 2:
+        #             return RC_SHUTDOWN_SOFT_IN_PROGRESS
+        #         elif shutdown state is 3:
+        #             return RC_SHUTDOWN_HARD_IN_PROGRESS
+        #         elif shutdown state is 4:
+        #             return RC_SHUTDOWN_HARD_IN_PROGRESS
+        #         elif shutdown state is 5:
+        #             return RC_SHUTDOWN_PREVIOUSLY_COMPLETED
+        #
+        #     if hard shutdown requested:
+        #         if shutdown state is 0:
+        #             initiate hard shutdown - set state to 4
+        #         elif shutdown state is 1:
+        #             set state to 4
+        #         elif shutdown state is 2:
+        #             set state to 4
+        #         elif shutdown state is 3:
+        #             set state to 4
+        #         elif shutdown state is 4:
+        #             return RC_SHUTDOWN_HARD_IN_PROGRESS
+        #         elif shutdown state is 5:
+        #             return RC_SHUTDOWN_PREVIOUSLY_COMPLETED
+        ################################################################
         if shutdown_type not in (
             Throttle.TYPE_SHUTDOWN_SOFT,
             Throttle.TYPE_SHUTDOWN_HARD,
@@ -1664,7 +1778,8 @@ class ThrottleAsync(Throttle):
         shutdown_complete_msg = (
             f"{msg_fillin} shutdown request detected that the "
             "throttle has already been shutdown by an earlier "
-            "shutdown request - returning False."
+            "shutdown request - returning "
+            "RC_SHUTDOWN_PREVIOUSLY_COMPLETED."
         )
         ################################################################
         # We are good to go for shutdown
@@ -1703,7 +1818,7 @@ class ThrottleAsync(Throttle):
 
             if self.shutdown_complete:
                 self.logger.debug(shutdown_complete_msg)
-                return False  # the soft shutdown was terminated
+                return ThrottleAsync.RC_SHUTDOWN_PREVIOUSLY_COMPLETED
 
             if shutdown_type == Throttle.TYPE_SHUTDOWN_HARD:
                 self.hard_shutdown_initiated = True
@@ -1763,7 +1878,7 @@ class ThrottleAsync(Throttle):
 
             if self.shutdown_complete:
                 self.logger.debug(shutdown_complete_msg)
-                return False  # the soft shutdown was terminated
+                return ThrottleAsync.RC_SHUTDOWN_PREVIOUSLY_COMPLETED
 
             # indicate shutdown no longer in progress
             self.do_shutdown = Throttle.TYPE_SHUTDOWN_NONE

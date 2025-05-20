@@ -261,91 +261,91 @@ def shutdown_requests_arg(request: Any) -> int:
 ########################################################################
 # f_num_reqs_arg fixture
 ########################################################################
-f_num_reqs_arg_list = [0, 16, 32]
-
-
-@pytest.fixture(params=f_num_reqs_arg_list)  # type: ignore
-def f1_num_reqs_arg(request: Any) -> int:
-    """Number of requests to make for f1.
-
-    Args:
-        request: special fixture that returns the fixture params
-
-    Returns:
-        The params values are returned one at a time
-    """
-    return cast(int, request.param)
-
-
-@pytest.fixture(params=f_num_reqs_arg_list)  # type: ignore
-def f2_num_reqs_arg(request: Any) -> int:
-    """Number of requests to make for f2.
-
-    Args:
-        request: special fixture that returns the fixture params
-
-    Returns:
-        The params values are returned one at a time
-    """
-    return cast(int, request.param)
-
-
-@pytest.fixture(params=f_num_reqs_arg_list)  # type: ignore
-def f3_num_reqs_arg(request: Any) -> int:
-    """Number of requests to make for f3.
-
-    Args:
-        request: special fixture that returns the fixture params
-
-    Returns:
-        The params values are returned one at a time
-    """
-    return cast(int, request.param)
-
-
-@pytest.fixture(params=f_num_reqs_arg_list)  # type: ignore
-def f4_num_reqs_arg(request: Any) -> int:
-    """Number of requests to make for f4.
-
-    Args:
-        request: special fixture that returns the fixture params
-
-    Returns:
-        The params values are returned one at a time
-    """
-    return cast(int, request.param)
-
-
-@pytest.fixture(params=f_num_reqs_arg_list)  # type: ignore
-def f5_num_reqs_arg(request: Any) -> int:
-    """Number of requests to make for f5.
-
-    Args:
-        request: special fixture that returns the fixture params
-
-    Returns:
-        The params values are returned one at a time
-    """
-    return cast(int, request.param)
+# f_num_reqs_arg_list = [0, 16, 32]
+#
+#
+# @pytest.fixture(params=f_num_reqs_arg_list)  # type: ignore
+# def f1_num_reqs_arg(request: Any) -> int:
+#     """Number of requests to make for f1.
+#
+#     Args:
+#         request: special fixture that returns the fixture params
+#
+#     Returns:
+#         The params values are returned one at a time
+#     """
+#     return cast(int, request.param)
+#
+#
+# @pytest.fixture(params=f_num_reqs_arg_list)  # type: ignore
+# def f2_num_reqs_arg(request: Any) -> int:
+#     """Number of requests to make for f2.
+#
+#     Args:
+#         request: special fixture that returns the fixture params
+#
+#     Returns:
+#         The params values are returned one at a time
+#     """
+#     return cast(int, request.param)
+#
+#
+# @pytest.fixture(params=f_num_reqs_arg_list)  # type: ignore
+# def f3_num_reqs_arg(request: Any) -> int:
+#     """Number of requests to make for f3.
+#
+#     Args:
+#         request: special fixture that returns the fixture params
+#
+#     Returns:
+#         The params values are returned one at a time
+#     """
+#     return cast(int, request.param)
+#
+#
+# @pytest.fixture(params=f_num_reqs_arg_list)  # type: ignore
+# def f4_num_reqs_arg(request: Any) -> int:
+#     """Number of requests to make for f4.
+#
+#     Args:
+#         request: special fixture that returns the fixture params
+#
+#     Returns:
+#         The params values are returned one at a time
+#     """
+#     return cast(int, request.param)
+#
+#
+# @pytest.fixture(params=f_num_reqs_arg_list)  # type: ignore
+# def f5_num_reqs_arg(request: Any) -> int:
+#     """Number of requests to make for f5.
+#
+#     Args:
+#         request: special fixture that returns the fixture params
+#
+#     Returns:
+#         The params values are returned one at a time
+#     """
+#     return cast(int, request.param)
 
 
 ########################################################################
 # num_shutdown1_funcs_arg fixture
 ########################################################################
-num_shutdown1_funcs_arg_list = [0, 1, 2, 3, 4]
-
-
-@pytest.fixture(params=num_shutdown1_funcs_arg_list)  # type: ignore
-def num_shutdown1_funcs_arg(request: Any) -> int:
-    """Number of requests to shutdown in first shutdown.
-
-    Args:
-        request: special fixture that returns the fixture params
-
-    Returns:
-        The params values are returned one at a time
-    """
-    return cast(int, request.param)
+# num_shutdown1_funcs_arg_list = [0, 1, 2, 3, 4]
+#
+#
+# @pytest.fixture(params=num_shutdown1_funcs_arg_list)  # type: ignore
+# def num_shutdown1_funcs_arg(request: Any) -> int:
+#     """Number of requests to shutdown in first shutdown.
+#
+#     Args:
+#         request: special fixture that returns the fixture params
+#
+#     Returns:
+#         The params values are returned one at a time
+#     """
+#     return cast(int, request.param)
 
 
 ########################################################################
@@ -540,21 +540,21 @@ def sleep_delay_arg(request: Any) -> float:
 ########################################################################
 # sleep2_delay_arg fixture
 ########################################################################
-sleep2_delay_arg_list = [0.3, 1.1]
+# sleep2_delay_arg_list = [0.3, 1.1]
 
 
-@pytest.fixture(params=sleep2_delay_arg_list)  # type: ignore
-def sleep2_delay_arg(request: Any) -> float:
-    """Whether to use timeout.
-
-    Args:
-        request: special fixture that returns the fixture params
-
-    Returns:
-        The params values are returned one at a time
-
-    """
-    return cast(float, request.param)
+# @pytest.fixture(params=sleep2_delay_arg_list)  # type: ignore
+# def sleep2_delay_arg(request: Any) -> float:
+#     """Whether to use timeout.
+#
+#     Args:
+#         request: special fixture that returns the fixture params
+#
+#     Returns:
+#         The params values are returned one at a time
+#
+#     """
+#     return cast(float, request.param)
 
 
 ########################################################################
@@ -3058,7 +3058,7 @@ def do_final_shutdown(throttle: ThrottleAsync, log_ver: LogVer) -> None:
         log_msg = (
             f"Hard shutdown request detected that the "
             "throttle has already been shutdown by an earlier "
-            "shutdown request - returning False."
+            "shutdown request - returning True."
         )
         log_ver.add_msg(
             log_name="scottbrian_throttle.throttle",
@@ -3593,14 +3593,18 @@ class TestThrottleShutdown:
             # verify new requests are rejected, q empty, and thread is
             # done
             ############################################################
-            assert Throttle.RC_SHUTDOWN == a_throttle.send_request(f2, a_req_time)
+            assert Throttle.RC_THROTTLE_IS_SHUTDOWN == a_throttle.send_request(
+                f2, a_req_time
+            )
             assert a_throttle.async_q.empty()
             assert not a_throttle.request_scheduler_thread.is_alive()
 
             ################################################################
             # the following requests should get rejected
             ################################################################
-            assert Throttle.RC_SHUTDOWN == a_throttle.send_request(f2, a_req_time)
+            assert Throttle.RC_THROTTLE_IS_SHUTDOWN == a_throttle.send_request(
+                f2, a_req_time
+            )
 
             ################################################################
             # verify the log messages
@@ -3799,14 +3803,18 @@ class TestThrottleShutdown:
             # verify new requests are rejected, q empty, and thread is
             # done
             ############################################################
-            assert Throttle.RC_SHUTDOWN == a_throttle.send_request(f2, a_req_time)
+            assert Throttle.RC_THROTTLE_IS_SHUTDOWN == a_throttle.send_request(
+                f2, a_req_time
+            )
             assert a_throttle.async_q.empty()
             assert not a_throttle.request_scheduler_thread.is_alive()
 
             ############################################################
             # the following requests should get rejected
             ############################################################
-            assert Throttle.RC_SHUTDOWN == a_throttle.send_request(f2, a_req_time)
+            assert Throttle.RC_THROTTLE_IS_SHUTDOWN == a_throttle.send_request(
+                f2, a_req_time
+            )
 
             ############################################################
             # verify the log messages
@@ -4038,14 +4046,18 @@ class TestThrottleShutdown:
             # verify new requests are rejected, q empty, and thread is
             # done
             ############################################################
-            assert Throttle.RC_SHUTDOWN == a_throttle.send_request(f2, a_req_time)
+            assert Throttle.RC_THROTTLE_IS_SHUTDOWN == a_throttle.send_request(
+                f2, a_req_time
+            )
             assert a_throttle.async_q.empty()
             assert not a_throttle.request_scheduler_thread.is_alive()
 
             ################################################################
             # the following requests should get rejected
             ################################################################
-            assert Throttle.RC_SHUTDOWN == a_throttle.send_request(f2, a_req_time)
+            assert Throttle.RC_THROTTLE_IS_SHUTDOWN == a_throttle.send_request(
+                f2, a_req_time
+            )
 
             ################################################################
             # verify the log messages
@@ -4398,7 +4410,9 @@ class TestThrottleShutdown:
             # verify new requests are rejected, q empty, and thread is
             # done
             ############################################################
-            assert Throttle.RC_SHUTDOWN == a_throttle.send_request(f2, a_req_time)
+            assert Throttle.RC_THROTTLE_IS_SHUTDOWN == a_throttle.send_request(
+                f2, a_req_time
+            )
             if time_out_none_issued:
                 assert a_throttle.async_q.empty()
                 assert not a_throttle.request_scheduler_thread.is_alive()
@@ -4409,7 +4423,9 @@ class TestThrottleShutdown:
             ############################################################
             # the following requests should get rejected
             ############################################################
-            assert Throttle.RC_SHUTDOWN == a_throttle.send_request(f2, a_req_time)
+            assert Throttle.RC_THROTTLE_IS_SHUTDOWN == a_throttle.send_request(
+                f2, a_req_time
+            )
 
             ############################################################
             # verify the log messages
@@ -4627,14 +4643,18 @@ class TestThrottleShutdown:
             # verify new requests are rejected, q empty, and thread is
             # done
             ############################################################
-            assert Throttle.RC_SHUTDOWN == a_throttle.send_request(f2, a_req_time)
+            assert Throttle.RC_THROTTLE_IS_SHUTDOWN == a_throttle.send_request(
+                f2, a_req_time
+            )
             assert a_throttle.async_q.empty()
             assert not a_throttle.request_scheduler_thread.is_alive()
 
             ############################################################
             # the following requests should get rejected
             ############################################################
-            assert Throttle.RC_SHUTDOWN == a_throttle.send_request(f2, a_req_time)
+            assert Throttle.RC_THROTTLE_IS_SHUTDOWN == a_throttle.send_request(
+                f2, a_req_time
+            )
             assert a_throttle.async_q.empty()
             assert not a_throttle.request_scheduler_thread.is_alive()
 
@@ -4654,6 +4674,12 @@ class TestThrottleShutdown:
     ####################################################################
     # test_shutdown_throttle_funcs
     ####################################################################
+    @pytest.mark.parametrize("sleep2_delay_arg", (0.3, 1.1))
+    @pytest.mark.parametrize("num_shutdown1_funcs_arg", (0, 1, 2, 3, 4))
+    @pytest.mark.parametrize("f1_num_reqs_arg", (0, 16, 32))
+    @pytest.mark.parametrize("f2_num_reqs_arg", (0, 16, 32))
+    @pytest.mark.parametrize("f3_num_reqs_arg", (0, 16, 32))
+    @pytest.mark.parametrize("f4_num_reqs_arg", (0, 16, 32))
     def test_shutdown_throttle_funcs(
         self,
         sleep2_delay_arg: float,
@@ -4962,11 +4988,11 @@ class TestThrottleShutdown:
         ################################################################
         # the following requests should get rejected
         ################################################################
-        assert Throttle.RC_SHUTDOWN == f1(f1_req_time)
-        assert Throttle.RC_SHUTDOWN == f2(f2_req_time)
-        assert Throttle.RC_SHUTDOWN == f3(f3_req_time)
-        assert Throttle.RC_SHUTDOWN == f4(f4_req_time)
-        # assert Throttle.RC_SHUTDOWN == f5(f5_req_time)
+        assert Throttle.RC_THROTTLE_IS_SHUTDOWN == f1(f1_req_time)
+        assert Throttle.RC_THROTTLE_IS_SHUTDOWN == f2(f2_req_time)
+        assert Throttle.RC_THROTTLE_IS_SHUTDOWN == f3(f3_req_time)
+        assert Throttle.RC_THROTTLE_IS_SHUTDOWN == f4(f4_req_time)
+        # assert Throttle.RC_THROTTLE_IS_SHUTDOWN == f5(f5_req_time)
 
         assert f1.throttle.async_q
         assert f1.throttle.async_q.empty()
