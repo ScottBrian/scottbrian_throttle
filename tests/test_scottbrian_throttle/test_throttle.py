@@ -121,39 +121,16 @@ class ReqTime:
 smoke_test: bool = False
 
 if smoke_test:
-    single_requests_arg: Optional[int] = 3
     single_seconds_arg: Optional[float] = 0.3
     single_early_count_arg: Optional[int] = 3
     single_lb_threshold_arg: OptIntFloat = 3
     single_send_interval_mult_arg: Optional[float] = 0.0
 
 else:
-    single_requests_arg = None
     single_seconds_arg = None
     single_early_count_arg = None
     single_lb_threshold_arg = None
     single_send_interval_mult_arg = None
-
-########################################################################
-# requests_arg fixture
-########################################################################
-requests_arg_list = [1, 2, 3]
-if single_requests_arg is not None:
-    requests_arg_list = [single_requests_arg]
-
-
-@pytest.fixture(params=requests_arg_list)  # type: ignore
-def requests_arg(request: Any) -> int:
-    """Using different requests.
-
-    Args:
-        request: special fixture that returns the fixture params
-
-    Returns:
-        The params values are returned one at a time
-    """
-    return cast(int, request.param)
-
 
 ########################################################################
 # seconds_arg fixture
@@ -259,96 +236,6 @@ def shutdown_requests_arg(request: Any) -> int:
 
 
 ########################################################################
-# f_num_reqs_arg fixture
-########################################################################
-# f_num_reqs_arg_list = [0, 16, 32]
-#
-#
-# @pytest.fixture(params=f_num_reqs_arg_list)  # type: ignore
-# def f1_num_reqs_arg(request: Any) -> int:
-#     """Number of requests to make for f1.
-#
-#     Args:
-#         request: special fixture that returns the fixture params
-#
-#     Returns:
-#         The params values are returned one at a time
-#     """
-#     return cast(int, request.param)
-#
-#
-# @pytest.fixture(params=f_num_reqs_arg_list)  # type: ignore
-# def f2_num_reqs_arg(request: Any) -> int:
-#     """Number of requests to make for f2.
-#
-#     Args:
-#         request: special fixture that returns the fixture params
-#
-#     Returns:
-#         The params values are returned one at a time
-#     """
-#     return cast(int, request.param)
-#
-#
-# @pytest.fixture(params=f_num_reqs_arg_list)  # type: ignore
-# def f3_num_reqs_arg(request: Any) -> int:
-#     """Number of requests to make for f3.
-#
-#     Args:
-#         request: special fixture that returns the fixture params
-#
-#     Returns:
-#         The params values are returned one at a time
-#     """
-#     return cast(int, request.param)
-#
-#
-# @pytest.fixture(params=f_num_reqs_arg_list)  # type: ignore
-# def f4_num_reqs_arg(request: Any) -> int:
-#     """Number of requests to make for f4.
-#
-#     Args:
-#         request: special fixture that returns the fixture params
-#
-#     Returns:
-#         The params values are returned one at a time
-#     """
-#     return cast(int, request.param)
-#
-#
-# @pytest.fixture(params=f_num_reqs_arg_list)  # type: ignore
-# def f5_num_reqs_arg(request: Any) -> int:
-#     """Number of requests to make for f5.
-#
-#     Args:
-#         request: special fixture that returns the fixture params
-#
-#     Returns:
-#         The params values are returned one at a time
-#     """
-#     return cast(int, request.param)
-
-
-########################################################################
-# num_shutdown1_funcs_arg fixture
-########################################################################
-# num_shutdown1_funcs_arg_list = [0, 1, 2, 3, 4]
-#
-#
-# @pytest.fixture(params=num_shutdown1_funcs_arg_list)  # type: ignore
-# def num_shutdown1_funcs_arg(request: Any) -> int:
-#     """Number of requests to shutdown in first shutdown.
-#
-#     Args:
-#         request: special fixture that returns the fixture params
-#
-#     Returns:
-#         The params values are returned one at a time
-#     """
-#     return cast(int, request.param)
-
-
-########################################################################
 # shutdown_seconds_arg fixture
 ########################################################################
 shutdown_seconds_arg_list = [0.3, 1, 2]
@@ -446,39 +333,39 @@ def timeout2_arg(request: Any) -> bool:
 ########################################################################
 # timeout_arg fixture
 ########################################################################
-timeout3_arg_list = [0.10, 0.75, 1.25]
+# timeout3_arg_list = [0.10, 0.75, 1.25]
+#
+#
+# @pytest.fixture(params=timeout3_arg_list)  # type: ignore
+# def timeout3_arg(request: Any) -> float:
+#     """Whether to use timeout.
+#
+#     Args:
+#         request: special fixture that returns the fixture params
+#
+#     Returns:
+#         The params values are returned one at a time
+#
+#     """
+#     return cast(float, request.param)
 
-
-@pytest.fixture(params=timeout3_arg_list)  # type: ignore
-def timeout3_arg(request: Any) -> float:
-    """Whether to use timeout.
-
-    Args:
-        request: special fixture that returns the fixture params
-
-    Returns:
-        The params values are returned one at a time
-
-    """
-    return cast(float, request.param)
-
-
-########################################################################
-# short_long_timeout_arg
-########################################################################
-# short_long_timeout_arg_list = (
-#     ("Short", "Short", "Long"),
-#     ("Short", "Long", "Short"),
-#     ("Short", "Long", "Long"),
-#     ("Long", "Short", "Short"),
-#     ("Long", "Short", "Long"),
-#     ("Long", "Long", "Short"),
-#     ("Long", "Long", "Long"),
+# ########################################################################
+# # hard_soft_combo_arg
+# ########################################################################
+# hard_soft_combo_arg_list = (
+#     ("Soft", "Soft", "Soft"),
+#     ("Soft", "Soft", "Hard"),
+#     ("Soft", "Hard", "Soft"),
+#     ("Soft", "Hard", "Hard"),
+#     ("Hard", "Soft", "Soft"),
+#     ("Hard", "Soft", "Hard"),
+#     ("Hard", "Hard", "Soft"),
+#     ("Hard", "Hard", "Hard"),
 # )
 #
 #
-# @pytest.fixture(params=short_long_timeout_arg_list)  # type: ignore
-# def short_long_timeout_arg(request: Any) -> tuple[str, str, str]:
+# @pytest.fixture(params=hard_soft_combo_arg_list)  # type: ignore
+# def hard_soft_combo_arg(request: Any) -> tuple[str, str, str]:
 #     """Whether to use timeout.
 #
 #     Args:
@@ -492,52 +379,23 @@ def timeout3_arg(request: Any) -> float:
 
 
 ########################################################################
-# hard_soft_combo_arg
-########################################################################
-hard_soft_combo_arg_list = (
-    ("Soft", "Soft", "Soft"),
-    ("Soft", "Soft", "Hard"),
-    ("Soft", "Hard", "Soft"),
-    ("Soft", "Hard", "Hard"),
-    ("Hard", "Soft", "Soft"),
-    ("Hard", "Soft", "Hard"),
-    ("Hard", "Hard", "Soft"),
-    ("Hard", "Hard", "Hard"),
-)
-
-
-@pytest.fixture(params=hard_soft_combo_arg_list)  # type: ignore
-def hard_soft_combo_arg(request: Any) -> tuple[str, str, str]:
-    """Whether to use timeout.
-
-    Args:
-        request: special fixture that returns the fixture params
-
-    Returns:
-        The params values are returned one at a time
-
-    """
-    return cast(tuple[str, str, str], request.param)
-
-
-########################################################################
 # sleep_delay_arg fixture
 ########################################################################
-sleep_delay_arg_list = [0.10, 0.30, 1.25]
-
-
-@pytest.fixture(params=sleep_delay_arg_list)  # type: ignore
-def sleep_delay_arg(request: Any) -> float:
-    """Whether to use timeout.
-
-    Args:
-        request: special fixture that returns the fixture params
-
-    Returns:
-        The params values are returned one at a time
-
-    """
-    return cast(float, request.param)
+# sleep_delay_arg_list = [0.10, 0.30, 1.25]
+#
+#
+# @pytest.fixture(params=sleep_delay_arg_list)  # type: ignore
+# def sleep_delay_arg(request: Any) -> float:
+#     """Whether to use timeout.
+#
+#     Args:
+#         request: special fixture that returns the fixture params
+#
+#     Returns:
+#         The params values are returned one at a time
+#
+#     """
+#     return cast(float, request.param)
 
 
 ########################################################################
@@ -737,6 +595,7 @@ class TestThrottleBasic:
     ####################################################################
     # len checks
     ####################################################################
+    @pytest.mark.parametrize("requests_arg", (1, 2, 3))
     def test_throttle_len_async(
         self,
         requests_arg: int,
@@ -775,6 +634,7 @@ class TestThrottleBasic:
     ####################################################################
     # repr with mode async
     ####################################################################
+    @pytest.mark.parametrize("requests_arg", (1, 2, 3))
     def test_throttle_repr_async(
         self, requests_arg: int, seconds_arg: IntFloat
     ) -> None:
@@ -823,6 +683,7 @@ class TestThrottleBasic:
     ####################################################################
     # repr with mode sync
     ####################################################################
+    @pytest.mark.parametrize("requests_arg", (1, 2, 3))
     def test_throttle_repr_sync(
         self,
         requests_arg: int,
@@ -847,6 +708,7 @@ class TestThrottleBasic:
     ####################################################################
     # repr with mode sync early count
     ####################################################################
+    @pytest.mark.parametrize("requests_arg", (1, 2, 3))
     def test_throttle_repr_sync_ec(
         self,
         requests_arg: int,
@@ -876,6 +738,7 @@ class TestThrottleBasic:
     ####################################################################
     # repr with mode sync leaky bucket
     ####################################################################
+    @pytest.mark.parametrize("requests_arg", (1, 2, 3))
     def test_throttle_repr_sync_lb(
         self,
         requests_arg: int,
@@ -1244,6 +1107,7 @@ class TestThrottle:
     ####################################################################
     # test_throttle_async
     ####################################################################
+    @pytest.mark.parametrize("requests_arg", (1, 2, 3))
     def test_throttle_async(
         self, requests_arg: int, seconds_arg: IntFloat, send_interval_mult_arg: float
     ) -> None:
@@ -1269,6 +1133,7 @@ class TestThrottle:
     ####################################################################
     # test_throttle_async
     ####################################################################
+    @pytest.mark.parametrize("requests_arg", (1, 2, 3))
     def test_throttle_multi_async(
         self,
         requests_arg: int,
@@ -1316,6 +1181,7 @@ class TestThrottle:
     ####################################################################
     # test_throttle_sync
     ####################################################################
+    @pytest.mark.parametrize("requests_arg", (1, 2, 3))
     def test_throttle_sync(
         self, requests_arg: int, seconds_arg: IntFloat, send_interval_mult_arg: float
     ) -> None:
@@ -1341,6 +1207,7 @@ class TestThrottle:
     ####################################################################
     # test_throttle_async
     ####################################################################
+    @pytest.mark.parametrize("requests_arg", (1, 2, 3))
     def test_throttle_multi_sync(
         self,
         requests_arg: int,
@@ -1389,6 +1256,7 @@ class TestThrottle:
     ####################################################################
     # test_throttle_sync_ec
     ####################################################################
+    @pytest.mark.parametrize("requests_arg", (1, 2, 3))
     def test_throttle_sync_ec(
         self,
         requests_arg: int,
@@ -1419,6 +1287,7 @@ class TestThrottle:
     ####################################################################
     # test_throttle_async
     ####################################################################
+    @pytest.mark.parametrize("requests_arg", (1, 2, 3))
     def test_throttle_multi_sync_ec(
         self, requests_arg: int, seconds_arg: IntFloat, early_count_arg: int
     ) -> None:
@@ -1465,6 +1334,7 @@ class TestThrottle:
     ####################################################################
     # test_throttle_sync_lb
     ####################################################################
+    @pytest.mark.parametrize("requests_arg", (1, 2, 3))
     def test_throttle_sync_lb(
         self,
         requests_arg: int,
@@ -1495,6 +1365,7 @@ class TestThrottle:
     ####################################################################
     # test_throttle_async
     ####################################################################
+    @pytest.mark.parametrize("requests_arg", (1, 2, 3))
     def test_throttle_multi_sync_lb(
         self, requests_arg: int, seconds_arg: IntFloat, lb_threshold_arg: int
     ) -> None:
@@ -2266,6 +2137,7 @@ class TestThrottle:
     ####################################################################
     # test_pie_throttle_async
     ####################################################################
+    @pytest.mark.parametrize("requests_arg", (1, 2, 3))
     def test_pie_throttle_async(
         self, requests_arg: int, seconds_arg: IntFloat, send_interval_mult_arg: float
     ) -> None:
@@ -2466,6 +2338,7 @@ class TestThrottle:
     ####################################################################
     # test_throttle_sync
     ####################################################################
+    @pytest.mark.parametrize("requests_arg", (1, 2, 3))
     def test_pie_throttle_sync(
         self, requests_arg: int, seconds_arg: IntFloat, send_interval_mult_arg: float
     ) -> None:
@@ -2682,6 +2555,7 @@ class TestThrottle:
     ####################################################################
     # test_throttle_sync_ec
     ####################################################################
+    @pytest.mark.parametrize("requests_arg", (1, 2, 3))
     def test_pie_throttle_sync_ec(
         self,
         requests_arg: int,
@@ -2901,6 +2775,7 @@ class TestThrottle:
     ####################################################################
     # test_throttle_sync_lb
     ####################################################################
+    @pytest.mark.parametrize("requests_arg", (1, 2, 3))
     def test_pie_throttle_sync_lb(
         self,
         requests_arg: int,
@@ -3100,6 +2975,7 @@ class TestThrottleMisc:
     ####################################################################
     # test_get_interval_secs
     ####################################################################
+    @pytest.mark.parametrize("requests_arg", (1, 2, 3))
     def test_get_interval_secs(self, requests_arg: int, seconds_arg: float) -> None:
         """Method to test get interval in seconds.
 
@@ -3119,6 +2995,7 @@ class TestThrottleMisc:
     ####################################################################
     # test_get_interval_ns
     ####################################################################
+    @pytest.mark.parametrize("requests_arg", (1, 2, 3))
     def test_get_interval_ns(self, requests_arg: int, seconds_arg: float) -> None:
         """Method to test get interval in nanoseconds.
 
@@ -3138,6 +3015,7 @@ class TestThrottleMisc:
     ####################################################################
     # test_get_completion_time_secs
     ####################################################################
+    @pytest.mark.parametrize("requests_arg", (1, 2, 3))
     def test_get_completion_time_secs(
         self, requests_arg: int, seconds_arg: float
     ) -> None:
@@ -3171,6 +3049,7 @@ class TestThrottleMisc:
     ####################################################################
     # test_get_completion_time_ns
     ####################################################################
+    @pytest.mark.parametrize("requests_arg", (1, 2, 3))
     def test_get_completion_time_ns(
         self, requests_arg: int, seconds_arg: float
     ) -> None:
@@ -3377,6 +3256,7 @@ class TestThrottleShutdown:
     short_long_items = ("Short", "Long")
     short_long_combos = it.product(short_long_items, repeat=3)
 
+    @pytest.mark.parametrize("requests_arg", (1, 2, 3))
     @pytest.mark.parametrize("short_long_timeout_arg", short_long_combos)
     def test_throttle_hard_shutdown_timeout(
         self,
@@ -3393,6 +3273,7 @@ class TestThrottleShutdown:
 
 
         """
+        complete_log_msg_issued = False
         seconds_arg = 0.3
         sleep_delay_arg = 0.0001
         num_reqs_to_make = 100000
@@ -3491,7 +3372,6 @@ class TestThrottleShutdown:
 
             arrival_time = 0
             long_shutdown_done = False
-            complete_log_msg_needed = True
             for short_long in short_long_timeout_arg:
                 if short_long == "Short":
                     timeout = 0.001
@@ -3523,8 +3403,8 @@ class TestThrottleShutdown:
                 assert num_reqs_done == exp_reqs_done
 
                 if exp_ret_code == ThrottleAsync.RC_SHUTDOWN_HARD_COMPLETED_OK:
-                    if complete_log_msg_needed:
-                        complete_log_msg_needed = False
+                    if not complete_log_msg_issued:
+                        complete_log_msg_issued = True
                         log_msg = (
                             "start_shutdown request successfully completed "
                             f"in {a_throttle.shutdown_elapsed_time:.4f} "
@@ -3613,6 +3493,9 @@ class TestThrottleShutdown:
     ####################################################################
     # test_throttle_shutdown
     ####################################################################
+    @pytest.mark.parametrize("requests_arg", (1, 2, 3))
+    @pytest.mark.parametrize("sleep_delay_arg", (0.10, 0.30, 1.25))
+    @pytest.mark.parametrize("timeout3_arg", (0.10, 0.75, 1.25))
     def test_throttle_soft_shutdown_timeout(
         self,
         requests_arg: int,
@@ -3632,7 +3515,7 @@ class TestThrottleShutdown:
 
 
         """
-        do_final_shutdown_needed: bool = True
+        complete_log_msg_issued: bool = False
         seconds_arg = 0.3
         num_reqs_to_make = 100
 
@@ -3760,17 +3643,19 @@ class TestThrottleShutdown:
                 prev_reqs_done = exp_reqs_done
 
                 if exp_reqs_done == num_reqs_to_make:
-                    log_msg = (
-                        "start_shutdown request successfully completed "
-                        f"in {a_throttle.shutdown_elapsed_time:.4f} "
-                        "seconds"
-                    )
-                    log_ver.add_msg(
-                        log_name="scottbrian_throttle.throttle",
-                        log_level=logging.DEBUG,
-                        log_msg=log_msg,
-                    )
-                    assert ret_code is True
+                    if not complete_log_msg_issued:
+                        complete_log_msg_issued = True
+                        log_msg = (
+                            "start_shutdown request successfully completed "
+                            f"in {a_throttle.shutdown_elapsed_time:.4f} "
+                            "seconds"
+                        )
+                        log_ver.add_msg(
+                            log_name="scottbrian_throttle.throttle",
+                            log_level=logging.DEBUG,
+                            log_msg=log_msg,
+                        )
+                    assert ret_code == ThrottleAsync.SOFT_SHUTDOWN_COMPLETED
                     break
                 else:
                     log_msg = "start_shutdown request timed out " f"with {timeout=:.4f}"
@@ -3779,7 +3664,7 @@ class TestThrottleShutdown:
                         log_level=logging.DEBUG,
                         log_msg=log_msg,
                     )
-                    assert ret_code is False
+                    assert ret_code == ThrottleAsync.RC_SHUTDOWN_TIMED_OUT
                     assert timeout <= shutdown_elapsed_time <= (timeout * 1.05)
 
             elapsed_time = time.time() - start_time
@@ -3814,11 +3699,8 @@ class TestThrottleShutdown:
             log_ver.print_match_results(match_results)
             log_ver.verify_log_results(match_results)
 
-            do_final_shutdown_needed = False
-
         finally:
-            if do_final_shutdown_needed:
-                do_final_shutdown(throttle=a_throttle, log_ver=log_ver)
+            do_final_shutdown(throttle=a_throttle, log_ver=log_ver)
 
     ####################################################################
     # test_throttle_shutdown
@@ -3826,6 +3708,7 @@ class TestThrottleShutdown:
     timeout_items = (0.0, 0.10, 0.75, 1.25)
     multi_timeout_combos = it.combinations_with_replacement(timeout_items, 3)
 
+    @pytest.mark.parametrize("requests_arg", (1, 2, 3))
     @pytest.mark.parametrize("multi_timeout_arg", multi_timeout_combos)
     def test_throttle_mutil_soft_shutdown(
         self,
@@ -3842,7 +3725,7 @@ class TestThrottleShutdown:
 
 
         """
-        do_final_shutdown_needed: bool = True
+        complete_log_msg_issued: bool = False
         seconds_arg = 0.3
         sleep_delay_arg = 0.1
         num_reqs_to_make = 100
@@ -4057,15 +3940,17 @@ class TestThrottleShutdown:
             log_ver.print_match_results(match_results)
             log_ver.verify_log_results(match_results)
 
-            do_final_shutdown_needed = False
-
         finally:
-            if do_final_shutdown_needed:
-                do_final_shutdown(throttle=a_throttle, log_ver=log_ver)
+            do_final_shutdown(throttle=a_throttle, log_ver=log_ver)
 
     ####################################################################
     # test_throttle_shutdown
     ####################################################################
+    hard_soft_items = ("Hard", "Soft")
+    hard_soft_combos = it.product(hard_soft_items, repeat=3)
+
+    @pytest.mark.parametrize("requests_arg", (1, 2, 3))
+    @pytest.mark.parametrize("hard_soft_combo_arg", hard_soft_combos)
     def test_throttle_shutdown_combos(
         self,
         requests_arg: int,
@@ -4083,7 +3968,7 @@ class TestThrottleShutdown:
 
 
         """
-        do_final_shutdown_needed: bool = True
+        complete_log_msg_issued: bool = False
         seconds_arg = 0.3
         num_reqs_to_make = 100000
         soft_reqs_to_allow = 10
@@ -4425,15 +4310,13 @@ class TestThrottleShutdown:
             log_ver.print_match_results(match_results)
             log_ver.verify_log_results(match_results)
 
-            do_final_shutdown_needed = False
-
         finally:
-            if do_final_shutdown_needed:
-                do_final_shutdown(throttle=a_throttle, log_ver=log_ver)
+            do_final_shutdown(throttle=a_throttle, log_ver=log_ver)
 
     ####################################################################
     # test_throttle_shutdown
     ####################################################################
+    @pytest.mark.parametrize("requests_arg", (1, 2, 3))
     def test_throttle_soft_shutdown_terminated_by_hard(
         self, requests_arg: int, timeout1_arg: bool, caplog: pytest.LogCaptureFixture
     ) -> None:
@@ -4445,7 +4328,7 @@ class TestThrottleShutdown:
             caplog: pytest fixture to capture log output
 
         """
-        do_final_shutdown_needed: bool = True
+        complete_log_msg_issued: bool = False
         seconds_arg = 0.3
         num_reqs_to_make = 100
         soft_reqs_to_allow = 10
@@ -4656,11 +4539,8 @@ class TestThrottleShutdown:
             log_ver.print_match_results(match_results)
             log_ver.verify_log_results(match_results)
 
-            do_final_shutdown_needed = False
-
         finally:
-            if do_final_shutdown_needed:
-                do_final_shutdown(throttle=a_throttle, log_ver=log_ver)
+            do_final_shutdown(throttle=a_throttle, log_ver=log_ver)
 
     ####################################################################
     # test_shutdown_throttle_funcs
