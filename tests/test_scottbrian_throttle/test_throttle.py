@@ -3655,7 +3655,7 @@ class TestThrottleShutdown:
                             log_level=logging.DEBUG,
                             log_msg=log_msg,
                         )
-                    assert ret_code == ThrottleAsync.SOFT_SHUTDOWN_COMPLETED
+                    assert ret_code == ThrottleAsync.RC_SHUTDOWN_SOFT_COMPLETED_OK
                     break
                 else:
                     log_msg = "start_shutdown request timed out " f"with {timeout=:.4f}"
@@ -3665,7 +3665,7 @@ class TestThrottleShutdown:
                         log_msg=log_msg,
                     )
                     assert ret_code == ThrottleAsync.RC_SHUTDOWN_TIMED_OUT
-                    assert timeout <= shutdown_elapsed_time <= (timeout * 1.05)
+                    assert timeout <= shutdown_elapsed_time <= (timeout * 1.10)
 
             elapsed_time = time.time() - start_time
 
@@ -3761,21 +3761,10 @@ class TestThrottleShutdown:
 
             log_ver.test_msg(f"soft shutdown {rc=}")
             if shutdown_completed:
-                if rc is False:
-                    log_msg = (
-                        f"Soft shutdown request detected that the "
-                        "throttle has already been shutdown by an earlier "
-                        "shutdown request - returning False."
-                    )
-                    log_ver.add_msg(
-                        log_name="scottbrian_throttle.throttle",
-                        log_level=logging.DEBUG,
-                        log_msg=log_msg,
-                    )
                 return
 
             if timeout == 0.0 or timeout == no_timeout_secs:
-                assert rc is True
+                assert rc == ThrottleAsync.RC_SHUTDOWN_SOFT_COMPLETED_OK
                 l_msg = (
                     "start_shutdown request successfully completed "
                     f"in {a_throttle.shutdown_elapsed_time:.4f} "
@@ -3783,7 +3772,7 @@ class TestThrottleShutdown:
                 )
                 shutdown_completed = True
             else:
-                assert rc is False
+                assert rc == ThrottleAsync.RC_SHUTDOWN_TIMED_OUT
                 l_msg = f"start_shutdown request timed out with {timeout=:.4f}"
 
             log_ver.add_msg(

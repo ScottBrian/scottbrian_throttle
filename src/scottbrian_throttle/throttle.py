@@ -1266,11 +1266,11 @@ class ThrottleAsync(Throttle):
     ####################################################################
     # throttle state constants
     ####################################################################
-    ACTIVE: Final[int] = 0
-    SOFT_SHUTDOWN_STARTED: Final[int] = 1
-    HARD_SHUTDOWN_STARTED: Final[int] = 2
-    SOFT_SHUTDOWN_COMPLETED: Final[int] = 3
-    HARD_SHUTDOWN_COMPLETED: Final[int] = 4
+    _ACTIVE: Final[int] = 0
+    _SOFT_SHUTDOWN_STARTED: Final[int] = 1
+    _HARD_SHUTDOWN_STARTED: Final[int] = 2
+    _SOFT_SHUTDOWN_COMPLETED: Final[int] = 3
+    _HARD_SHUTDOWN_COMPLETED: Final[int] = 4
 
     __slots__ = (
         "async_q_size",
@@ -1360,7 +1360,7 @@ class ThrottleAsync(Throttle):
         # Set remainder of vars
         ################################################################
         self.shutdown_lock = threading.Lock()
-        self.throttle_state = ThrottleAsync.ACTIVE
+        self.throttle_state = ThrottleAsync._ACTIVE
         self._check_async_q_time = 0.0
         self._check_async_q_time2 = 0.0
         self.shutdown_start_time = 0.0
@@ -1459,7 +1459,7 @@ class ThrottleAsync(Throttle):
               because the throttle was shut down.
 
         """
-        if self.throttle_state != ThrottleAsync.ACTIVE:
+        if self.throttle_state != ThrottleAsync._ACTIVE:
             return Throttle.RC_THROTTLE_IS_SHUTDOWN
 
         # TODO: use se_lock
@@ -1476,7 +1476,7 @@ class ThrottleAsync(Throttle):
         # async_q - this request will never be processed
         with self.shutdown_lock:
             request_item = Throttle.Request(func, args, kwargs, time.perf_counter_ns())
-            while self.throttle_state == ThrottleAsync.ACTIVE:
+            while self.throttle_state == ThrottleAsync._ACTIVE:
                 try:
                     self.async_q.put(request_item, block=True, timeout=0.5)
                     return Throttle.RC_OK
@@ -1522,7 +1522,7 @@ class ThrottleAsync(Throttle):
                     time.perf_counter_ns() + self._target_interval_ns
                 )
             except queue.Empty:
-                if self.throttle_state != ThrottleAsync.ACTIVE:
+                if self.throttle_state != ThrottleAsync._ACTIVE:
                     return
                 continue  # no need to wait since we already did
             ############################################################
@@ -1531,7 +1531,7 @@ class ThrottleAsync(Throttle):
             # errors.
             ############################################################
             try:
-                if self.throttle_state != ThrottleAsync.HARD_SHUTDOWN_STARTED:
+                if self.throttle_state != ThrottleAsync._HARD_SHUTDOWN_STARTED:
                     self._arrival_time = request_item.arrival_time
                     request_item.request_func(*request_item.args, **request_item.kwargs)
                     # obtained_nowait=obtained_nowait)
@@ -1550,10 +1550,10 @@ class ThrottleAsync(Throttle):
             ############################################################
             while True:
                 # handle shutdown
-                if self.throttle_state != ThrottleAsync.ACTIVE:
+                if self.throttle_state != ThrottleAsync._ACTIVE:
                     if self.async_q.empty():
                         return  # we are done with shutdown
-                    if self.throttle_state == ThrottleAsync.HARD_SHUTDOWN_STARTED:
+                    if self.throttle_state == ThrottleAsync._HARD_SHUTDOWN_STARTED:
                         break  # don't sleep for hard shutdown
 
                 # Use min to ensure we don't sleep too long and appear
@@ -1691,7 +1691,7 @@ class ThrottleAsync(Throttle):
             # a soft shutdown. The return codes will tell either type
             # of request how the throttle was shutdown.
 
-            if self.throttle_state == ThrottleAsync.ACTIVE:
+            if self.throttle_state == ThrottleAsync._ACTIVE:
                 # There is only one shutdown per throttle instantiation, so we
                 # will capture the shutdown length of time starting with the
                 # first shutdown request. Any subsequent shutdown requests will
@@ -1699,12 +1699,12 @@ class ThrottleAsync(Throttle):
                 self.shutdown_start_time = time.time()
 
                 if shutdown_type == ThrottleAsync.TYPE_SHUTDOWN_SOFT:
-                    self.throttle_state = ThrottleAsync.SOFT_SHUTDOWN_STARTED
+                    self.throttle_state = ThrottleAsync._SOFT_SHUTDOWN_STARTED
                 else:
-                    self.throttle_state = ThrottleAsync.HARD_SHUTDOWN_STARTED
-            elif self.throttle_state == ThrottleAsync.SOFT_SHUTDOWN_STARTED:
+                    self.throttle_state = ThrottleAsync._HARD_SHUTDOWN_STARTED
+            elif self.throttle_state == ThrottleAsync._SOFT_SHUTDOWN_STARTED:
                 if shutdown_type == ThrottleAsync.TYPE_SHUTDOWN_HARD:
-                    self.throttle_state = ThrottleAsync.HARD_SHUTDOWN_STARTED
+                    self.throttle_state = ThrottleAsync._HARD_SHUTDOWN_STARTED
 
         ################################################################
         # join the schedule_requests thread to wait for the shutdown
@@ -1731,11 +1731,11 @@ class ThrottleAsync(Throttle):
 
             # if here, throttle is shutdown
             completion_log_msg_needed = False
-            if self.throttle_state == ThrottleAsync.SOFT_SHUTDOWN_STARTED:
-                self.throttle_state = ThrottleAsync.SOFT_SHUTDOWN_COMPLETED
+            if self.throttle_state == ThrottleAsync._SOFT_SHUTDOWN_STARTED:
+                self.throttle_state = ThrottleAsync._SOFT_SHUTDOWN_COMPLETED
                 completion_log_msg_needed = True
-            elif self.throttle_state == ThrottleAsync.HARD_SHUTDOWN_STARTED:
-                self.throttle_state = ThrottleAsync.HARD_SHUTDOWN_COMPLETED
+            elif self.throttle_state == ThrottleAsync._HARD_SHUTDOWN_STARTED:
+                self.throttle_state = ThrottleAsync._HARD_SHUTDOWN_COMPLETED
                 completion_log_msg_needed = True
 
             if completion_log_msg_needed:
@@ -1745,7 +1745,7 @@ class ThrottleAsync(Throttle):
                     f"in {self.shutdown_elapsed_time:.4f} seconds"
                 )
 
-            if self.throttle_state == ThrottleAsync.SOFT_SHUTDOWN_COMPLETED:
+            if self.throttle_state == ThrottleAsync._SOFT_SHUTDOWN_COMPLETED:
                 return ThrottleAsync.RC_SHUTDOWN_SOFT_COMPLETED_OK
             else:
                 return ThrottleAsync.RC_SHUTDOWN_HARD_COMPLETED_OK
