@@ -1455,8 +1455,8 @@ class ThrottleAsync(Throttle):
 
         Returns:
             * ``Throttle.RC_OK`` (0) request scheduled
-            * ``Throttle.RC_THROTTLE_IS_SHUTDOWN`` (4) - the request was rejected
-              because the throttle was shut down.
+            * ``Throttle.RC_THROTTLE_IS_SHUTDOWN`` (4) - the request was
+              rejected because the throttle was shut down.
 
         """
         if self.throttle_state != ThrottleAsync._ACTIVE:
@@ -1610,11 +1610,11 @@ class ThrottleAsync(Throttle):
                                *requests* arguments specified during
                                throttle instantiation.
                              * A hard shutdown
-                               (ThrottleAsync.TYPE_SHUTDOWN_HARD) stops any
-                               additional requests from being queued and
-                               cleans up the request queue by quickly
-                               removing any remaining requests without
-                               executing them.
+                               (ThrottleAsync.TYPE_SHUTDOWN_HARD) stops
+                               any additional requests from being queued
+                               and cleans up the request queue by
+                               quickly removing any remaining requests
+                               without executing them.
             timeout: number of seconds to allow for shutdown to
                        complete. If the shutdown times out, control is
                        returned with a return value of False. The
@@ -1639,6 +1639,7 @@ class ThrottleAsync(Throttle):
         .. # noqa: DAR101
 
         Returns:
+
             * RC_SHUTDOWN_SOFT_COMPLETED_OK (0): the
               ``start_shutdown()`` request either completed a soft
               shutdown or detected that a previous soft shutdown
@@ -1692,10 +1693,11 @@ class ThrottleAsync(Throttle):
             # of request how the throttle was shutdown.
 
             if self.throttle_state == ThrottleAsync._ACTIVE:
-                # There is only one shutdown per throttle instantiation, so we
-                # will capture the shutdown length of time starting with the
-                # first shutdown request. Any subsequent shutdown requests will
-                # not affect the total shutdown time.
+                # We will set the start time only when the first
+                # shutdown request is made. More than one shutdown
+                # request can be made. Whichever request first detects
+                # the completion of the shutdown will calculate the
+                # elapsed time.
                 self.shutdown_start_time = time.time()
 
                 if shutdown_type == ThrottleAsync.TYPE_SHUTDOWN_SOFT:

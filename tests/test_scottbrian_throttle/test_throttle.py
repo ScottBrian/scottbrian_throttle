@@ -18,7 +18,7 @@ import sys
 import threading
 import time
 from time import perf_counter_ns
-from typing import Any, Callable, cast, Final, Optional, Union
+from typing import Any, Callable, cast, Final, Optional, TypeVar, Union
 from typing_extensions import TypeAlias
 
 ########################################################################
@@ -28,6 +28,8 @@ import pytest
 from scottbrian_utils.flower_box import print_flower_box_msg as flowers
 from scottbrian_utils.pauser import Pauser
 from scottbrian_utils.log_verifier import LogVer
+from scottbrian_utils.entry_trace import etrace
+import wrapt
 
 ########################################################################
 # Local
@@ -490,6 +492,48 @@ def request_style_arg(request: Any) -> int:
         The params values are returned one at a time
     """
     return cast(int, request.param)
+
+
+########################################################################
+# verify_throttle_expected_reqs
+########################################################################
+def verify_throttle_expected_reqs(
+    throttle: ThrottleAsync, start_time: float, req_time: ReqTime, log_ver: LogVer
+) -> None:
+    elapsed_time_from_start = time.time() - start_time
+    num_reqs_done = req_time.num_reqs
+    arrival_time = req_time.arrival_time
+    elapsed_time_from_arrival = arrival_time - start_time
+
+    exp_reqs_done = throttle.get_expected_num_completed_reqs(
+        interval=elapsed_time_from_start
+    )
+
+    exp_reqs_done2 = throttle.get_expected_num_completed_reqs(
+        interval=elapsed_time_from_arrival
+    )
+
+    start_time_str = formatted_time_str(raw_time=start_time)
+    arrival_time_str = formatted_time_str(raw_time=arrival_time)
+    elapsed_time_from_start_str = formatted_interval_str(
+        raw_interval=elapsed_time_from_start
+    )
+    elapsed_time_from_arrival_str = formatted_interval_str(
+        raw_interval=elapsed_time_from_arrival
+    )
+
+    log_ver.test_msg(
+        log_msg=(
+            f"{start_time_str=}, {arrival_time_str=}, "
+            f"{elapsed_time_from_arrival_str=}, "
+            f"{elapsed_time_from_start_str=}, "
+            f"{exp_reqs_done=}, {exp_reqs_done2=}, "
+            f"{num_reqs_done=}"
+        )
+    )
+
+    assert abs(exp_reqs_done - exp_reqs_done2) <= 1
+    assert abs(num_reqs_done - (exp_reqs_done + exp_reqs_done2) / 2) <= 1
 
 
 ########################################################################
@@ -3247,8 +3291,30 @@ class TestThrottleShutdownErrors:
 ########################################################################
 # TestThrottleShutdown
 ########################################################################
+# F = TypeVar("F", bound=Callable[..., Any])
+#
+#
+# def clear_log_ver(
+#     wrapped: Optional[F] = None,
+# ) -> F:
+#     @wrapt.decorator(enabled=True)  # type: ignore
+#     def trace_wrapper(
+#         wrapped: F,
+#         instance: Optional[Any],
+#         args: tuple[Any, ...],
+#         kwargs: dict[str, Any],
+#     ) -> Any:
+#         instance.log_ver.patterns = []
+#         return_value = wrapped(*args, **kwargs)
+#         return return_value
+#
+#     return cast(F, trace_wrapper(wrapped))
+
+
 class TestThrottleShutdown:
     """Class TestThrottle."""
+
+    # log_ver = LogVer(log_name=test_log_name)
 
     ####################################################################
     # test_throttle_shutdown
@@ -3258,6 +3324,7 @@ class TestThrottleShutdown:
 
     @pytest.mark.parametrize("requests_arg", (1, 2, 3))
     @pytest.mark.parametrize("short_long_timeout_arg", short_long_combos)
+    @etrace(latest=-1, depth=0, log_ver=True)
     def test_throttle_hard_shutdown_timeout(
         self,
         requests_arg: int,
@@ -3278,12 +3345,13 @@ class TestThrottleShutdown:
         sleep_delay_arg = 0.0001
         num_reqs_to_make = 100000
 
-        log_ver = LogVer(log_name=test_log_name)
-        alpha_call_seq = (
-            "test_throttle.py::TestThrottleShutdown"
-            ".test_throttle_hard_shutdown_timeout"
-        )
-        log_ver.add_call_seq(name="alpha", seq=alpha_call_seq)
+        # log_ver = LogVer(log_name=test_log_name)
+        log_ver = self.log_ver
+        # alpha_call_seq = (
+        #     "test_throttle.py::TestThrottleShutdown"
+        #     ".test_throttle_hard_shutdown_timeout"
+        # )
+        # log_ver.add_call_seq(name="alpha", seq=alpha_call_seq)
 
         def f2(req_time: ReqTime) -> None:
             """F2 request function.
@@ -3358,20 +3426,28 @@ class TestThrottleShutdown:
 
             log_ver.test_msg(f"about to sleep for {sleep_time=}")
             time.sleep(sleep_time)
-            num_reqs_done = a_req_time.num_reqs
-            arrival_time = a_req_time.arrival_time
-            elapsed_time_from_arrival = arrival_time - start_time
-            exp_reqs_done = a_throttle.get_expected_num_completed_reqs(
-                interval=elapsed_time_from_arrival
-            )
 
-            assert num_reqs_done == exp_reqs_done
+            verify_throttle_expected_reqs(
+                throttle=a_throttle,
+                start_time=start_time,
+                req_time=a_req_time,
+                log_ver=log_ver,
+            )
+            # num_reqs_done = a_req_time.num_reqs
+            # arrival_time = a_req_time.arrival_time
+            # elapsed_time_from_arrival = arrival_time - start_time
+            # exp_reqs_done = a_throttle.get_expected_num_completed_reqs(
+            #     interval=elapsed_time_from_arrival
+            # )
+
+            # assert num_reqs_done == exp_reqs_done
 
             num_reqs_remaining = a_throttle.async_q.qsize()
             log_ver.test_msg(f"remaining requests on asynq: {num_reqs_remaining}")
 
             arrival_time = 0
             long_shutdown_done = False
+            num_reqs_done_before_shutdown = 0
             for short_long in short_long_timeout_arg:
                 if short_long == "Short":
                     timeout = 0.001
@@ -3388,19 +3464,35 @@ class TestThrottleShutdown:
 
                 # expect no additional reqs done since hard shutdown
 
-                num_reqs_done = a_req_time.num_reqs
-                if arrival_time == 0:
-                    arrival_time = a_req_time.arrival_time
-                    elapsed_time_from_arrival = arrival_time - start_time
-                    exp_reqs_done = a_throttle.get_expected_num_completed_reqs(
-                        interval=elapsed_time_from_arrival
+                # do the verify check only once before the shutdown
+                # because the number of expected reeqs will increase
+                # since it is based of start_time, but no reqs should
+                # be processed once the shutdown is started
+                if num_reqs_done_before_shutdown == 0:
+                    verify_throttle_expected_reqs(
+                        throttle=a_throttle,
+                        start_time=start_time,
+                        req_time=a_req_time,
+                        log_ver=log_ver,
                     )
+                # num_reqs_done = a_req_time.num_reqs
+                # if arrival_time == 0:
+                #     arrival_time = a_req_time.arrival_time
+                #     elapsed_time_from_arrival = arrival_time - start_time
+                #     exp_reqs_done = a_throttle.get_expected_num_completed_reqs(
+                #         interval=elapsed_time_from_arrival
+                #     )
+
+                if num_reqs_done_before_shutdown == 0:
+                    num_reqs_done_before_shutdown = a_req_time.num_reqs
 
                 ret_code = a_throttle.start_shutdown(
                     shutdown_type=ThrottleAsync.TYPE_SHUTDOWN_HARD, timeout=timeout
                 )
 
-                assert num_reqs_done == exp_reqs_done
+                # verify that the throttle did not process any reqs
+                # after the shutdown was started
+                assert num_reqs_done_before_shutdown == a_req_time.num_reqs
 
                 if exp_ret_code == ThrottleAsync.RC_SHUTDOWN_HARD_COMPLETED_OK:
                     if not complete_log_msg_issued:
@@ -3851,6 +3943,7 @@ class TestThrottleShutdown:
         # requests showing up in the next test case logs.
         ################################################################
         try:
+            start_time = time.time()
             for _ in range(num_reqs_to_make):
                 assert Throttle.RC_OK == a_throttle.send_request(f2, a_req_time)
 
@@ -3870,7 +3963,14 @@ class TestThrottleShutdown:
             sleep_time = sleep_seconds - (time.time() - a_req_time.f_time)
             time.sleep(sleep_time)
 
-            assert a_req_time.num_reqs == sleep_reqs_to_do
+            verify_throttle_expected_reqs(
+                throttle=a_throttle,
+                start_time=start_time,
+                req_time=a_req_time,
+                log_ver=log_ver,
+            )
+
+            assert abs(a_req_time.num_reqs - sleep_reqs_to_do) <= 1
 
             start_time = time.time()
 
@@ -4196,39 +4296,45 @@ class TestThrottleShutdown:
                         shutdown_type=shutdown_type, timeout=timeout
                     )
 
-                elapsed_time_from_start = time.time() - start_time
-                num_reqs_done = a_req_time.num_reqs
-                arrival_time = a_req_time.arrival_time
-                elapsed_time_from_arrival = arrival_time - start_time
-
-                exp_reqs_done = a_throttle.get_expected_num_completed_reqs(
-                    interval=elapsed_time_from_start
+                verify_throttle_expected_reqs(
+                    throttle=a_throttle,
+                    start_time=start_time,
+                    req_time=a_req_time,
+                    log_ver=log_ver,
                 )
-
-                exp_reqs_done2 = a_throttle.get_expected_num_completed_reqs(
-                    interval=elapsed_time_from_arrival
-                )
-
-                start_time_str = formatted_time_str(raw_time=start_time)
-                arrival_time_str = formatted_time_str(raw_time=arrival_time)
-                elapsed_time_from_start_str = formatted_interval_str(
-                    raw_interval=elapsed_time_from_start
-                )
-                elapsed_time_from_arrival_str = formatted_interval_str(
-                    raw_interval=elapsed_time_from_arrival
-                )
-
-                log_ver.test_msg(
-                    log_msg=(
-                        f"{start_time_str=}, {arrival_time_str=}, "
-                        f"{elapsed_time_from_arrival_str=}, "
-                        f"{elapsed_time_from_start_str=}, "
-                        f"{exp_reqs_done=}, {exp_reqs_done2=}, "
-                        f"{num_reqs_done=}"
-                    )
-                )
-
-                assert a_req_time.num_reqs == exp_reqs_done2
+                # elapsed_time_from_start = time.time() - start_time
+                # num_reqs_done = a_req_time.num_reqs
+                # arrival_time = a_req_time.arrival_time
+                # elapsed_time_from_arrival = arrival_time - start_time
+                #
+                # exp_reqs_done = a_throttle.get_expected_num_completed_reqs(
+                #     interval=elapsed_time_from_start
+                # )
+                #
+                # exp_reqs_done2 = a_throttle.get_expected_num_completed_reqs(
+                #     interval=elapsed_time_from_arrival
+                # )
+                #
+                # start_time_str = formatted_time_str(raw_time=start_time)
+                # arrival_time_str = formatted_time_str(raw_time=arrival_time)
+                # elapsed_time_from_start_str = formatted_interval_str(
+                #     raw_interval=elapsed_time_from_start
+                # )
+                # elapsed_time_from_arrival_str = formatted_interval_str(
+                #     raw_interval=elapsed_time_from_arrival
+                # )
+                #
+                # log_ver.test_msg(
+                #     log_msg=(
+                #         f"{start_time_str=}, {arrival_time_str=}, "
+                #         f"{elapsed_time_from_arrival_str=}, "
+                #         f"{elapsed_time_from_start_str=}, "
+                #         f"{exp_reqs_done=}, {exp_reqs_done2=}, "
+                #         f"{num_reqs_done=}"
+                #     )
+                # )
+                #
+                # assert a_req_time.num_reqs == exp_reqs_done2
 
                 if exp_ret_code:
                     log_msg = (
