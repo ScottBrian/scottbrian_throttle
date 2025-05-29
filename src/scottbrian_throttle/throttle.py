@@ -2477,22 +2477,22 @@ def shutdown_throttle_funcs(
     Returns:
         * ``True`` if *timeout* was not specified, or if it was
           specified and all of the specified functions completed
-          shutdown within the specified number of seconds.
+          shutdown within the specified number of seconds. Also, if the
+          list of funcs to shutdown is empty, True is returned.
         * ``False`` if *timeout* was specified and at least one of the
           functions specified to shutdown did not complete within the
           specified number of seconds.
 
     """
     funcs = [func for func in args]
-    start_time = time.time()  # start the clock
-
+    timer = Timer(timeout=timeout)
     ####################################################################
     # In the following code we loop until we all funcs are shutdown or
     # until we time out when timeout is specified. We call shutdown for
     # each func with a very short timeout value. The first attempt for
     # each func will get its shutdown started and very likely result in
     # a timeout retcode. This is OK since we suppress the timeout log
-    # message. Even though the timeout happens, the shutdone, once
+    # message. Even though the timeout happens, the shutdown, once
     # started, will continue processing. Each subsequent attempt will
     # either timeout again or come back with a completed retcode. We
     # remove each completed func from the list and keep trying the
@@ -2501,18 +2501,19 @@ def shutdown_throttle_funcs(
     while funcs:
         funcs_remaining = [func for func in funcs]
         for func in funcs_remaining:
-            if func.throttle.start_shutdown(
+            if ThrottleAsync.RC_SHUTDOWN_TIMED_OUT != func.throttle.start_shutdown(
                 shutdown_type=shutdown_type, timeout=0.01, suppress_timeout_msg=True
             ):
                 funcs.remove(func)
 
-        if funcs and timeout and timeout > 0 and time.time() > start_time + timeout:
+        if timer.is_expired() and funcs:
             for func in funcs:
                 func.throttle.logger.debug(
                     f"Throttle ID {id(func.throttle)} shutdown_throttle_funcs request "
                     f"timed out with {timeout=:.4f}"
                 )
             return False  # we timed out
+
         time.sleep(0.1)  # allow shutdowns to progress
 
     # if here, all funcs successfully shutdown
