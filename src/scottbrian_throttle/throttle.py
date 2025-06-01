@@ -1704,8 +1704,14 @@ class ThrottleAsync(Throttle):
                     self.throttle_state = ThrottleAsync._SOFT_SHUTDOWN_STARTED
                 else:
                     self.throttle_state = ThrottleAsync._HARD_SHUTDOWN_STARTED
-            elif self.throttle_state == ThrottleAsync._SOFT_SHUTDOWN_STARTED:
-                if shutdown_type == ThrottleAsync.TYPE_SHUTDOWN_HARD:
+            else:  # shutdown already started or has already completed
+                # if currently processing a soft shutdown and a hard
+                # shutdown is now being requested, we need to shift to a
+                # hard shutdown
+                if (
+                    self.throttle_state == ThrottleAsync._SOFT_SHUTDOWN_STARTED
+                    and shutdown_type == ThrottleAsync.TYPE_SHUTDOWN_HARD
+                ):
                     self.throttle_state = ThrottleAsync._HARD_SHUTDOWN_STARTED
 
         ################################################################
