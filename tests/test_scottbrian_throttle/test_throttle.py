@@ -2662,53 +2662,6 @@ def formatted_interval_str(raw_interval: float) -> str:
 
 
 ########################################################################
-# do_final_shutdown
-########################################################################
-def do_final_shutdown(throttle: ThrottleAsync, log_ver: LogVer) -> None:
-    """Perform a final shutdown at end of test..
-
-    Args:
-        throttle: name of Asyn throtlle to shutdowne
-        log_ver: log verifier used to test log messages
-
-    """
-    log_ver.test_msg("final shutdown to ensure throttle is closed")
-    _ = throttle.start_shutdown(ThrottleAsync.TYPE_SHUTDOWN_HARD)
-    # if not rc:
-    #     log_msg = (
-    #         f"Hard shutdown request detected that the "
-    #         "throttle has already been shutdown by an earlier "
-    #         "shutdown request - returning True."
-    #     )
-    #     log_ver.add_msg(
-    #         log_name="scottbrian_throttle.throttle",
-    #         log_level=logging.DEBUG,
-    #         log_msg=log_msg,
-    #     )
-    # else:
-    #     log_msg = (
-    #         "start_shutdown request successfully completed "
-    #         f"in {throttle.shutdown_elapsed_time:.4f} "
-    #         "seconds"
-    #     )
-    #     log_ver.add_msg(
-    #         log_name="scottbrian_throttle.throttle",
-    #         log_level=logging.DEBUG,
-    #         log_msg=log_msg,
-    #     )
-    #
-    # if throttle.hard_shutdown_replaced_soft_shutdown:
-    #     log_msg = (
-    #         "Hard shutdown request now replacing " "previously started soft shutdown."
-    #     )
-    #     log_ver.add_msg(
-    #         log_name="scottbrian_throttle.throttle",
-    #         log_level=logging.DEBUG,
-    #         log_msg=log_msg,
-    #     )
-
-
-########################################################################
 # TestThrottleShutdown
 ########################################################################
 class TestThrottleMisc:
@@ -3076,6 +3029,10 @@ def queue_first_batch_requests(
     """
     interval = throttle.get_interval_secs()
 
+    log_ver.test_msg(
+        "queue_first_batch_requests about to add " f"{num_reqs=} with {num_sleep_reqs=}"
+    )
+
     # Calculate the first sleep time to use
     # the get_completion_time_secs calculation is for the start of
     # a series where the first request has no delay.
@@ -3139,6 +3096,71 @@ def queue_more_requests(
     )
 
 
+########################################################################
+# final_shutdown_and_verification
+########################################################################
+def final_shutdown_and_verification(
+    throttle: ThrottleAsync,
+    req_time: ReqTime,
+    log_ver: LogVer,
+    ret_code: int,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Make sure throttle is shutdown and verify results.
+
+    Args:
+        throttle: the async throttle
+        req_time: req_time from queue_first_batch_requests
+        log_ver: log verifier to use
+        ret_code: the ret_code from mainline
+        caplog: contained the log messages to verify
+
+    """
+    ############################################################
+    # verify new requests are rejected, q empty, and thread is
+    # done @sbt
+    ############################################################
+    issue_remaining_requests_log_entry(throttle=throttle, log_ver=log_ver)
+
+    assert Throttle.RC_THROTTLE_IS_SHUTDOWN == throttle.send_request(
+        f2_target, req_time, log_ver
+    )
+
+    # make sure request schedular is gone so that any lagging
+    # f1 messages are logged. This is needed to ensure the
+    # verify log results below will be able to match the added
+    # pattern for the lagging message
+    if ret_code == ThrottleAsync.RC_SHUTDOWN_TIMED_OUT:
+        ret_code = throttle.start_shutdown(
+            shutdown_type=ThrottleAsync.TYPE_SHUTDOWN_HARD, timeout=60
+        )
+    assert ret_code != ThrottleAsync.RC_SHUTDOWN_TIMED_OUT
+
+    assert throttle.async_q.empty()
+    assert not throttle.request_scheduler_thread.is_alive()
+
+    ############################################################
+    # we now know that shutdown is done one way or another
+    ############################################################
+    log_msg = (
+        "start_shutdown request successfully completed "
+        f"in {throttle.shutdown_elapsed_time:.4f} "
+        "seconds"
+    )
+    log_ver.add_msg(
+        log_name="scottbrian_throttle.throttle",
+        log_level=logging.DEBUG,
+        log_msg=log_msg,
+    )
+
+    ################################################################
+    # verify the log messages
+    ################################################################
+    match_results = log_ver.get_match_results(caplog=caplog)
+    log_ver.print_match_results(match_results)
+    log_ver.verify_log_results(match_results)
+
+
 class TestThrottleShutdown:
     """Class TestThrottle."""
 
@@ -3191,11 +3213,6 @@ class TestThrottleShutdown:
             num_reqs_to_make, math.floor(num_reqs_to_make * sleep_delay_arg)
         )
         log_ver.test_msg(f"{sleep_reqs_to_do=}")
-
-        ################################################################
-        # calculate timeout times
-        ################################################################
-        log_ver.test_msg("start adding requests")
 
         ################################################################
         # We need a try/finally to make sure we can shut down the
@@ -3275,59 +3292,16 @@ class TestThrottleShutdown:
                 else:  # retcode is RC_SHUTDOWN_HARD_COMPLETED_OK
                     assert async_q_empty is True
 
-            elapsed_time = time.time() - start_time
-
-            log_ver.test_msg(
-                f"shutdown complete with {ret_code=}, "
-                f"{a_req_time.num_reqs} reqs done, "
-                f"{elapsed_time=:.4f} seconds"
+            final_shutdown_and_verification(
+                throttle=a_throttle,
+                req_time=a_req_time,
+                log_ver=log_ver,
+                ret_code=ret_code,
+                caplog=caplog,
             )
-
-            issue_remaining_requests_log_entry(throttle=a_throttle, log_ver=log_ver)
-            ############################################################
-            # verify new requests are rejected, q empty, and thread is
-            # done @sbt
-            ############################################################
-            assert Throttle.RC_THROTTLE_IS_SHUTDOWN == a_throttle.send_request(
-                f2_target, a_req_time, log_ver
-            )
-
-            # make sure request schedular is gone so that any lagging
-            # f1 messages are logged. This is needed to ensure the
-            # verify log results below will be able to match the added
-            # pattern for the lagging message
-            if ret_code == ThrottleAsync.RC_SHUTDOWN_TIMED_OUT:
-                ret_code = a_throttle.start_shutdown(
-                    shutdown_type=ThrottleAsync.TYPE_SHUTDOWN_HARD, timeout=60
-                )
-            assert ret_code != ThrottleAsync.RC_SHUTDOWN_TIMED_OUT
-
-            assert a_throttle.async_q.empty()
-            assert not a_throttle.request_scheduler_thread.is_alive()
-
-            ############################################################
-            # we now know that shutdown is done one way or another
-            ############################################################
-            log_msg = (
-                "start_shutdown request successfully completed "
-                f"in {a_throttle.shutdown_elapsed_time:.4f} "
-                "seconds"
-            )
-            log_ver.add_msg(
-                log_name="scottbrian_throttle.throttle",
-                log_level=logging.DEBUG,
-                log_msg=log_msg,
-            )
-
-            ################################################################
-            # verify the log messages
-            ################################################################
-            match_results = log_ver.get_match_results(caplog=caplog)
-            log_ver.print_match_results(match_results)
-            log_ver.verify_log_results(match_results)
 
         finally:
-            do_final_shutdown(throttle=a_throttle, log_ver=log_ver)
+            a_throttle.start_shutdown(ThrottleAsync.TYPE_SHUTDOWN_HARD)
 
     ####################################################################
     # test_throttle_shutdown
@@ -3411,8 +3385,6 @@ class TestThrottleShutdown:
         )  # +(interval / 2)
         log_ver.test_msg(f"{timeout_seconds=}")
 
-        log_ver.test_msg("start adding requests")
-
         ################################################################
         # We need a try/finally to make sure we can shut down the
         # throttle in the event that an assertion fails. In an earlier
@@ -3421,20 +3393,6 @@ class TestThrottleShutdown:
         # requests showing up in the next test case logs.
         ################################################################
         try:
-            # start_time = time.time()
-            # a_req_time = ReqTime(
-            #     num_reqs=0, f_time=start_time, start_time=start_time, interval=interval
-            # )
-            # for _ in range(num_reqs_to_make):
-            #     assert Throttle.RC_OK == a_throttle.send_request(
-            #         f2_target, a_req_time, log_ver
-            #     )
-            #
-            # log_ver.test_msg(
-            #     "all requests added, elapsed time = "
-            #     f"{time.time() - start_time} seconds"
-            # )
-
             (start_time, a_req_time) = queue_first_batch_requests(
                 throttle=a_throttle,
                 num_reqs=num_reqs_to_make,
@@ -3442,23 +3400,9 @@ class TestThrottleShutdown:
                 log_ver=log_ver,
             )
 
-            # prev_reqs_done = 0
             prev_reqs_done = sleep_reqs_to_do
 
             while True:
-                # sleep_time = sleep_seconds - (time.time() - a_req_time.f_time)
-                # log_ver.test_msg(f"about to sleep for {sleep_time=}")
-                # time.sleep(sleep_time)
-
-                # switch to the longer sleep time from this point on
-                # since the first request was done which has no delay
-                # sleep_seconds = sleep_seconds2
-
-                # exp_reqs_done = min(num_reqs_to_make, sleep_reqs_to_do + prev_reqs_done)
-                # assert a_req_time.num_reqs == exp_reqs_done
-                #
-                # prev_reqs_done = exp_reqs_done
-
                 shutdown_start_time = time.time()
                 timeout = timeout_seconds - (shutdown_start_time - a_req_time.f_time)
 
@@ -3499,58 +3443,16 @@ class TestThrottleShutdown:
 
                 prev_reqs_done = exp_reqs_done
 
-            elapsed_time = time.time() - start_time
-
-            log_ver.test_msg(
-                f"shutdown complete with {ret_code=}, "
-                f"{a_req_time.num_reqs} reqs done, "
-                f"{elapsed_time=:.4f} seconds"
+            final_shutdown_and_verification(
+                throttle=a_throttle,
+                req_time=a_req_time,
+                log_ver=log_ver,
+                ret_code=ret_code,
+                caplog=caplog,
             )
-
-            ############################################################
-            # verify new requests are rejected, q empty, and thread is
-            # done
-            ############################################################
-            assert Throttle.RC_THROTTLE_IS_SHUTDOWN == a_throttle.send_request(
-                f2_target, a_req_time, log_ver
-            )
-
-            # make sure request schedular is gone so that any lagging
-            # f1 messages are logged. This is needed to ensure the
-            # verify log results below will be able to match the added
-            # pattern for the lagging message
-            if ret_code == ThrottleAsync.RC_SHUTDOWN_TIMED_OUT:
-                ret_code = a_throttle.start_shutdown(
-                    shutdown_type=ThrottleAsync.TYPE_SHUTDOWN_HARD, timeout=60
-                )
-            assert ret_code != ThrottleAsync.RC_SHUTDOWN_TIMED_OUT
-
-            assert a_throttle.async_q.empty()
-            assert not a_throttle.request_scheduler_thread.is_alive()
-
-            ############################################################
-            # we now know that shutdown is done one way or another
-            ############################################################
-            log_msg = (
-                "start_shutdown request successfully completed "
-                f"in {a_throttle.shutdown_elapsed_time:.4f} "
-                "seconds"
-            )
-            log_ver.add_msg(
-                log_name="scottbrian_throttle.throttle",
-                log_level=logging.DEBUG,
-                log_msg=log_msg,
-            )
-
-            ############################################################
-            # verify the log messages
-            ############################################################
-            match_results = log_ver.get_match_results(caplog=caplog)
-            log_ver.print_match_results(match_results)
-            log_ver.verify_log_results(match_results)
 
         finally:
-            do_final_shutdown(throttle=a_throttle, log_ver=log_ver)
+            a_throttle.start_shutdown(ThrottleAsync.TYPE_SHUTDOWN_HARD)
 
     ####################################################################
     # test_throttle_shutdown
@@ -3597,29 +3499,32 @@ class TestThrottleShutdown:
         # shutdown_completed = False
         ret_code = ThrottleAsync.RC_SHUTDOWN_TIMED_OUT
 
-        def soft_shutdown(timeout: float) -> None:
+        def soft_shutdown(ss_timeout: float) -> None:
             """Do soft shutdown.
 
             Args:
-                timeout: whether to issue timeout
+                ss_timeout: whether to issue timeout
             """
             # nonlocal shutdown_completed
             nonlocal ret_code
             rc = a_throttle.start_shutdown(
-                shutdown_type=ThrottleAsync.TYPE_SHUTDOWN_SOFT, timeout=timeout
+                shutdown_type=ThrottleAsync.TYPE_SHUTDOWN_SOFT, timeout=ss_timeout
             )
 
-            log_ver.test_msg(f"soft shutdown {rc=} with {timeout=:.4f}")
+            log_ver.test_msg(f"soft shutdown {rc=} with {ss_timeout=:.4f}")
             # if shutdown_completed:
             #     return
 
-            if timeout == 0.0 or timeout == no_timeout_secs:
+            if ss_timeout == 0.0 or ss_timeout == no_timeout_secs:
                 assert rc == ThrottleAsync.RC_SHUTDOWN_SOFT_COMPLETED_OK
                 ret_code = ThrottleAsync.RC_SHUTDOWN_SOFT_COMPLETED_OK
                 # shutdown_completed = True
             else:
                 if rc == ThrottleAsync.RC_SHUTDOWN_TIMED_OUT:
-                    l_msg = f"start_shutdown request timed out with {timeout=:.4f}"
+                    l_msg = (
+                        "start_shutdown request timed out with "
+                        f"timeout={ss_timeout:.4f}"
+                    )
 
                     log_ver.add_msg(
                         log_name="scottbrian_throttle.throttle",
@@ -3641,9 +3546,9 @@ class TestThrottleShutdown:
         # of requests. Without the extra time, we could come out of the
         # sleep just a fraction before the last request of the series
         # is made because of timing randomness.
-        sleep_seconds = a_throttle.get_completion_time_secs(
-            sleep_reqs_to_do, from_start=True
-        ) + (interval / 2)
+        # sleep_seconds = a_throttle.get_completion_time_secs(
+        #     sleep_reqs_to_do, from_start=True
+        # ) + (interval / 2)
 
         ################################################################
         # calculate timeout times
@@ -3669,7 +3574,6 @@ class TestThrottleShutdown:
                     f"{timeout_seconds=}"
                 )
 
-        log_ver.test_msg("start adding requests")
         ################################################################
         # We need a try/finally to make sure we can shut down the
         # throttle in the event that an assertion fails. In an earlier
@@ -3678,41 +3582,16 @@ class TestThrottleShutdown:
         # requests showing up in the next test case logs.
         ################################################################
         try:
-            start_time = time.time()
-            a_req_time = ReqTime(
-                num_reqs=0, f_time=start_time, start_time=start_time, interval=interval
-            )
-            for _ in range(num_reqs_to_make):
-                assert Throttle.RC_OK == a_throttle.send_request(
-                    f2_target, a_req_time, log_ver
-                )
-
-            log_ver.test_msg(
-                "all requests added, elapsed time = "
-                f"{time.time() - start_time} seconds"
-            )
-
-            ############################################################
-            # sleep for a few req to get processed before shutdowns
-            ############################################################
-            sleep_time = sleep_seconds - (time.time() - a_req_time.f_time)
-
-            log_ver.test_msg(f"about to sleep for {sleep_time=}")
-
-            # recalculate to avoid log message overhead
-            sleep_time = sleep_seconds - (time.time() - a_req_time.f_time)
-            time.sleep(sleep_time)
-
-            verify_throttle_expected_reqs(
+            (start_time, a_req_time) = queue_first_batch_requests(
                 throttle=a_throttle,
-                start_time=start_time,
-                req_time=a_req_time,
+                num_reqs=num_reqs_to_make,
+                num_sleep_reqs=sleep_reqs_to_do,
                 log_ver=log_ver,
             )
 
             assert abs(a_req_time.num_reqs - sleep_reqs_to_do) <= 1
 
-            start_time = time.time()
+            # start_time = time.time()
 
             shutdown_threads = []
             for idx, timeout in enumerate(timeout_values):
@@ -3727,11 +3606,10 @@ class TestThrottleShutdown:
             ############################################################
             # wait for shutdowns to complete
             ############################################################
-            # while a_req_time.num_reqs < num_reqs_to_make:
-            #     time.sleep(1)
-
             while ret_code == ThrottleAsync.RC_SHUTDOWN_TIMED_OUT:
                 time.sleep(1)
+
+            assert a_req_time.num_reqs == num_reqs_to_make
 
             ############################################################
             # make sure all thread came back home
@@ -3739,58 +3617,16 @@ class TestThrottleShutdown:
             for idx in range(len(timeout_values)):
                 shutdown_threads[idx].join()
 
-            elapsed_time = time.time() - start_time
-
-            log_ver.test_msg(
-                f"shutdown complete, "
-                f"{a_req_time.num_reqs} reqs done, "
-                f"{elapsed_time=:.4f} seconds, "
-                f"{shutdown_completed=}"
+            final_shutdown_and_verification(
+                throttle=a_throttle,
+                req_time=a_req_time,
+                log_ver=log_ver,
+                ret_code=ret_code,
+                caplog=caplog,
             )
-
-            ############################################################
-            # verify new requests are rejected, q empty, and thread is
-            # done
-            ############################################################
-            assert Throttle.RC_THROTTLE_IS_SHUTDOWN == a_throttle.send_request(
-                f2_target, a_req_time, log_ver
-            )
-            # make sure request schedular is gone so that any lagging
-            # f1 messages are logged. This is needed to ensure the
-            # verify log results below will be able to match the added
-            # pattern for the lagging message
-            if ret_code == ThrottleAsync.RC_SHUTDOWN_TIMED_OUT:
-                ret_code = a_throttle.start_shutdown(
-                    shutdown_type=ThrottleAsync.TYPE_SHUTDOWN_HARD, timeout=60
-                )
-            assert ret_code != ThrottleAsync.RC_SHUTDOWN_TIMED_OUT
-
-            assert a_throttle.async_q.empty()
-            assert not a_throttle.request_scheduler_thread.is_alive()
-
-            ############################################################
-            # we now know that shutdown is done one way or another
-            ############################################################
-            log_msg = (
-                "start_shutdown request successfully completed "
-                f"in {a_throttle.shutdown_elapsed_time:.4f} "
-                "seconds"
-            )
-            log_ver.add_msg(
-                log_name="scottbrian_throttle.throttle",
-                log_level=logging.DEBUG,
-                log_msg=log_msg,
-            )
-
-            ################################################################
-            # verify the log messages
-            ################################################################
-            match_results = log_ver.get_match_results(caplog=caplog)
-            log_ver.print_match_results(match_results)
-            log_ver.verify_log_results(match_results)
 
         finally:
-            do_final_shutdown(throttle=a_throttle, log_ver=log_ver)
+            a_throttle.start_shutdown(ThrottleAsync.TYPE_SHUTDOWN_HARD)
 
     ####################################################################
     # test_throttle_shutdown
@@ -3885,8 +3721,6 @@ class TestThrottleShutdown:
             f" {sleep_seconds=}"
         )
 
-        log_ver.test_msg(log_msg="start adding requests")
-
         ################################################################
         # We need a try/finally to make sure we can shut down the
         # throttle in the event that an assertion fails. In an earlier
@@ -3896,40 +3730,23 @@ class TestThrottleShutdown:
         ################################################################
         ret_code = ThrottleAsync.RC_SHUTDOWN_TIMED_OUT
         try:
-            start_time = time.time()
-            a_req_time = ReqTime(
-                num_reqs=0, f_time=start_time, start_time=start_time, interval=interval
-            )
             num_first_batch = sleep_reqs_to_do * 2
-            for req_idx in range(num_first_batch):
-                assert Throttle.RC_OK == a_throttle.send_request(
-                    f2_target, a_req_time, log_ver
-                )
-
-            log_ver.test_msg(
-                "all requests added, elapsed time = "
-                f"{time.time() - start_time} seconds, "
-            )
-
-            # do sleep
-
-            time_before_sleep = time.time()
-            sleep_time = sleep_seconds - (time_before_sleep - start_time)
-            time.sleep(sleep_time)
-
-            verify_throttle_expected_reqs(
+            (start_time, a_req_time) = queue_first_batch_requests(
                 throttle=a_throttle,
-                start_time=start_time,
-                req_time=a_req_time,
+                num_reqs=num_first_batch,
+                num_sleep_reqs=sleep_reqs_to_do,
                 log_ver=log_ver,
             )
 
             # queue remainder of requests
             num_second_batch = num_reqs_to_make - num_first_batch
-            for req_idx in range(num_second_batch):
-                assert Throttle.RC_OK == a_throttle.send_request(
-                    f2_target, a_req_time, log_ver
-                )
+
+            queue_more_requests(
+                throttle=a_throttle,
+                num_reqs=num_second_batch,
+                req_time=a_req_time,
+                log_ver=log_ver,
+            )
 
             hard_shutdown_issued = False
             last_num_reqs_done = -1
@@ -3989,50 +3806,17 @@ class TestThrottleShutdown:
                     assert a_throttle.async_q.empty()
 
                 issue_remaining_requests_log_entry(throttle=a_throttle, log_ver=log_ver)
-            ############################################################
-            # verify new requests are rejected, q empty, and thread is
-            # done
-            ############################################################
-            assert Throttle.RC_THROTTLE_IS_SHUTDOWN == a_throttle.send_request(
-                f2_target, a_req_time, log_ver
+
+            final_shutdown_and_verification(
+                throttle=a_throttle,
+                req_time=a_req_time,
+                log_ver=log_ver,
+                ret_code=ret_code,
+                caplog=caplog,
             )
-
-            # make sure request schedular is gone so that any lagging
-            # f1 messages are logged. This is needed to ensure the
-            # verify log results below will be able to match the added
-            # pattern for the lagging message
-            if ret_code == ThrottleAsync.RC_SHUTDOWN_TIMED_OUT:
-                ret_code = a_throttle.start_shutdown(
-                    shutdown_type=ThrottleAsync.TYPE_SHUTDOWN_HARD, timeout=60
-                )
-            assert ret_code != ThrottleAsync.RC_SHUTDOWN_TIMED_OUT
-
-            assert a_throttle.async_q.empty()
-            assert not a_throttle.request_scheduler_thread.is_alive()
-
-            ############################################################
-            # we now know that shutdown is done one way or another
-            ############################################################
-            log_msg = (
-                "start_shutdown request successfully completed "
-                f"in {a_throttle.shutdown_elapsed_time:.4f} "
-                "seconds"
-            )
-            log_ver.add_msg(
-                log_name="scottbrian_throttle.throttle",
-                log_level=logging.DEBUG,
-                log_msg=log_msg,
-            )
-
-            ############################################################
-            # verify the log messages
-            ############################################################
-            match_results = log_ver.get_match_results(caplog=caplog)
-            log_ver.print_match_results(match_results)
-            log_ver.verify_log_results(match_results)
 
         finally:
-            do_final_shutdown(throttle=a_throttle, log_ver=log_ver)
+            a_throttle.start_shutdown(ThrottleAsync.TYPE_SHUTDOWN_HARD)
 
     ####################################################################
     # test_throttle_shutdown
@@ -4104,9 +3888,9 @@ class TestThrottleShutdown:
         # of requests. Without the extra time, we could come out of the
         # sleep just a fraction before the last request of the series
         # is made because of timing randomness.
-        sleep_seconds = a_throttle.get_completion_time_secs(
-            sleep_reqs_to_do, from_start=True
-        ) + (interval / 2)
+        # sleep_seconds = a_throttle.get_completion_time_secs(
+        #     sleep_reqs_to_do, from_start=True
+        # ) + (interval / 2)
 
         ################################################################
         # calculate timeout times
@@ -4122,8 +3906,6 @@ class TestThrottleShutdown:
             a_throttle.get_completion_time_secs(num_reqs_to_make, from_start=False) + 60
         )
 
-        log_ver.test_msg("start adding requests")
-
         ################################################################
         # We need a try/finally to make sure we can shut down the
         # throttle in the event that an assertion fails. In an earlier
@@ -4132,31 +3914,38 @@ class TestThrottleShutdown:
         # requests showing up in the next test case logs.
         ################################################################
         try:
-            start_time = time.time()
-            a_req_time = ReqTime(
-                num_reqs=0, f_time=start_time, start_time=start_time, interval=interval
+            # start_time = time.time()
+            # a_req_time = ReqTime(
+            #     num_reqs=0, f_time=start_time, start_time=start_time, interval=interval
+            # )
+            # for _ in range(num_reqs_to_make):
+            #     assert Throttle.RC_OK == a_throttle.send_request(
+            #         f2_target, a_req_time, log_ver
+            #     )
+            #
+            # log_ver.test_msg(
+            #     "all requests added, elapsed time = "
+            #     f"{time.time() - start_time} seconds"
+            # )
+            #
+            # # calculate sleep_time for log message
+            # sleep_time = sleep_seconds - (time.time() - start_time)
+            #
+            # log_ver.test_msg(f"about to sleep for {sleep_time=}")
+            #
+            # # calculate sleep_time again after log message for accuracy
+            # sleep_time = sleep_seconds - (time.time() - start_time)
+            # time.sleep(sleep_time)
+            #
+            # exp_reqs_done = sleep_reqs_to_do
+            # assert a_req_time.num_reqs == exp_reqs_done
+
+            (start_time, a_req_time) = queue_first_batch_requests(
+                throttle=a_throttle,
+                num_reqs=num_reqs_to_make,
+                num_sleep_reqs=sleep_reqs_to_do,
+                log_ver=log_ver,
             )
-            for _ in range(num_reqs_to_make):
-                assert Throttle.RC_OK == a_throttle.send_request(
-                    f2_target, a_req_time, log_ver
-                )
-
-            log_ver.test_msg(
-                "all requests added, elapsed time = "
-                f"{time.time() - start_time} seconds"
-            )
-
-            # calculate sleep_time for log message
-            sleep_time = sleep_seconds - (time.time() - start_time)
-
-            log_ver.test_msg(f"about to sleep for {sleep_time=}")
-
-            # calculate sleep_time again after log message for accuracy
-            sleep_time = sleep_seconds - (time.time() - start_time)
-            time.sleep(sleep_time)
-
-            exp_reqs_done = sleep_reqs_to_do
-            assert a_req_time.num_reqs == exp_reqs_done
 
             # get the soft shutdown started
 
@@ -4168,7 +3957,8 @@ class TestThrottleShutdown:
             sleep_time = timeout_seconds - (time.time() - a_req_time.f_time)
             time.sleep(sleep_time)
 
-            exp_reqs_done += sleep_reqs_to_do
+            exp_reqs_done = sleep_reqs_to_do * 2
+            # exp_reqs_done += sleep_reqs_to_do
             assert a_req_time.num_reqs == exp_reqs_done
 
             # issue hard shutdown to terminate the soft shutdown
@@ -4189,49 +3979,16 @@ class TestThrottleShutdown:
             # wait for the soft_shutdown thread to end
             soft_shutdown_thread.join()
 
-            ############################################################
-            # verify new requests are rejected, q empty, and thread is
-            # done
-            ############################################################
-            assert Throttle.RC_THROTTLE_IS_SHUTDOWN == a_throttle.send_request(
-                f2_target, a_req_time, log_ver
+            final_shutdown_and_verification(
+                throttle=a_throttle,
+                req_time=a_req_time,
+                log_ver=log_ver,
+                ret_code=ret_code,
+                caplog=caplog,
             )
-            # make sure request schedular is gone so that any lagging
-            # f1 messages are logged. This is needed to ensure the
-            # verify log results below will be able to match the added
-            # pattern for the lagging message
-            # if ret_code == ThrottleAsync.RC_SHUTDOWN_TIMED_OUT:
-            #     ret_code = a_throttle.start_shutdown(
-            #         shutdown_type=ThrottleAsync.TYPE_SHUTDOWN_HARD, timeout=60
-            #     )
-            # assert ret_code != ThrottleAsync.RC_SHUTDOWN_TIMED_OUT
-
-            assert a_throttle.async_q.empty()
-            assert not a_throttle.request_scheduler_thread.is_alive()
-
-            ############################################################
-            # we now know that shutdown is done one way or another
-            ############################################################
-            log_msg = (
-                "start_shutdown request successfully completed "
-                f"in {a_throttle.shutdown_elapsed_time:.4f} "
-                "seconds"
-            )
-            log_ver.add_msg(
-                log_name="scottbrian_throttle.throttle",
-                log_level=logging.DEBUG,
-                log_msg=log_msg,
-            )
-
-            ############################################################
-            # verify the log messages
-            ############################################################
-            match_results = log_ver.get_match_results(caplog=caplog)
-            log_ver.print_match_results(match_results)
-            log_ver.verify_log_results(match_results)
 
         finally:
-            do_final_shutdown(throttle=a_throttle, log_ver=log_ver)
+            a_throttle.start_shutdown(ThrottleAsync.TYPE_SHUTDOWN_HARD)
 
     ####################################################################
     # test_shutdown_throttle_funcs
