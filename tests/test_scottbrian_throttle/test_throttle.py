@@ -3036,7 +3036,108 @@ def f2_target(req_time: ReqTime, log_ver: LogVer) -> None:
 ########################################################################
 # get_throttle
 ########################################################################
-# def get_throttle(requests=requests_arg, seconds=seconds_arg, async_q_size=num_reqs_to_make)
+def get_async_throttle(
+    requests: int, seconds: float, async_q_size: int
+) -> tuple[ThrottleAsync, float]:
+    """Obtain an async throttle and return it.
+
+    Args:
+        requests: number of requests per *seconds&
+        seconds: number of seconds the the number of *requests*
+        async_q_size: max number of requests that will be queued
+
+    """
+    a_throttle = ThrottleAsync(
+        requests=requests, seconds=seconds, async_q_size=async_q_size
+    )
+
+    assert a_throttle.async_q
+    assert a_throttle.request_scheduler_thread
+
+    interval = a_throttle.get_interval_secs()
+
+    return a_throttle, interval
+
+
+########################################################################
+# queue_first_batch_requests
+########################################################################
+def queue_first_batch_requests(
+    throttle: ThrottleAsync, num_reqs: int, num_sleep_reqs: int, log_ver: LogVer
+) -> tuple[float, ReqTime]:
+    """Queue the request to the asyn throttle.
+
+    Args:
+        throttle: the async throttle
+        num_reqs: number of requests to queue
+        num_sleep_reqs: number of requests to allow to be processed
+        log_ver: log verifier to use
+
+    """
+    interval = throttle.get_interval_secs()
+
+    # Calculate the first sleep time to use
+    # the get_completion_time_secs calculation is for the start of
+    # a series where the first request has no delay.
+    # Note that we add 1/2 interval to ensure we are between
+    # requests when we come out of the sleep and verify the number
+    # of requests. Without the extra time, we could come out of the
+    # sleep just a fraction before the last request of the series
+    # is made because of timing randomness.
+    sleep_seconds = throttle.get_completion_time_secs(
+        num_sleep_reqs, from_start=True
+    ) + (interval / 2)
+
+    start_time = time.time()
+    a_req_time = ReqTime(
+        num_reqs=0, f_time=start_time, start_time=start_time, interval=interval
+    )
+
+    for _ in range(num_reqs):
+        assert Throttle.RC_OK == throttle.send_request(f2_target, a_req_time, log_ver)
+
+    log_ver.test_msg(
+        f"{num_reqs} requests added, elapsed time = {time.time() - start_time} seconds"
+    )
+
+    sleep_time = sleep_seconds - (time.time() - start_time)
+
+    log_ver.test_msg(f"about to sleep for {sleep_time=} for {num_sleep_reqs=}")
+    time.sleep(sleep_time)
+
+    verify_throttle_expected_reqs(
+        throttle=throttle,
+        start_time=start_time,
+        req_time=a_req_time,
+        log_ver=log_ver,
+    )
+
+    return start_time, a_req_time
+
+
+########################################################################
+# queue_more_requests
+########################################################################
+def queue_more_requests(
+    throttle: ThrottleAsync, num_reqs: int, req_time: ReqTime, log_ver: LogVer
+) -> None:
+    """Queue the request to the asyn throttle.
+
+    Args:
+        throttle: the async throttle
+        num_reqs: number of requests to queue
+        req_time: req_time from queue_first_batch_requests
+        log_ver: log verifier to use
+
+    """
+    start_time = time.time()
+    for _ in range(num_reqs):
+        assert Throttle.RC_OK == throttle.send_request(f2_target, req_time, log_ver)
+
+    log_ver.test_msg(
+        f"{num_reqs} requests added, elapsed time = {time.time() - start_time} seconds"
+    )
+
 
 class TestThrottleShutdown:
     """Class TestThrottle."""
@@ -3069,8 +3170,6 @@ class TestThrottleShutdown:
         sleep_delay_arg = 0.0001
         num_reqs_to_make = 1_000_000
 
-        # a_throttle = get_throttle(requests=requests_arg, seconds=seconds_arg, async_q_size=num_reqs_to_make)
-
         log_ver = self.log_ver
         alpha_call_seq = (
             "test_throttle.py::TestThrottleShutdown"
@@ -3078,15 +3177,12 @@ class TestThrottleShutdown:
         )
         log_ver.add_call_seq(name="alpha", seq=alpha_call_seq)
 
-        a_throttle = ThrottleAsync(
+        (a_throttle, interval) = get_async_throttle(
             requests=requests_arg, seconds=seconds_arg, async_q_size=num_reqs_to_make
         )
-
-        assert a_throttle.async_q
-        assert a_throttle.request_scheduler_thread
-
-        interval = a_throttle.get_interval_secs()
-        log_ver.test_msg(f"{seconds_arg=}, {sleep_delay_arg=}, {interval=}")
+        log_ver.test_msg(
+            f"{seconds_arg=}, {num_reqs_to_make=}, {sleep_delay_arg=}, {interval=}"
+        )
 
         ################################################################
         # calculate sleep times
@@ -3095,18 +3191,6 @@ class TestThrottleShutdown:
             num_reqs_to_make, math.floor(num_reqs_to_make * sleep_delay_arg)
         )
         log_ver.test_msg(f"{sleep_reqs_to_do=}")
-
-        # Calculate the first sleep time to use
-        # the get_completion_time_secs calculation is for the start of
-        # a series where the first request has no delay.
-        # Note that we add 1/2 interval to ensure we are between
-        # requests when we come out of the sleep and verify the number
-        # of requests. Without the extra time, we could come out of the
-        # sleep just a fraction before the last request of the series
-        # is made because of timing randomness.
-        sleep_seconds = a_throttle.get_completion_time_secs(
-            sleep_reqs_to_do, from_start=True
-        ) + (interval / 2)
 
         ################################################################
         # calculate timeout times
@@ -3122,44 +3206,22 @@ class TestThrottleShutdown:
         ################################################################
         ret_code = ThrottleAsync.RC_SHUTDOWN_TIMED_OUT
         try:
-            start_time = time.time()
-            a_req_time = ReqTime(
-                num_reqs=0, f_time=start_time, start_time=start_time, interval=interval
-            )
-
             num_first_batch = sleep_reqs_to_do * 2
-            for _ in range(num_first_batch):
-                assert Throttle.RC_OK == a_throttle.send_request(
-                    f2_target, a_req_time, log_ver
-                )
 
-            log_ver.test_msg(
-                f"all {num_first_batch} first batch requests added, elapsed time = "
-                f"{time.time() - start_time} seconds"
-            )
-
-            sleep_time = sleep_seconds - (time.time() - start_time)
-
-            log_ver.test_msg(f"about to sleep for {sleep_time=}")
-            time.sleep(sleep_time)
-
-            verify_throttle_expected_reqs(
+            (start_time, a_req_time) = queue_first_batch_requests(
                 throttle=a_throttle,
-                start_time=start_time,
-                req_time=a_req_time,
+                num_reqs=num_first_batch,
+                num_sleep_reqs=sleep_reqs_to_do,
                 log_ver=log_ver,
             )
 
             num_second_batch = num_reqs_to_make - num_first_batch
-            second_batch_start_time = time.time()
-            for _ in range(num_second_batch):
-                assert Throttle.RC_OK == a_throttle.send_request(
-                    f2_target, a_req_time, log_ver
-                )
 
-            log_ver.test_msg(
-                f"all {num_second_batch} second batch requests added, elapsed time = "
-                f"{time.time() - second_batch_start_time} seconds"
+            queue_more_requests(
+                throttle=a_throttle,
+                num_reqs=num_second_batch,
+                req_time=a_req_time,
+                log_ver=log_ver,
             )
 
             issue_remaining_requests_log_entry(throttle=a_throttle, log_ver=log_ver)
@@ -3303,13 +3365,12 @@ class TestThrottleShutdown:
         )
         log_ver.add_call_seq(name="alpha", seq=alpha_call_seq)
 
-        a_throttle = ThrottleAsync(requests=requests_arg, seconds=seconds_arg)
-
-        assert a_throttle.async_q
-        assert a_throttle.request_scheduler_thread
-
-        interval = a_throttle.get_interval_secs()
-        log_ver.test_msg(f"{interval=}")
+        (a_throttle, interval) = get_async_throttle(
+            requests=requests_arg, seconds=seconds_arg, async_q_size=num_reqs_to_make
+        )
+        log_ver.test_msg(
+            f"{seconds_arg=}, {num_reqs_to_make=}, {sleep_delay_arg=}, {interval=}"
+        )
 
         ################################################################
         # calculate sleep times
@@ -3327,16 +3388,16 @@ class TestThrottleShutdown:
         # of requests. Without the extra time, we could come out of the
         # sleep just a fraction before the last request of the series
         # is made because of timing randomness.
-        sleep_seconds = a_throttle.get_completion_time_secs(
-            sleep_reqs_to_do, from_start=True
-        ) + (interval / 2)
+        # sleep_seconds = a_throttle.get_completion_time_secs(
+        #     sleep_reqs_to_do, from_start=True
+        # ) + (interval / 2)
 
         # calculate the subsequent sleep time to use by adding one
         # interval since the first request zero delay is no longer true
         sleep_seconds2 = a_throttle.get_completion_time_secs(
             sleep_reqs_to_do, from_start=False
         ) + (interval / 2)
-        log_ver.test_msg(f"{sleep_seconds=}")
+        # log_ver.test_msg(f"{sleep_seconds=}")
 
         ################################################################
         # calculate timeout times
@@ -3352,10 +3413,6 @@ class TestThrottleShutdown:
 
         log_ver.test_msg("start adding requests")
 
-        start_time = time.time()
-        a_req_time = ReqTime(
-            num_reqs=0, f_time=start_time, start_time=start_time, interval=interval
-        )
         ################################################################
         # We need a try/finally to make sure we can shut down the
         # throttle in the event that an assertion fails. In an earlier
@@ -3364,31 +3421,43 @@ class TestThrottleShutdown:
         # requests showing up in the next test case logs.
         ################################################################
         try:
-            for _ in range(num_reqs_to_make):
-                assert Throttle.RC_OK == a_throttle.send_request(
-                    f2_target, a_req_time, log_ver
-                )
+            # start_time = time.time()
+            # a_req_time = ReqTime(
+            #     num_reqs=0, f_time=start_time, start_time=start_time, interval=interval
+            # )
+            # for _ in range(num_reqs_to_make):
+            #     assert Throttle.RC_OK == a_throttle.send_request(
+            #         f2_target, a_req_time, log_ver
+            #     )
+            #
+            # log_ver.test_msg(
+            #     "all requests added, elapsed time = "
+            #     f"{time.time() - start_time} seconds"
+            # )
 
-            log_ver.test_msg(
-                "all requests added, elapsed time = "
-                f"{time.time() - start_time} seconds"
+            (start_time, a_req_time) = queue_first_batch_requests(
+                throttle=a_throttle,
+                num_reqs=num_reqs_to_make,
+                num_sleep_reqs=sleep_reqs_to_do,
+                log_ver=log_ver,
             )
 
-            prev_reqs_done = 0
+            # prev_reqs_done = 0
+            prev_reqs_done = sleep_reqs_to_do
 
             while True:
-                sleep_time = sleep_seconds - (time.time() - a_req_time.f_time)
-                log_ver.test_msg(f"about to sleep for {sleep_time=}")
-                time.sleep(sleep_time)
+                # sleep_time = sleep_seconds - (time.time() - a_req_time.f_time)
+                # log_ver.test_msg(f"about to sleep for {sleep_time=}")
+                # time.sleep(sleep_time)
 
                 # switch to the longer sleep time from this point on
                 # since the first request was done which has no delay
-                sleep_seconds = sleep_seconds2
+                # sleep_seconds = sleep_seconds2
 
-                exp_reqs_done = min(num_reqs_to_make, sleep_reqs_to_do + prev_reqs_done)
-                assert a_req_time.num_reqs == exp_reqs_done
-
-                prev_reqs_done = exp_reqs_done
+                # exp_reqs_done = min(num_reqs_to_make, sleep_reqs_to_do + prev_reqs_done)
+                # assert a_req_time.num_reqs == exp_reqs_done
+                #
+                # prev_reqs_done = exp_reqs_done
 
                 shutdown_start_time = time.time()
                 timeout = timeout_seconds - (shutdown_start_time - a_req_time.f_time)
@@ -3420,6 +3489,15 @@ class TestThrottleShutdown:
                     )
                     assert ret_code == ThrottleAsync.RC_SHUTDOWN_TIMED_OUT
                     assert timeout <= shutdown_elapsed_time <= (timeout * 1.10)
+
+                sleep_time = sleep_seconds2 - (time.time() - a_req_time.f_time)
+                log_ver.test_msg(f"about to sleep for {sleep_time=}")
+                time.sleep(sleep_time)
+
+                exp_reqs_done = min(num_reqs_to_make, sleep_reqs_to_do + prev_reqs_done)
+                assert a_req_time.num_reqs == exp_reqs_done
+
+                prev_reqs_done = exp_reqs_done
 
             elapsed_time = time.time() - start_time
 
@@ -3509,6 +3587,13 @@ class TestThrottleShutdown:
         )
         log_ver.add_call_seq(name="alpha", seq=alpha_call_seq)
 
+        (a_throttle, interval) = get_async_throttle(
+            requests=requests_arg, seconds=seconds_arg, async_q_size=num_reqs_to_make
+        )
+        log_ver.test_msg(
+            f"{seconds_arg=}, {num_reqs_to_make=}, {sleep_delay_arg=}, {interval=}"
+        )
+
         # shutdown_completed = False
         ret_code = ThrottleAsync.RC_SHUTDOWN_TIMED_OUT
 
@@ -3541,16 +3626,6 @@ class TestThrottleShutdown:
                         log_level=logging.DEBUG,
                         log_msg=l_msg,
                     )
-
-        a_throttle = ThrottleAsync(
-            requests=requests_arg, seconds=seconds_arg, async_q_size=num_reqs_to_make
-        )
-
-        assert a_throttle.async_q
-        assert a_throttle.request_scheduler_thread
-
-        interval = a_throttle.get_interval_secs()
-        log_ver.test_msg(f"{interval=}")
 
         ################################################################
         # calculate sleep times
@@ -3772,17 +3847,10 @@ class TestThrottleShutdown:
         )
         log_ver.add_call_seq(name="alpha", seq=alpha_call_seq)
 
-        a_throttle = ThrottleAsync(
+        (a_throttle, interval) = get_async_throttle(
             requests=requests_arg, seconds=seconds_arg, async_q_size=num_reqs_to_make
         )
-
-        assert a_throttle.async_q
-        assert a_throttle.request_scheduler_thread
-
-        log_ver.test_msg(f"{num_reqs_to_make=}")
-
-        interval = a_throttle.get_interval_secs()
-        log_ver.test_msg(f"{interval=}")
+        log_ver.test_msg(f"{seconds_arg=}, {num_reqs_to_make=}, {interval=}")
 
         ################################################################
         # calculate sleep times
@@ -3994,6 +4062,11 @@ class TestThrottleShutdown:
         )
         log_ver.add_call_seq(name="alpha", seq=alpha_call_seq)
 
+        (a_throttle, interval) = get_async_throttle(
+            requests=requests_arg, seconds=seconds_arg, async_q_size=num_reqs_to_make
+        )
+        log_ver.test_msg(f"{seconds_arg=}, {num_reqs_to_make=}, {interval=}")
+
         def soft_shutdown(timeout_tf: bool) -> None:
             """Do soft shutdown.
 
@@ -4016,18 +4089,6 @@ class TestThrottleShutdown:
         soft_shutdown_thread = threading.Thread(
             target=soft_shutdown, args=(timeout1_arg,)
         )
-
-        a_throttle = ThrottleAsync(
-            requests=requests_arg, seconds=seconds_arg, async_q_size=num_reqs_to_make
-        )
-
-        assert a_throttle.async_q
-        assert a_throttle.request_scheduler_thread
-
-        log_ver.test_msg(f"{num_reqs_to_make=}")
-
-        interval = a_throttle.get_interval_secs()
-        log_ver.test_msg(f"{interval=}")
 
         ################################################################
         # calculate sleep times
