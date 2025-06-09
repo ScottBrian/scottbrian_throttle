@@ -82,7 +82,7 @@ class ExcHook:
             raise Exception(f"{exc_msg}")
 
 
-@pytest.fixture(autouse=True)  # type: ignore
+@pytest.fixture(autouse=True)
 def thread_exc(monkeypatch: Any) -> Generator[ExcHook, None, None]:
     """Instantiate and return a ThreadExc for testing.
 
@@ -130,6 +130,9 @@ def thread_exc(monkeypatch: Any) -> Generator[ExcHook, None, None]:
 
     # the following check ensures that the test case waited via join for
     # any started threads to come home
+    if threading.active_count() > 1:
+        for thread in threading.enumerate():
+            print(f"conftest thread: {thread}")
     assert threading.active_count() == 1
     exc_hook.raise_exc_if_one()
 

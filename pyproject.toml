@@ -22,7 +22,7 @@ dependencies = [
     "more-itertools ~=10.7",
     "pandas ~=2.2",
 #    "scottbrian-utils ~=4.2",
-    "scottbrian_utils @  file://C:/Users/Tiger/PycharmProjects/scottbrian_utils/dist/scottbrian_utils-4.2.0-py3-none-any.whl",
+    "scottbrian_utils @  file://C:/Users/Tiger/PycharmProjects/scottbrian_utils/dist/scottbrian_utils-5.0.0-py3-none-any.whl",
     "typing_extensions ~=4.13",
     "wrapt ~=1.17",
 ]

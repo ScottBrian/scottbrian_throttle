@@ -339,6 +339,7 @@ The throttle module contains:
 ########################################################################
 # Standard Library
 ########################################################################
+from abc import ABC, abstractmethod
 import functools
 import logging
 import queue
@@ -385,12 +386,6 @@ OptIntFloat: TypeAlias = Optional[IntFloat]
 ########################################################################
 class ThrottleError(Exception):
     """Base class for exceptions in this module."""
-
-    pass
-
-
-class IllegalSoftShutdownAfterHard(ThrottleError):
-    """Throttle exception for illegal soft shutdown after hard."""
 
     pass
 
@@ -452,7 +447,7 @@ class MissingLbThresholdSpecification(ThrottleError):
 ########################################################################
 # Throttle Base class
 ########################################################################
-class Throttle:
+class Throttle(ABC):
     """Throttle base class."""
 
     DEFAULT_ASYNC_Q_SIZE: Final[int] = 4096
@@ -475,21 +470,24 @@ class Throttle:
     NS_2_SECS: Final[float] = 0.000000001
 
     __slots__ = (
-        "requests",
-        "seconds",
-        "_target_interval",
-        "_target_interval_ns",
-        "sync_lock",
         "_arrival_time",
         "_next_target_time",
+        "_target_interval",
+        "_target_interval_ns",
         "logger",
         "pauser",
+        "requests",
+        "seconds",
+        "sync_lock",
+        "t_name",
     )
 
     ####################################################################
     # __init__
     ####################################################################
-    def __init__(self, *, requests: int, seconds: IntFloat) -> None:
+    def __init__(
+        self, *, requests: int, seconds: IntFloat, name: Optional[str] = None
+    ) -> None:
         """Initialize an instance of the Throttle class.
 
         Args:
@@ -497,6 +495,9 @@ class Throttle:
                         the interval specified by seconds.
             seconds: The number of seconds in which the number of
                        requests specified in requests can be made.
+            name: The name used to identify the throttle in log messages
+                issued by the throttle. The default name is
+                the python id of the Throttle class instance.
 
 
         Raises:
@@ -543,6 +544,10 @@ class Throttle:
                 "float greater than zero."
             )
 
+        if name is None:
+            self.t_name = str(id(self))
+        else:
+            self.t_name = name
         ################################################################
         # Set remainder of vars
         ################################################################
@@ -557,6 +562,7 @@ class Throttle:
     ####################################################################
     # send_request
     ####################################################################
+    @abstractmethod
     def send_request(self, func: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
         """Send the request.
 
@@ -573,66 +579,7 @@ class Throttle:
                 will be logged and re-raised.
 
         """
-        ################################################################
-        # SYNC_MODE
-        ################################################################
-        ################################################################
-        # The SYNC_MODE Throttle algorithm works as follows:
-        # 1) during throttle instantiation:
-        #    a) a target interval is calculated as seconds/requests.
-        #       For example, with a specification of 4 requests per 1
-        #       second, the target interval will be 0.25 seconds.
-        #    b) _next_target_time is set to a current time reference via
-        #       time.perf_counter_ns
-        # 2) as each request arrives, it is checked against the
-        #    _next_target_time and:
-        #    a) if it arrived at or after _next_target_time, it is
-        #       allowed to proceed without delay
-        #    b) if it arrived before the _next_target_time the request
-        #       is delayed until _next_target_time is reached
-        # 3) _next_target_time is increased by the target_interval
-        #
-        ################################################################
-        with self.sync_lock:
-            # set the time that this request is being made
-            self._arrival_time = time.perf_counter_ns()
-
-            if self._arrival_time < self._next_target_time:
-                wait_time = (
-                    self._next_target_time - self._arrival_time
-                ) * Throttle.NS_2_SECS
-                self.pauser.pause(wait_time)
-
-            ############################################################
-            # Update the expected arrival time for the next request by
-            # adding the request interval to our current time or the
-            # next arrival time, whichever is later. Note that we update
-            # the target time before we send the request which means we
-            # face a possible scenario where we send a request that gets
-            # delayed en route to the service, but out next request
-            # arrives at the updated expected arrival time and is sent
-            # out immediately, but it now arrives early relative to the
-            # previous request, as observed by the service. If we update
-            # the target time after sending the request we avoid that
-            # scenario, but we would then be adding in the request
-            # processing time to the throttle delay with the undesirable
-            # effect that all requests will now be throttled more than
-            # they need to be.
-            ############################################################
-            self._next_target_time = time.perf_counter_ns() + self._target_interval_ns
-
-            ############################################################
-            # Call the request function and return with the request
-            # return value. We use try/except to log and re-raise any
-            # unhandled errors.
-            ############################################################
-            try:
-                return func(*args, **kwargs)
-            except Exception as e:
-                self.logger.debug(
-                    f"throttle send_request unhandled exception in request: {e}"
-                )
-                raise
+        pass
 
     ####################################################################
     # get_interval
@@ -728,7 +675,9 @@ class ThrottleSync(Throttle):
     ####################################################################
     # __init__
     ####################################################################
-    def __init__(self, *, requests: int, seconds: IntFloat) -> None:
+    def __init__(
+        self, *, requests: int, seconds: IntFloat, name: Optional[str] = None
+    ) -> None:
         """Initialize an instance of the Throttle class.
 
         Args:
@@ -736,9 +685,12 @@ class ThrottleSync(Throttle):
                         the interval specified by seconds.
             seconds: The number of seconds in which the number of
                        requests specified in requests can be made.
+            name: The name used to identify the throttle in log messages
+                issued by the throttle. The default name is
+                the python id of the Throttle class instance.
 
         """
-        super().__init__(requests=requests, seconds=seconds)
+        super().__init__(requests=requests, seconds=seconds, name=name)
 
     ####################################################################
     # repr
@@ -841,7 +793,8 @@ class ThrottleSync(Throttle):
                 return func(*args, **kwargs)
             except Exception as e:
                 self.logger.debug(
-                    f"throttle send_request unhandled exception in request: {e}"
+                    f"throttle {self.t_name} send_request unhandled exception in "
+                    f"request: {e}"
                 )
                 raise
 
@@ -857,7 +810,14 @@ class ThrottleSyncEc(ThrottleSync):
     ####################################################################
     # __init__
     ####################################################################
-    def __init__(self, *, requests: int, seconds: IntFloat, early_count: int) -> None:
+    def __init__(
+        self,
+        *,
+        requests: int,
+        seconds: IntFloat,
+        name: Optional[str] = None,
+        early_count: int,
+    ) -> None:
         """Initialize an instance of the early count Throttle class.
 
         Args:
@@ -865,6 +825,9 @@ class ThrottleSyncEc(ThrottleSync):
                         the interval specified by seconds.
             seconds: The number of seconds in which the number of
                        requests specified in requests can be made.
+            name: The name used to identify the throttle in log messages
+                issued by the throttle. The default name is
+                the python id of the Throttle class instance.
             early_count: Specifies the number of requests that are
                            allowed to proceed immediately without delay
                            for **mode=Throttle.MODE_SYNC_EC**.
@@ -881,7 +844,7 @@ class ThrottleSyncEc(ThrottleSync):
         ################################################################
         # early_count
         ################################################################
-        super().__init__(requests=requests, seconds=seconds)
+        super().__init__(requests=requests, seconds=seconds, name=name)
 
         if isinstance(early_count, int) and (0 < early_count):
             self.early_count = early_count
@@ -1036,7 +999,8 @@ class ThrottleSyncEc(ThrottleSync):
                 return func(*args, **kwargs)
             except Exception as e:
                 self.logger.debug(
-                    f"throttle send_request unhandled exception in request: {e}"
+                    f"throttle {self.t_name} send_request unhandled exception in "
+                    f"request: {e}"
                 )
                 raise
 
@@ -1058,7 +1022,12 @@ class ThrottleSyncLb(ThrottleSync):
     # __init__
     ####################################################################
     def __init__(
-        self, *, requests: int, seconds: IntFloat, lb_threshold: IntFloat
+        self,
+        *,
+        requests: int,
+        seconds: IntFloat,
+        name: Optional[str] = None,
+        lb_threshold: IntFloat,
     ) -> None:
         """Initialize an instance of the leaky bucket Throttle class.
 
@@ -1067,6 +1036,9 @@ class ThrottleSyncLb(ThrottleSync):
                         the interval specified by seconds.
             seconds: The number of seconds in which the number of
                        requests specified in requests can be made.
+            name: The name used to identify the throttle in log messages
+                issued by the throttle. The default name is
+                the python id of the Throttle class instance.
             lb_threshold: Specifies the threshold for the leaky bucket
                             when Throttle.MODE_SYNC_LB is specified for
                             mode. This is the number of requests that
@@ -1090,7 +1062,7 @@ class ThrottleSyncLb(ThrottleSync):
         ################################################################
         # lb_threshold
         ################################################################
-        super().__init__(requests=requests, seconds=seconds)
+        super().__init__(requests=requests, seconds=seconds, name=name)
 
         if isinstance(lb_threshold, (int, float)) and (0 < lb_threshold):
             self.lb_threshold = float(lb_threshold)
@@ -1239,7 +1211,8 @@ class ThrottleSyncLb(ThrottleSync):
                 return func(*args, **kwargs)
             except Exception as e:
                 self.logger.debug(
-                    f"throttle send_request unhandled exception in request: {e}"
+                    f"throttle {self.t_name} send_request unhandled exception in "
+                    f"request: {e}"
                 )
                 raise
 
@@ -1273,15 +1246,16 @@ class ThrottleAsync(Throttle):
     _HARD_SHUTDOWN_COMPLETED: Final[int] = 4
 
     __slots__ = (
-        "async_q_size",
-        "shutdown_lock",
-        "throttle_state",
         "_check_async_q_time",
         "_check_async_q_time2",
-        "shutdown_start_time",
-        "shutdown_elapsed_time",
+        "_throttle_shutdown_started",
         "async_q",
+        "async_q_size",
         "request_scheduler_thread",
+        "shutdown_elapsed_time",
+        "shutdown_lock",
+        "shutdown_start_time",
+        "throttle_state",
     )
 
     ####################################################################
@@ -1292,6 +1266,7 @@ class ThrottleAsync(Throttle):
         *,
         requests: int,
         seconds: IntFloat,
+        name: Optional[str] = None,
         async_q_size: Optional[int] = None,
     ) -> None:
         """Initialize an instance of the ThrottleAsync class.
@@ -1301,6 +1276,9 @@ class ThrottleAsync(Throttle):
                         the interval specified by seconds.
             seconds: The number of seconds in which the number of
                        requests specified in requests can be made.
+            name: The name used to identify the throttle in log messages
+                issued by the throttle. The default name is
+                the python id of the Throttle class instance.
             async_q_size: Specifies the size of the request
                             queue for async requests. When the request
                             queue is totally populated, any additional
@@ -1345,13 +1323,13 @@ class ThrottleAsync(Throttle):
         ################################################################
         # async_q_size
         ################################################################
-        super().__init__(requests=requests, seconds=seconds)
+        super().__init__(requests=requests, seconds=seconds, name=name)
         if async_q_size is not None:
             if isinstance(async_q_size, int) and (0 < async_q_size):
                 self.async_q_size = async_q_size
             else:
                 raise IncorrectAsyncQSizeSpecified(
-                    "async_q_size " "must be an " "integer greater" "than zero."
+                    "async_q_size must be an integer greater than zero."
                 )
         else:
             self.async_q_size = Throttle.DEFAULT_ASYNC_Q_SIZE
@@ -1360,6 +1338,7 @@ class ThrottleAsync(Throttle):
         # Set remainder of vars
         ################################################################
         self.shutdown_lock = threading.Lock()
+        self._throttle_shutdown_started = False
         self.throttle_state = ThrottleAsync._ACTIVE
         self._check_async_q_time = 0.0
         self._check_async_q_time2 = 0.0
@@ -1459,8 +1438,8 @@ class ThrottleAsync(Throttle):
               rejected because the throttle was shut down.
 
         """
-        if self.throttle_state != ThrottleAsync._ACTIVE:
-            return Throttle.RC_THROTTLE_IS_SHUTDOWN
+        # if self.throttle_state != ThrottleAsync._ACTIVE:
+        #     return Throttle.RC_THROTTLE_IS_SHUTDOWN
 
         # TODO: use se_lock
         # We obtain the shutdown lock to protect against the following
@@ -1476,7 +1455,11 @@ class ThrottleAsync(Throttle):
         # async_q - this request will never be processed
         with self.shutdown_lock:
             request_item = Throttle.Request(func, args, kwargs, time.perf_counter_ns())
-            while self.throttle_state == ThrottleAsync._ACTIVE:
+            # start_shutdown will set _throttle_shutdown_started to tell
+            # us to abandon our attempts to get a request on a full
+            # async_q so that we give up the lock to allow
+            # start_shutdown to proceed
+            while not self._throttle_shutdown_started:
                 try:
                     self.async_q.put(request_item, block=True, timeout=0.5)
                     return Throttle.RC_OK
@@ -1537,7 +1520,8 @@ class ThrottleAsync(Throttle):
                     # obtained_nowait=obtained_nowait)
             except Exception as e:
                 self.logger.debug(
-                    f"throttle schedule_requests unhandled exception in request: {e}"
+                    f"throttle {self.t_name} schedule_requests unhandled exception in "
+                    f"request: {e}"
                 )
                 raise
 
@@ -1598,23 +1582,24 @@ class ThrottleAsync(Throttle):
 
         Args:
             shutdown_type: specifies whether to do a soft or a hard
-                             shutdown:
+                shutdown:
 
-                             * A soft shutdown
-                               (ThrottleAsync.TYPE_SHUTDOWN_SOFT),
-                               the default, stops any additional
-                               requests from being queued and cleans up
-                               the request queue by scheduling any
-                               remaining requests at the normal interval
-                               as calculated by the *seconds* and
-                               *requests* arguments specified during
-                               throttle instantiation.
-                             * A hard shutdown
-                               (ThrottleAsync.TYPE_SHUTDOWN_HARD) stops
-                               any additional requests from being queued
-                               and cleans up the request queue by
-                               quickly removing any remaining requests
-                               without executing them.
+                     * A soft shutdown
+                       (ThrottleAsync.TYPE_SHUTDOWN_SOFT),
+                       the default, stops any additional
+                       requests from being queued and cleans up
+                       the request queue by scheduling any
+                       remaining requests at the normal interval
+                       as calculated by the *seconds* and
+                       *requests* arguments specified during
+                       throttle instantiation.
+                     * A hard shutdown
+                       (ThrottleAsync.TYPE_SHUTDOWN_HARD) stops
+                       any additional requests from being queued
+                       and cleans up the request queue by
+                       quickly removing any remaining requests
+                       without executing them.
+
             timeout: number of seconds to allow for shutdown to
                        complete. If the shutdown times out, control is
                        returned with a return value of False. The
@@ -1638,7 +1623,7 @@ class ThrottleAsync(Throttle):
 
         .. # noqa: DAR101
 
-        Returns:
+        Returns: One of the following return codes is returned:
 
             * RC_SHUTDOWN_SOFT_COMPLETED_OK (0): the
               ``start_shutdown()`` request either completed a soft
@@ -1655,9 +1640,9 @@ class ThrottleAsync(Throttle):
 
         Raises:
             IncorrectShutdownTypeSpecified: For start_shutdown,
-                *shutdownType* must be specified as either
-                ThrottleAsync.TYPE_SHUTDOWN_SOFT or
-                ThrottleAsync.TYPE_SHUTDOWN_HARD
+            shutdownType must be specified as either
+            ThrottleAsync.TYPE_SHUTDOWN_SOFT or
+            ThrottleAsync.TYPE_SHUTDOWN_HARD
 
         """
         if shutdown_type not in (
@@ -1673,6 +1658,14 @@ class ThrottleAsync(Throttle):
         ################################################################
         # We are good to go for shutdown
         ################################################################
+        # The shutdown started flag is initialized to False and once
+        # set to True is never changed back to False. We set it here
+        # when we are about to start shutdown to tell send_request to
+        # exit immediately rather that continuing to loop trying to get
+        # a request on a full async_q
+
+        self._throttle_shutdown_started = True
+
         # We use the shutdown lock to block us until any in progress
         # send_requests are complete, and to block other shutdown
         # requests while the variables are been checked and set.
@@ -1733,7 +1726,8 @@ class ThrottleAsync(Throttle):
             if self.request_scheduler_thread.is_alive():
                 if not suppress_timeout_msg:
                     self.logger.debug(
-                        f"start_shutdown request timed out with {timeout=:.4f}"
+                        f"throttle {self.t_name} start_shutdown request timed out with "
+                        f"{timeout=:.4f}"
                     )
                 return ThrottleAsync.RC_SHUTDOWN_TIMED_OUT
 
@@ -1747,10 +1741,13 @@ class ThrottleAsync(Throttle):
                 completion_log_msg_needed = True
 
             if completion_log_msg_needed:
-                self.shutdown_elapsed_time = time.time() - self.shutdown_start_time
+                # add 0.0001 so we don't get a zero elapsed time
+                self.shutdown_elapsed_time = (
+                    time.time() - self.shutdown_start_time + 0.0001
+                )
                 self.logger.debug(
-                    "start_shutdown request successfully completed "
-                    f"in {self.shutdown_elapsed_time:.4f} seconds"
+                    f"throttle {self.t_name} start_shutdown request successfully "
+                    f"completed in {self.shutdown_elapsed_time:.4f} seconds"
                 )
 
             if self.throttle_state == ThrottleAsync._SOFT_SHUTDOWN_COMPLETED:
@@ -1862,20 +1859,24 @@ def add_throttle_async_attr(func: F) -> FuncWithThrottleAsyncAttr[F]:
 ########################################################################
 @overload
 def throttle_sync(
-    wrapped: F, *, requests: int, seconds: IntFloat
+    wrapped: F, *, requests: int, seconds: IntFloat, name: Optional[str] = None
 ) -> FuncWithThrottleSyncAttr[F]:
     pass
 
 
 @overload
 def throttle_sync(
-    *, requests: int, seconds: IntFloat
+    *, requests: int, seconds: IntFloat, name: Optional[str] = None
 ) -> Callable[[F], FuncWithThrottleSyncAttr[F]]:
     pass
 
 
 def throttle_sync(
-    wrapped: Optional[F] = None, *, requests: int, seconds: Any
+    wrapped: Optional[F] = None,
+    *,
+    requests: int,
+    seconds: Any,
+    name: Optional[str] = None,
 ) -> Union[F, FuncWithThrottleSyncAttr[F]]:
     """Decorator to wrap a function in a sync throttle.
 
@@ -1893,6 +1894,10 @@ def throttle_sync(
                    any of the following arguments specified.
         requests: The number of requests that can be made in
                     the interval specified by seconds.
+        name: The name used to identify the throttle in log messages
+                issued by the throttle. The default name is
+                the name of the function being wrapped by the
+                throttle_async decorator.
         seconds: The number of seconds in which the number of requests
                    specified in requests can be made.
 
@@ -1960,10 +1965,14 @@ def throttle_sync(
     if wrapped is None:
         return cast(
             FuncWithThrottleSyncAttr[F],
-            functools.partial(throttle_sync, requests=requests, seconds=seconds),
+            functools.partial(
+                throttle_sync, requests=requests, seconds=seconds, name=name
+            ),
         )
 
-    a_throttle_sync = ThrottleSync(requests=requests, seconds=seconds)
+    if name is None:
+        name = wrapped.__name__
+    a_throttle_sync = ThrottleSync(requests=requests, seconds=seconds, name=name)
 
     @decorator  # type: ignore
     def wrapper(
@@ -1988,14 +1997,19 @@ def throttle_sync(
 ########################################################################
 @overload
 def throttle_sync_ec(
-    wrapped: F, *, requests: int, seconds: IntFloat, early_count: int
+    wrapped: F,
+    *,
+    requests: int,
+    seconds: IntFloat,
+    name: Optional[str] = None,
+    early_count: int,
 ) -> FuncWithThrottleSyncEcAttr[F]:
     pass
 
 
 @overload
 def throttle_sync_ec(
-    *, requests: int, seconds: IntFloat, early_count: int
+    *, requests: int, seconds: IntFloat, name: Optional[str] = None, early_count: int
 ) -> Callable[[F], FuncWithThrottleSyncEcAttr[F]]:
     pass
 
@@ -2005,6 +2019,7 @@ def throttle_sync_ec(
     *,
     requests: int,
     seconds: Any,  # : IntFloat,
+    name: Optional[str] = None,
     early_count: int,
 ) -> Union[F, FuncWithThrottleSyncEcAttr[F]]:
     """Decorator to wrap a function in a sync ec throttle.
@@ -2025,6 +2040,10 @@ def throttle_sync_ec(
                     the interval specified by seconds.
         seconds: The number of seconds in which the number of requests
                    specified in requests can be made.
+        name: The name used to identify the throttle in log messages
+                issued by the throttle. The default name is
+                the name of the function being wrapped by the
+                throttle_async decorator.
         early_count: Specifies the number of requests that are allowed
                        to proceed that arrive earlier than the
                        allowed interval. The count of early requests
@@ -2111,12 +2130,15 @@ def throttle_sync_ec(
                 throttle_sync_ec,
                 requests=requests,
                 seconds=seconds,
+                name=name,
                 early_count=early_count,
             ),
         )
 
+    if name is None:
+        name = wrapped.__name__
     a_throttle_sync_ec = ThrottleSyncEc(
-        requests=requests, seconds=seconds, early_count=early_count
+        requests=requests, seconds=seconds, name=name, early_count=early_count
     )
 
     @decorator  # type: ignore
@@ -2142,14 +2164,19 @@ def throttle_sync_ec(
 ########################################################################
 @overload
 def throttle_sync_lb(
-    wrapped: F, *, requests: int, seconds: IntFloat, lb_threshold: float
+    wrapped: F,
+    *,
+    requests: int,
+    seconds: IntFloat,
+    name: Optional[str] = None,
+    lb_threshold: float,
 ) -> FuncWithThrottleSyncLbAttr[F]:
     pass
 
 
 @overload
 def throttle_sync_lb(
-    *, requests: int, seconds: IntFloat, lb_threshold: float
+    *, requests: int, seconds: IntFloat, name: Optional[str] = None, lb_threshold: float
 ) -> Callable[[F], FuncWithThrottleSyncLbAttr[F]]:
     pass
 
@@ -2159,6 +2186,7 @@ def throttle_sync_lb(
     *,
     requests: int,
     seconds: Any,  # : IntFloat,
+    name: Optional[str] = None,
     lb_threshold: float,
 ) -> Union[F, FuncWithThrottleSyncLbAttr[F]]:
     """Decorator to wrap a function in a sync lb throttle.
@@ -2179,6 +2207,10 @@ def throttle_sync_lb(
                     the interval specified by seconds.
         seconds: The number of seconds in which the number of requests
                    specified in requests can be made.
+        name: The name used to identify the throttle in log messages
+                issued by the throttle. The default name is
+                the name of the function being wrapped by the
+                throttle_async decorator.
         lb_threshold: Specifies the threshold for the leaky bucket when
                         Throttle.MODE_SYNC_LB is specified for mode.
                         This is the number of requests that can be in
@@ -2264,12 +2296,15 @@ def throttle_sync_lb(
                 throttle_sync_lb,
                 requests=requests,
                 seconds=seconds,
+                name=name,
                 lb_threshold=lb_threshold,
             ),
         )
 
+    if name is None:
+        name = wrapped.__name__
     a_throttle_sync_lb = ThrottleSyncLb(
-        requests=requests, seconds=seconds, lb_threshold=lb_threshold
+        requests=requests, seconds=seconds, name=name, lb_threshold=lb_threshold
     )
 
     @decorator  # type: ignore
@@ -2295,14 +2330,23 @@ def throttle_sync_lb(
 ########################################################################
 @overload
 def throttle_async(
-    wrapped: F, *, requests: int, seconds: IntFloat, async_q_size: Optional[int] = None
+    wrapped: F,
+    *,
+    requests: int,
+    seconds: IntFloat,
+    name: Optional[str] = None,
+    async_q_size: Optional[int] = None,
 ) -> FuncWithThrottleAsyncAttr[F]:
     pass
 
 
 @overload
 def throttle_async(
-    *, requests: int, seconds: IntFloat, async_q_size: Optional[int] = None
+    *,
+    requests: int,
+    seconds: IntFloat,
+    name: Optional[str] = None,
+    async_q_size: Optional[int] = None,
 ) -> Callable[[F], FuncWithThrottleAsyncAttr[F]]:
     pass
 
@@ -2312,6 +2356,7 @@ def throttle_async(
     *,
     requests: int,
     seconds: Any,  # : IntFloat,
+    name: Optional[str] = None,
     async_q_size: Optional[int] = None,
 ) -> Union[F, FuncWithThrottleAsyncAttr[F]]:
     """Decorator to wrap a function in an async throttle.
@@ -2332,6 +2377,10 @@ def throttle_async(
                     the interval specified by seconds.
         seconds: The number of seconds in which the number of requests
                    specified in requests can be made.
+        name: The name used to identify the throttle in log messages
+                issued by the throttle. The default name is
+                the name of the function being wrapped by the
+                throttle_async decorator.
         async_q_size: Specifies the size of the request
                         queue for async requests. When the request
                         queue is totaly populated, any additional
@@ -2409,12 +2458,19 @@ def throttle_async(
                 throttle_async,
                 requests=requests,
                 seconds=seconds,
+                name=name,
                 async_q_size=async_q_size,
             ),
         )
 
+    if name is None:
+        name = wrapped.__name__
+
     a_throttle_async = ThrottleAsync(
-        requests=requests, seconds=seconds, async_q_size=async_q_size
+        requests=requests,
+        seconds=seconds,
+        async_q_size=async_q_size,
+        name=name,
     )
 
     @decorator  # type: ignore
@@ -2515,7 +2571,7 @@ def shutdown_throttle_funcs(
         if timer.is_expired() and funcs:
             for func in funcs:
                 func.throttle.logger.debug(
-                    f"Throttle ID {id(func.throttle)} shutdown_throttle_funcs request "
+                    f"Throttle {func.throttle.t_name} shutdown_throttle_funcs request "
                     f"timed out with {timeout=:.4f}"
                 )
             return False  # we timed out
