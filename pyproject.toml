@@ -4,11 +4,11 @@ version = "1.0.0"
 description = "Miscellaneous utilities"
 readme = "README.rst"
 requires-python = "~=3.12"
-license = {file = "LICENSE.txt"}
+license = "MIT"
+license-files = ["LICEN[CS]E*"]
 keywords = ["utilities"]
 authors = [{name = "Scott Tuttle", email = "sbtuttle@outlook.com"}]
 classifiers = [
-    "License :: OSI Approved :: MIT License",
     "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Developers",
     "Topic :: Software Development :: Libraries :: Python Modules",
@@ -20,10 +20,9 @@ classifiers = [
     "Operating System :: Microsoft :: Windows :: Windows 10"]
 dependencies = [
     "more-itertools ~=10.7",
-    "pandas ~=2.2",
-#    "scottbrian-utils ~=4.2",
-    "scottbrian_utils @  file://C:/Users/Tiger/PycharmProjects/scottbrian_utils/dist/scottbrian_utils-5.0.0-py3-none-any.whl",
-    "typing_extensions ~=4.13",
+    "pandas ~=2.3",
+    "scottbrian-utils ~=5.0",
+    "typing_extensions ~=4.14",
     "wrapt ~=1.17",
 ]
 
@@ -36,8 +35,5 @@ Documentation = "https://scottbrian-throttle.readthedocs.io/en/latest/"
 Source = "https://github.com/ScottBrian/scottbrian_throttle.git"
 
 [build-system]
-requires = [
-    "setuptools ~=69.5",
-    "wheel ~=0.43"
-]
+requires = ["setuptools ~=80.9"]
 build-backend = 'setuptools.build_meta'
