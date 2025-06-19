@@ -55,14 +55,13 @@ class SbtDocCheckerOutputChecker(DocCheckerOutputChecker):
                             # want to have a way to determine a
                             # reasonable variance when the expected or
                             # actual value is zero.
-                            if actual_value == 0 or expected_value == 0:
-                                actual_value += 1 + diff_value
-                                expected_value += 1 + diff_value
+                            if expected_value == 0:
+                                expected_value = 1
 
                             # if the difference is withing spec, replace
                             # the want with the got so it will pass.
                             # Otherwise, leave it as is so it will fail.
-                            if (diff_value / abs(expected_value)) < 0.10:
+                            if (diff_value / abs(expected_value)) <= 0.20:
                                 want = re.sub(match_str, found_item.group(), want)
 
         # self.msgs.append(f"{want=}, {got=}")

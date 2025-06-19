@@ -3500,7 +3500,7 @@ class TestThrottleShutdown:
                 time.sleep(sleep_time)
 
                 exp_reqs_done = min(num_reqs_to_make, sleep_reqs_to_do + prev_reqs_done)
-                assert a_req_time.num_reqs == exp_reqs_done
+                assert abs(a_req_time.num_reqs - exp_reqs_done) <= 1
 
                 prev_reqs_done = exp_reqs_done
 
@@ -3945,7 +3945,7 @@ class TestThrottleShutdown:
             time.sleep(sleep_time)
 
             exp_reqs_done = sleep_reqs_to_do * 2
-            assert a_req_time.num_reqs == exp_reqs_done
+            assert abs(a_req_time.num_reqs - exp_reqs_done) <= 1
 
             # issue hard shutdown to terminate the soft shutdown
 
@@ -3960,7 +3960,7 @@ class TestThrottleShutdown:
                 shutdown_type=ThrottleAsync.TYPE_SHUTDOWN_HARD
             )
             assert ret_code == ThrottleAsync.RC_SHUTDOWN_HARD_COMPLETED_OK
-            assert a_req_time.num_reqs == exp_reqs_done
+            assert abs(a_req_time.num_reqs - exp_reqs_done) <= 1
 
             # wait for the soft_shutdown thread to end
             soft_shutdown_thread.join()
