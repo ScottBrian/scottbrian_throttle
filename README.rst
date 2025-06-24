@@ -120,7 +120,7 @@ request 9 sent at elapsed time: 4.5
 Installation
 ============
 
-Linux:
+Windows:
 
 ``pip install scottbrian-throttle``
 
