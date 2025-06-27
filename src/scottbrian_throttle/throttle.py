@@ -985,6 +985,9 @@ class ThrottleSyncLb(ThrottleSync):
         "lb_adjustment_ns",
         "lb_threshold",
         "_wait_time",
+        "_before_next_target_time",
+        "_entry_bucket_amt",
+        "_exit_bucket_amt",
     )
 
     ####################################################################
@@ -1050,6 +1053,10 @@ class ThrottleSyncLb(ThrottleSync):
         self._next_target_time = time.perf_counter_ns() - self.lb_adjustment_ns
 
         self._wait_time: float = 0.0
+
+        self._before_next_target_time: float = 0.0
+        self._entry_bucket_amt: float = 0.0
+        self._exit_bucket_amt: float = 0.0
 
     ####################################################################
     # repr
@@ -1141,12 +1148,83 @@ class ThrottleSyncLb(ThrottleSync):
             # to catch up.
             ############################################################
             self._wait_time = 0.0
+            self._before_next_target_time = self._next_target_time
+
+            # full_bucket_ns = (
+            #     self._target_interval * self.lb_threshold
+            # ) * Throttle.SECS_2_NS
+            # self._entry_bucket_amt = max(
+            #     0.0, (self._next_target_time - self._arrival_time) * Throttle.NS_2_SECS
+            # )
+            #
+            # if self._arrival_time < self._next_target_time:
+            #     wait_time = 0.0
+            #     if (
+            #         self._next_target_time - self._arrival_time
+            #         >= full_bucket_ns - self._target_interval_ns
+            #     ):
+            #         wait_time = (
+            #             self._next_target_time
+            #             - self._arrival_time
+            #             - (full_bucket_ns - self._target_interval_ns)
+            #         ) * Throttle.NS_2_SECS
+            #         self._wait_time = wait_time
+            #         self.pauser.pause(wait_time)
+            #     self._next_target_time += (
+            #         self._target_interval_ns - wait_time * Throttle.SECS_2_NS
+            #     )
+            # else:
+            #     self._next_target_time = self._arrival_time + self._target_interval_ns
+            #
+            # self._exit_bucket_amt = max(
+            #     0.0, (self._next_target_time - self._arrival_time) * Throttle.NS_2_SECS
+            # )
+
+            self._entry_bucket_amt = max(
+                0.0, (self._next_target_time - self._arrival_time) * Throttle.NS_2_SECS
+            )
+
+            ############################################################
+            # good code
+            ############################################################
+            # if self._next_target_time <= self._arrival_time:
+            #     # bucket is empty
+            #     self._next_target_time = self._arrival_time + self._target_interval_ns
+            # elif self._next_target_time - self._arrival_time < self.lb_adjustment_ns:
+            #     # bucket has room for another send
+            #     self._next_target_time += self._target_interval_ns
+            # else:
+            #     # we need to wait to drain the bucket some more
+            #     wait_time = (
+            #         self._next_target_time - self._arrival_time - self.lb_adjustment_ns
+            #     )
+            #     self._wait_time = wait_time * Throttle.NS_2_SECS
+            #     self.pauser.pause(wait_time * Throttle.NS_2_SECS)
+            #
+            #     self._next_target_time += self._target_interval_ns - wait_time
+            #
+            # self._exit_bucket_amt = max(
+            #     0.0, (self._next_target_time - self._arrival_time) * Throttle.NS_2_SECS
+            # )
+
+            ############################################################
+            # try 2:
+            ############################################################
             if self._arrival_time < self._next_target_time:
-                wait_time = (
-                    self._next_target_time - self._arrival_time
-                ) * Throttle.NS_2_SECS
-                self._wait_time = wait_time
-                self.pauser.pause(wait_time)
+                wait_time = self._next_target_time - self._arrival_time
+                self._wait_time = wait_time * Throttle.NS_2_SECS
+                self.pauser.pause(wait_time * Throttle.NS_2_SECS)
+                self._next_target_time = (
+                    self._arrival_time + self._wait_time + self._target_interval_ns
+                )
+            else:
+                if (
+                    self._arrival_time - self._next_target_time
+                    >= self.lb_adjustment_ns + self._target_interval_ns
+                ):
+                    self._next_target_time = self._arrival_time - self.lb_adjustment_ns
+                else:
+                    self._next_target_time += self._target_interval_ns
 
             ############################################################
             # Update the expected arrival time for the next request by
@@ -1164,15 +1242,41 @@ class ThrottleSyncLb(ThrottleSync):
             # effect that all requests will now be throttled more than
             # they need to be.
             ############################################################
-            self._next_target_time = (
-                max(
-                    float(time.perf_counter_ns()),
-                    self._next_target_time + self.lb_adjustment_ns,
-                )
-                - self.lb_adjustment_ns
-                + self._target_interval_ns
-            )
+            # if self._arrival_time < self._next_target_time:
+            #     wait_time = (
+            #         self._next_target_time - self._arrival_time
+            #     ) * Throttle.NS_2_SECS
+            #     self._wait_time = wait_time
+            #     self.pauser.pause(wait_time)
 
+            ############################################################
+            # Update the expected arrival time for the next request by
+            # adding the request interval to our current time or the
+            # next arrival time, whichever is later. Note that we update
+            # the target time before we send the request which means we
+            # face a possible scenario where we send a request that gets
+            # delayed en route to the service, but out next request
+            # arrives at the updated expected arrival time and is sent
+            # out immediately, but it now arrives early relative to the
+            # previous request, as observed by the service. If we update
+            # the target time after sending the request we avoid that
+            # scenario, but we would then be adding in the request
+            # processing time to the throttle delay with the undesirable
+            # effect that all requests will now be throttled more than
+            # they need to be.
+            ############################################################
+            # self._next_target_time = (
+            #     max(
+            #         float(time.perf_counter_ns()),
+            #         self._next_target_time + self.lb_adjustment_ns,
+            #     )
+            #     - self.lb_adjustment_ns
+            #     + self._target_interval_ns
+            # )
+
+            self._exit_bucket_amt = max(
+                0.0, (self._next_target_time - self._arrival_time) * Throttle.NS_2_SECS
+            )
             ############################################################
             # Call the request function and return with the request
             # return value. We use try/except to log and re-raise any

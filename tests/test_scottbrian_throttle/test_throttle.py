@@ -1060,7 +1060,7 @@ class TestThrottle:
         )
 
     ####################################################################
-    # test_throttle_sync_lb
+    # test_throttle_sync_lb_args_style
     ####################################################################
     @pytest.mark.parametrize("request_style_arg", (0, 1, 2, 3, 4, 5, 6))
     def test_throttle_sync_lb_args_style(self, request_style_arg: int) -> None:
@@ -4420,6 +4420,10 @@ class RequestValidator:
         self.exp_interval_sums: list[float] = []
 
         self.throttles: list[Throttle] = []
+        self.before_next_target_times: list[float] = []
+
+        self.t_entry_bucket_amt: list[float] = []
+        self.t_exit_bucket_amt: list[float] = []
         self.next_target_times: list[float] = []
         self.idx = -1
 
@@ -4459,6 +4463,8 @@ class RequestValidator:
         self.norm_req_intervals: list[float] = []
         self.norm_after_req_intervals: list[float] = []
         self.norm_start_intervals: list[float] = []
+
+        self.norm_before_next_target_intervals: list[float] = []
         self.norm_next_target_intervals: list[float] = []
 
         self.mean_before_req_interval = 0.0
@@ -4467,6 +4473,7 @@ class RequestValidator:
         self.mean_after_req_interval = 0.0
         self.mean_start_interval = 0.0
 
+        self.norm_before_next_target_times: list[float] = []
         self.norm_next_target_times: list[float] = []
 
         self.mean_next_target_interval = 0.0
@@ -4578,6 +4585,8 @@ class RequestValidator:
         self.norm_req_intervals = []
         self.norm_after_req_intervals = []
         self.norm_start_intervals = []
+
+        self.norm_before_next_target_intervals = []
         self.norm_next_target_intervals = []
 
         self.mean_before_req_interval = 0.0
@@ -4585,9 +4594,14 @@ class RequestValidator:
         self.mean_req_interval = 0.0
         self.mean_after_req_interval = 0.0
 
+        self.before_next_target_times = []
+        self.norm_before_next_target_times = []
         self.next_target_times = []
         self.norm_next_target_times = []
-        self.norm_next_target_intervals = []
+
+        self.t_entry_bucket_amt = []
+        self.t_exit_bucket_amt = []
+
         self.mean_next_target_interval = 0.0
 
         self.path_times = []
@@ -4619,6 +4633,11 @@ class RequestValidator:
         print(f"{self.min_interval=}")
         print(f"{self.max_interval=}")
         print(f"{self.exp_total_time=}")
+
+        print(f"{self.t_throttle.lb_adjustment=}")
+        print(f"{self.t_throttle.lb_adjustment_ns=}")
+        print(f"{self.t_throttle._next_target_time=}")
+        print(f"{self.t_throttle._target_interval=}")
 
     ####################################################################
     # add_func_throttles
@@ -4928,11 +4947,29 @@ class RequestValidator:
         ]
 
         ################################################################
+        # create list of before next target times and intervals
+        ################################################################
+        if self.before_next_target_times:
+            assert len(self.before_next_target_times) == self.total_requests
+            # base_time = self.before_next_target_times[0]
+            self.norm_before_next_target_times = [
+                (item - base_time) * Pauser.NS_2_SECS
+                for item in self.before_next_target_times
+            ]
+            self.norm_before_next_target_intervals = list(
+                map(
+                    lambda t1, t2: t1 - t2,
+                    self.norm_before_next_target_times,
+                    [0.0] + self.norm_before_next_target_times[:-1],
+                )
+            )
+
+        ################################################################
         # create list of next target times and intervals
         ################################################################
         if self.next_target_times:
             assert len(self.next_target_times) == self.total_requests
-            base_time = self.next_target_times[0]
+            # base_time = self.next_target_times[0]
             self.norm_next_target_times = [
                 (item - base_time) * Pauser.NS_2_SECS for item in self.next_target_times
             ]
@@ -5131,6 +5168,42 @@ class RequestValidator:
             p_exit_bucket_amt = []
             p_avail_bucket_amt = []
 
+        if self.norm_before_next_target_times:
+            p_b4_next_t_times = list(
+                map(lambda num: f"{num: 7.3f}", self.norm_before_next_target_times)
+            )
+            p_b4_next_t_intervals = list(
+                map(lambda num: f"{num: 7.3f}", self.norm_before_next_target_intervals)
+            )
+        else:
+            p_b4_next_t_times = []
+            p_b4_next_t_intervals = []
+
+        if self.norm_next_target_times:
+            p_next_t_times = list(
+                map(lambda num: f"{num: 7.3f}", self.norm_next_target_times)
+            )
+            p_next_t_intervals = list(
+                map(lambda num: f"{num: 7.3f}", self.norm_next_target_intervals)
+            )
+        else:
+            p_next_t_times = []
+            p_next_t_intervals = []
+
+        if self.t_entry_bucket_amt:
+            p_t_entry_bucket_amt = list(
+                map(lambda num: f"{num: 7.3f}", self.t_entry_bucket_amt)
+            )
+        else:
+            p_t_entry_bucket_amt = []
+
+        if self.t_exit_bucket_amt:
+            p_t_exit_bucket_amt = list(
+                map(lambda num: f"{num: 7.3f}", self.t_exit_bucket_amt)
+            )
+        else:
+            p_t_exit_bucket_amt = []
+
         # p_time_traces_intervals = []
         # for time_trace in self.norm_time_traces_intervals:
         #     p_time_traces_interval = list(
@@ -5172,7 +5245,16 @@ class RequestValidator:
 
         print(f"\n{p_previous_delay      =}")  # noqa E221 E251
         print(f"{p_current_delay       =}")  # noqa E221 E251
+
+        print(f"\n{p_arrival_times       =}")  # noqa E221 E251
+        print(f"{p_b4_next_t_times     =}")
+        print(f"{p_next_t_times        =}")
         print(f"{p_wait_times          =}")  # noqa E221 E251
+        print(f"{p_t_entry_bucket_amt  =}")
+        print(f"{p_t_exit_bucket_amt   =}")
+
+        print(f"\n{p_b4_next_t_intervals =}")
+        print(f"{p_next_t_intervals    =}")
 
         print(f"\n{p_enter_bucket_amt    =}")  # noqa E221 E251
         print(f"{p_exit_bucket_amt     =}")  # noqa E221 E251
@@ -5676,8 +5758,11 @@ class RequestValidator:
         """
         self.req_times.append((idx, perf_counter_ns()))
         self.arrival_times.append(self.t_throttle._arrival_time)
+        self.before_next_target_times.append(self.t_throttle._before_next_target_time)
         self.next_target_times.append(self.t_throttle._next_target_time)
         self.wait_times.append(self.t_throttle._wait_time)
+        self.t_entry_bucket_amt.append(self.t_throttle._entry_bucket_amt)
+        self.t_exit_bucket_amt.append(self.t_throttle._exit_bucket_amt)
         # self.check_async_q_times.append(self.t_throttle._check_async_q_time)
         assert idx == self.idx + 1
         assert requests == self.requests
