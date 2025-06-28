@@ -4747,10 +4747,14 @@ class RequestValidator:
             intervals_to_use = self.norm_arrival_intervals
         else:
             intervals_to_use = self.send_intervals
-        previous_delay = 0.0
+        current_delay = 0.0
         for send_interval in intervals_to_use[1:]:
+            previous_delay = current_delay
+            current_delay = 0.0
             # remove the amount that leaked since the last send
-            current_bucket_amt = max(0.0, current_bucket_amt - send_interval)
+            current_bucket_amt = max(
+                0.0, current_bucket_amt - (send_interval - previous_delay)
+            )
             self.enter_bucket_amt.append(current_bucket_amt)
             available_bucket_amt = bucket_capacity - current_bucket_amt
             self.avail_bucket_amt.append(available_bucket_amt)
@@ -4760,17 +4764,15 @@ class RequestValidator:
 
             if self.target_interval <= available_bucket_amt:
                 current_bucket_amt += self.target_interval
-                self.expected_intervals.append(send_interval - previous_delay)
-
-                previous_delay = 0.0
-                current_delay = 0.0
+                self.expected_intervals.append(
+                    send_interval - previous_delay + current_delay
+                )
             else:
                 current_delay = self.target_interval - available_bucket_amt
                 self.expected_intervals.append(
                     send_interval - previous_delay + current_delay
                 )
                 current_bucket_amt += self.target_interval - current_delay
-                previous_delay = current_delay
 
             self.current_delay.append(current_delay)
             self.exit_bucket_amt.append(current_bucket_amt)
@@ -5244,21 +5246,24 @@ class RequestValidator:
         print(f"{p_diff_ratio          =}")  # noqa E221 E251
 
         print(f"\n{p_previous_delay      =}")  # noqa E221 E251
-        print(f"{p_current_delay       =}")  # noqa E221 E251
 
         print(f"\n{p_arrival_times       =}")  # noqa E221 E251
         print(f"{p_b4_next_t_times     =}")
         print(f"{p_next_t_times        =}")
-        print(f"{p_wait_times          =}")  # noqa E221 E251
-        print(f"{p_t_entry_bucket_amt  =}")
-        print(f"{p_t_exit_bucket_amt   =}")
 
         print(f"\n{p_b4_next_t_intervals =}")
         print(f"{p_next_t_intervals    =}")
 
         print(f"\n{p_enter_bucket_amt    =}")  # noqa E221 E251
-        print(f"{p_exit_bucket_amt     =}")  # noqa E221 E251
-        print(f"{p_avail_bucket_amt    =}")  # noqa E221 E251
+        print(f"{p_t_entry_bucket_amt  =}")
+
+        print(f"\n{p_current_delay       =}")  # noqa E221 E251
+        print(f"{p_wait_times          =}")  # noqa E221 E251
+
+        print(f"\n{p_exit_bucket_amt     =}")  # noqa E221 E251
+        print(f"{p_t_exit_bucket_amt   =}")
+
+        print(f"\n{p_avail_bucket_amt    =}")  # noqa E221 E251
 
         # if self.mode == MODE_ASYNC:
         #     flowers(['path times:',
