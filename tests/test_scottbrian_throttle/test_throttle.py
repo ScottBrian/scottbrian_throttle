@@ -1083,14 +1083,15 @@ class TestThrottle:
     ####################################################################
     # test_throttle_sync_lb
     ####################################################################
-    # @pytest.mark.parametrize("requests_arg", (1, 2, 3))
-    # @pytest.mark.parametrize("seconds_arg", (0.3, 1, 2))
-    # @pytest.mark.parametrize("lb_threshold_arg", (1, 1.5, 3))
-    # @pytest.mark.parametrize("send_interval_mult_arg", (0.0, 0.9, 1.0, 1.1))
-    @pytest.mark.parametrize("requests_arg", (1,))
-    @pytest.mark.parametrize("seconds_arg", (1,))
-    @pytest.mark.parametrize("lb_threshold_arg", (3,))
-    @pytest.mark.parametrize("send_interval_mult_arg", (0.9,))
+    # @pytest.mark.parametrize("requests_arg", (1,))
+    # @pytest.mark.parametrize("seconds_arg", (1,))
+    # @pytest.mark.parametrize("lb_threshold_arg", (3,))
+    # @pytest.mark.parametrize("send_interval_mult_arg", (0.9,))
+
+    @pytest.mark.parametrize("requests_arg", (1, 2, 3))
+    @pytest.mark.parametrize("seconds_arg", (0.3, 1, 2))
+    @pytest.mark.parametrize("lb_threshold_arg", (1, 1.5, 3))
+    @pytest.mark.parametrize("send_interval_mult_arg", (0.0, 0.9, 1.0, 1.1))
     def test_throttle_sync_lb(
         self,
         requests_arg: int,
