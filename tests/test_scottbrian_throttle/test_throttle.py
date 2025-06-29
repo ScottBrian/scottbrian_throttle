@@ -335,10 +335,13 @@ class TestThrottleBasic:
         ################################################################
         a_throttle = ThrottleAsync(requests=requests_arg, seconds=seconds_arg)
 
+        t_id = id(a_throttle)
+
         expected_repr_str = (
             f"ThrottleAsync("
             f"requests={requests_arg}, "
             f"seconds={float(seconds_arg)}, "
+            f"name={t_id}, "
             f"async_q_size={Throttle.DEFAULT_ASYNC_Q_SIZE})"
         )
 
@@ -354,10 +357,53 @@ class TestThrottleBasic:
             requests=requests_arg, seconds=seconds_arg, async_q_size=q_size
         )
 
+        t_id = id(a_throttle)
+
         expected_repr_str = (
             f"ThrottleAsync("
             f"requests={requests_arg}, "
             f"seconds={float(seconds_arg)}, "
+            f"name={t_id}, "
+            f"async_q_size={q_size})"
+        )
+
+        assert repr(a_throttle) == expected_repr_str
+
+        a_throttle.start_shutdown()
+
+        ################################################################
+        # throttle with async_q_size not specified with name
+        ################################################################
+        a_throttle = ThrottleAsync(
+            requests=requests_arg, seconds=seconds_arg, name="my_t"
+        )
+
+        expected_repr_str = (
+            f"ThrottleAsync("
+            f"requests={requests_arg}, "
+            f"seconds={float(seconds_arg)}, "
+            f"name=my_t, "
+            f"async_q_size={Throttle.DEFAULT_ASYNC_Q_SIZE})"
+        )
+
+        assert repr(a_throttle) == expected_repr_str
+
+        a_throttle.start_shutdown()
+
+        ################################################################
+        # throttle with async_q_size specified with name
+        ################################################################
+        q_size = requests_arg * 3
+        t_name = "t_man"
+        a_throttle = ThrottleAsync(
+            requests=requests_arg, seconds=seconds_arg, name=t_name, async_q_size=q_size
+        )
+
+        expected_repr_str = (
+            f"ThrottleAsync("
+            f"requests={requests_arg}, "
+            f"seconds={float(seconds_arg)}, "
+            f"name={t_name}, "
             f"async_q_size={q_size})"
         )
 
@@ -383,10 +429,26 @@ class TestThrottleBasic:
         """
         a_throttle = ThrottleSync(requests=requests_arg, seconds=seconds_arg)
 
+        t_id = id(a_throttle)
+
         expected_repr_str = (
             f"ThrottleSync("
             f"requests={requests_arg}, "
-            f"seconds={float(seconds_arg)})"
+            f"seconds={float(seconds_arg)}, "
+            f"name={t_id})"
+        )
+
+        assert repr(a_throttle) == expected_repr_str
+
+        a_throttle = ThrottleSync(
+            requests=requests_arg, seconds=seconds_arg, name="my_synct"
+        )
+
+        expected_repr_str = (
+            f"ThrottleSync("
+            f"requests={requests_arg}, "
+            f"seconds={float(seconds_arg)}, "
+            f"name=my_synct)"
         )
 
         assert repr(a_throttle) == expected_repr_str
@@ -418,6 +480,24 @@ class TestThrottleBasic:
             f"ThrottleSyncEc("
             f"requests={requests_arg}, "
             f"seconds={float(seconds_arg)}, "
+            f"name={id(a_throttle)}, "
+            f"early_count={early_count_arg})"
+        )
+
+        assert repr(a_throttle) == expected_repr_str
+
+        a_throttle = ThrottleSyncEc(
+            requests=requests_arg,
+            seconds=seconds_arg,
+            early_count=early_count_arg,
+            name="a_syncEC",
+        )
+
+        expected_repr_str = (
+            f"ThrottleSyncEc("
+            f"requests={requests_arg}, "
+            f"seconds={float(seconds_arg)}, "
+            f"name=a_syncEC, "
             f"early_count={early_count_arg})"
         )
 
@@ -450,6 +530,24 @@ class TestThrottleBasic:
             f"ThrottleSyncLb("
             f"requests={requests_arg}, "
             f"seconds={float(seconds_arg)}, "
+            f"name={id(a_throttle)}, "
+            f"lb_threshold={float(lb_threshold_arg)})"
+        )
+
+        assert repr(a_throttle) == expected_repr_str
+
+        a_throttle = ThrottleSyncLb(
+            requests=requests_arg,
+            seconds=seconds_arg,
+            lb_threshold=lb_threshold_arg,
+            name="a_syncLb",
+        )
+
+        expected_repr_str = (
+            f"ThrottleSyncLb("
+            f"requests={requests_arg}, "
+            f"seconds={float(seconds_arg)}, "
+            f"name=a_syncLb, "
             f"lb_threshold={float(lb_threshold_arg)})"
         )
 
@@ -4635,8 +4733,8 @@ class RequestValidator:
         print(f"{self.max_interval=}")
         print(f"{self.exp_total_time=}")
 
-        print(f"{self.t_throttle.lb_adjustment=}")
-        print(f"{self.t_throttle.lb_adjustment_ns=}")
+        # print(f"{self.t_throttle.lb_adjustment=}")
+        # print(f"{self.t_throttle.lb_adjustment_ns=}")
         print(f"{self.t_throttle._next_target_time=}")
         print(f"{self.t_throttle._target_interval=}")
 
@@ -5764,11 +5862,10 @@ class RequestValidator:
         """
         self.req_times.append((idx, perf_counter_ns()))
         self.arrival_times.append(self.t_throttle._arrival_time)
-        self.before_next_target_times.append(self.t_throttle._before_next_target_time)
         self.next_target_times.append(self.t_throttle._next_target_time)
         self.wait_times.append(self.t_throttle._wait_time)
-        self.t_entry_bucket_amt.append(self.t_throttle._entry_bucket_amt)
-        self.t_exit_bucket_amt.append(self.t_throttle._exit_bucket_amt)
+        # self.t_entry_bucket_amt.append(self.t_throttle._entry_bucket_amt)
+        # self.t_exit_bucket_amt.append(self.t_throttle._exit_bucket_amt)
         # self.check_async_q_times.append(self.t_throttle._check_async_q_time)
         assert idx == self.idx + 1
         assert requests == self.requests
