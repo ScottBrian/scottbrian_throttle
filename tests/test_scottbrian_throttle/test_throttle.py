@@ -24,10 +24,12 @@ from typing_extensions import TypeAlias
 # Third Party
 ########################################################################
 import pytest
-from scottbrian_utils.flower_box import print_flower_box_msg as flowers
-from scottbrian_utils.pauser import Pauser
-from scottbrian_utils.log_verifier import LogVer
+
 from scottbrian_utils.entry_trace import etrace
+from scottbrian_utils.exc_hook import ExcHook
+from scottbrian_utils.flower_box import print_flower_box_msg as flowers
+from scottbrian_utils.log_verifier import LogVer
+from scottbrian_utils.pauser import Pauser
 
 ########################################################################
 # Local
@@ -757,7 +759,7 @@ class TestThrottleDecoratorRequestErrors:
     """TestThrottleDecoratorErrors class."""
 
     def test_pie_throttle_request_errors(
-        self, caplog: pytest.LogCaptureFixture, thread_exc: Any
+        self, caplog: pytest.LogCaptureFixture, thread_exc: ExcHook
     ) -> None:
         """test_throttle using request failure.
 
@@ -804,13 +806,24 @@ class TestThrottleDecoratorRequestErrors:
             log_level=logging.DEBUG,
             log_msg=log_msg,
         )
-        with pytest.raises(Exception):
+        zero_div_err_pattern = (
+            "Test case excepthook: args.exc_type=<class "
+            "'ZeroDivisionError'>, "
+            r"args.exc_value=ZeroDivisionError\('division by "
+            r"zero'\), "
+            "args.exc_traceback=<traceback object at 0x[0-9A-F]+>, "
+            "args.thread=<Thread(Thread-[0-9]+ "
+            r"\(schedule_requests\), started [0-9]+>"
+        )
+
+        with pytest.raises(ZeroDivisionError, match=zero_div_err_pattern):
 
             @throttle_async(requests=1, seconds=1)
             def f2() -> None:
                 ans = 42 / 0
                 print(f"{ans=}")
 
+            f2()
             f2()
             f2.throttle.start_shutdown()
             log_msg = (
@@ -823,24 +836,24 @@ class TestThrottleDecoratorRequestErrors:
                 log_level=logging.DEBUG,
                 log_msg=log_msg,
             )
-            # For mode async, the schedule_requests thread will fail
-            # with the divide by zero error and cause the thread_exc
-            # code in conftest to get control and this will result in
-            # log records being written. Unfortunately, we can't simply
-            # add the expected log messages because they include memory
-            # addresses that we can't predict, so we will simply fish
-            # them out the actual log records and place them into our
-            # expected log records. This will allow this test case to
-            # succeed.
-            for actual_record in caplog.record_tuples:
-                if "conftest" in actual_record[0]:
-                    log_ver.add_msg(
-                        log_name=actual_record[0],
-                        log_level=logging.DEBUG,
-                        log_msg=re.escape(actual_record[2]),
-                    )
-
             thread_exc.raise_exc_if_one()
+
+        # For mode async, the schedule_requests thread will fail
+        # with the divide by zero error and cause the thread_exc
+        # code in conftest to get control and this will result in
+        # log records being written. Unfortunately, we can't simply
+        # add the expected log messages because they include memory
+        # addresses that we can't predict, so we will simply fish
+        # them out the actual log records and place them into our
+        # expected log records. This will allow this test case to
+        # succeed.
+        # for actual_record in caplog.record_tuples:
+        #     if "conftest" in actual_record[0]:
+        #         log_ver.add_msg(
+        #             log_name=actual_record[0],
+        #             log_level=logging.DEBUG,
+        #             log_msg=re.escape(actual_record[2]),
+        #         )
 
         ################################################################
         # sync_ec request failure
@@ -882,6 +895,62 @@ class TestThrottleDecoratorRequestErrors:
                 print(f"{ans=}")
 
             f4()
+
+        match_results = log_ver.get_match_results(caplog=caplog)
+        log_ver.print_match_results(match_results)
+        log_ver.verify_log_results(match_results)
+
+    def test_async_pie_throttle_request_errors(
+        self, caplog: pytest.LogCaptureFixture, thread_exc: ExcHook
+    ) -> None:
+        """test_throttle using request failure.
+
+        Args:
+            caplog: pytest fixture to capture log output
+            thread_exc: contains any uncaptured errors from thread
+
+        """
+        log_ver = LogVer(log_name=__name__)
+        alpha_call_seq = (
+            "test_throttle.py::TestThrottleDecoratorRequestErrors"
+            ".test_async_pie_throttle_request_errors"
+        )
+        log_ver.add_call_seq(name="alpha", seq=alpha_call_seq)
+
+        ################################################################
+        # async request failure
+        ################################################################
+        log_msg = (
+            "throttle f2 schedule_requests unhandled exception in "
+            "request: division by zero"
+        )
+        log_ver.add_msg(
+            log_name="scottbrian_throttle.throttle",
+            log_level=logging.DEBUG,
+            log_msg=log_msg,
+        )
+        with pytest.raises(Exception):
+
+            @throttle_async(requests=1, seconds=1)
+            def f2() -> None:
+                ans = 42 / 0
+                print(f"{ans=}")
+
+            f2()
+            f2()
+            f2.throttle.start_shutdown()
+            log_msg = (
+                "throttle f2 start_shutdown request successfully completed "
+                f"in {f2.throttle.shutdown_elapsed_time:.4f} "
+                "seconds"
+            )
+            log_ver.add_msg(
+                log_name="scottbrian_throttle.throttle",
+                log_level=logging.DEBUG,
+                log_msg=log_msg,
+            )
+            log_ver.test_msg("about to call thread_exc.raise_exc_if_one()")
+            thread_exc.raise_exc_if_one()
 
         match_results = log_ver.get_match_results(caplog=caplog)
         log_ver.print_match_results(match_results)
@@ -5347,20 +5416,20 @@ class RequestValidator:
         print(f"\n{p_previous_delay      =}")  # noqa E221 E251
 
         print(f"\n{p_arrival_times       =}")  # noqa E221 E251
-        print(f"{p_b4_next_t_times     =}")
-        print(f"{p_next_t_times        =}")
+        print(f"{p_b4_next_t_times     =}")  # noqa E221 E251
+        print(f"{p_next_t_times        =}")  # noqa E221 E251
 
-        print(f"\n{p_b4_next_t_intervals =}")
-        print(f"{p_next_t_intervals    =}")
+        print(f"\n{p_b4_next_t_intervals =}")  # noqa E221 E251
+        print(f"{p_next_t_intervals    =}")  # noqa E221 E251
 
         print(f"\n{p_enter_bucket_amt    =}")  # noqa E221 E251
-        print(f"{p_t_entry_bucket_amt  =}")
+        print(f"{p_t_entry_bucket_amt  =}")  # noqa E221 E251
 
         print(f"\n{p_current_delay       =}")  # noqa E221 E251
         print(f"{p_wait_times          =}")  # noqa E221 E251
 
         print(f"\n{p_exit_bucket_amt     =}")  # noqa E221 E251
-        print(f"{p_t_exit_bucket_amt   =}")
+        print(f"{p_t_exit_bucket_amt   =}")  # noqa E221 E251
 
         print(f"\n{p_avail_bucket_amt    =}")  # noqa E221 E251
 

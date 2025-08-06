@@ -684,7 +684,7 @@ class ThrottleSync(Throttle):
         >>> request_throttle = ThrottleSync(requests=1,
         ...                                 seconds=2)
         >>> repr(request_throttle)
-        'ThrottleSync(requests=1, seconds=2.0)'
+        'ThrottleSync(requests=1, seconds=2.0, name=3056773933840)'
 
         """
         if TYPE_CHECKING:
@@ -853,7 +853,7 @@ class ThrottleSyncEc(ThrottleSync):
         ...                                   seconds=1,
         ...                                   early_count=3)
         >>> repr(request_throttle)
-        'ThrottleSyncEc(requests=2, seconds=1.0, early_count=3)'
+        'ThrottleSyncEc(requests=2, seconds=1.0, name=3056806142800, early_count=3)'
 
 
         .. # noqa: W505, E501
@@ -1071,7 +1071,7 @@ class ThrottleSyncLb(ThrottleSync):
         ...                                   seconds=30,
         ...                                   lb_threshold=4)
         >>> repr(request_throttle)
-        'ThrottleSyncLb(requests=20, seconds=30.0, lb_threshold=4.0)'
+        'ThrottleSyncLb(requests=20, seconds=30.0, name=3056806388048, lb_threshold=4.0)'
 
 
         .. # noqa: W505, E501
@@ -1402,7 +1402,7 @@ class ThrottleAsync(Throttle):
         ...                                  seconds=30)
         ...
         >>> repr(request_throttle)
-        'ThrottleAsync(requests=30, seconds=30.0, async_q_size=4096)'
+        'ThrottleAsync(requests=30, seconds=30.0, name=3056774133840, async_q_size=4096)'
 
         >>> request_throttle.start_shutdown()
 

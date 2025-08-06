@@ -1,11 +1,20 @@
 """conftest.py module for testing."""
 
-import threading
-import traceback
-import pytest
-from typing import Any, Generator
-
+########################################################################
+# Standard Library
+########################################################################
 import logging
+import pytest
+from typing import Generator
+
+########################################################################
+# Third Party
+########################################################################
+
+########################################################################
+# Local
+########################################################################
+from scottbrian_utils.exc_hook import ExcHook
 
 ########################################################################
 # logging
@@ -24,6 +33,43 @@ import logging
 # )
 
 logger = logging.getLogger(__name__)
+
+
+########################################################################
+# thread_exc
+#
+# Usage:
+# The thread_exc is an autouse fixture which means it does not need to
+# be specified as an argument in the test case methods. If a thread
+# fails, such as an assertion error, then thread_exc will capture the
+# error and raise it for the thread, and will also raise it during
+# cleanup processing for the mainline to ensure the test case fails.
+# Without thread_exc, any uncaptured thread failure will appear in the
+# output, but the test case itself will not fail.
+# Also, if you need to issue the thread error earlier, before cleanup,
+# then specify thread_exc as an argument on the test method and then in
+# mainline issue:
+#     thread_exc.raise_exc_if_one()
+#
+# When the above is done, cleanup will not raise the error again.
+#
+########################################################################
+@pytest.fixture(autouse=True)
+def thread_exc(
+    monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest
+) -> Generator[ExcHook, None, None]:
+    """Instantiate and return a ThreadExc for testing.
+
+    Args:
+        monkeypatch: pytest fixture used to modify code for testing
+        request: for pytest
+
+    Yields:
+        a thread exception handler
+
+    """
+    with ExcHook(monkeypatch) as exc_hook:
+        yield exc_hook
 
 
 ########################################################################
@@ -62,79 +108,84 @@ logger = logging.getLogger(__name__)
 # When the above is done, cleanup will not raise the error again.
 #
 ########################################################################
-class ExcHook:
-    """ExcHook class."""
-
-    def __init__(self) -> None:
-        """Initialize the ExcHook class instance."""
-        self.exc_err_msg1 = ""
-
-    def raise_exc_if_one(self) -> None:
-        """Raise an error is we have one.
-
-        Raises:
-            Exception: exc_msg
-
-        """
-        if self.exc_err_msg1:
-            exc_msg = self.exc_err_msg1
-            self.exc_err_msg1 = ""
-            raise Exception(f"{exc_msg}")
-
-
-@pytest.fixture(autouse=True)
-def thread_exc(monkeypatch: Any) -> Generator[ExcHook, None, None]:
-    """Instantiate and return a ThreadExc for testing.
-
-    Args:
-        monkeypatch: pytest fixture used to modify code for testing
-
-    Yields:
-        a thread exception handler
-
-    """
-    # logger.debug(f"hook before: {threading.excepthook}")
-    exc_hook = ExcHook()
-
-    def mock_threading_excepthook(args: Any) -> None:
-        """Build error message from exception.
-
-        Args:
-            args: contains:
-                      args.exc_type: Optional[Type[BaseException]]
-                      args.exc_value: Optional[BaseException]
-                      args.exc_traceback: Optional[TracebackType]
-
-        Raises:
-            Exception: Test case thread test error
-
-        """
-        exc_err_msg = (
-            f"Test case excepthook: {args.exc_type}, "
-            f"{args.exc_value}, {args.exc_traceback},"
-            f" {args.thread}"
-        )
-        traceback.print_tb(args.exc_traceback)
-        logger.debug(exc_err_msg)
-        current_thread = threading.current_thread()
-        logger.debug(f"excepthook current thread is {current_thread}")
-        # ExcHook.exc_err_msg1 = exc_err_msg
-        exc_hook.exc_err_msg1 = exc_err_msg
-        raise Exception(f"Test case thread test error: {exc_err_msg}")
-
-    monkeypatch.setattr(threading, "excepthook", mock_threading_excepthook)
-    # logger.debug(f"hook after: {threading.excepthook}")
-    new_hook = threading.excepthook
-
-    yield exc_hook
-
-    # the following check ensures that the test case waited via join for
-    # any started threads to come home
-    if threading.active_count() > 1:
-        for thread in threading.enumerate():
-            print(f"conftest thread: {thread}")
-    assert threading.active_count() == 1
-    exc_hook.raise_exc_if_one()
-
-    # the following assert ensures -p no:threadexception was specified
-    assert threading.excepthook == new_hook
+# class ExcHook:
+#     """ExcHook class."""
+#
+#     def __init__(self) -> None:
+#         """Initialize the ExcHook class instance."""
+#         self.exc_err_msg1 = ""
+#
+#     def raise_exc_if_one(self) -> None:
+#         """Raise an error is we have one.
+#
+#         Raises:
+#             Exception: exc_msg
+#
+#         """
+#         logger.debug(f"enter raise_exc_if_one with err message:
+#         {self.exc_err_msg1=}")
+#         if self.exc_err_msg1:
+#             exc_msg = self.exc_err_msg1
+#             self.exc_err_msg1 = ""
+#             raise Exception(f"raise_if_one: {exc_msg}")
+#
+#
+# @pytest.fixture(autouse=True)
+# def thread_exc(monkeypatch: Any) -> Generator[ExcHook, None, None]:
+#     """Instantiate and return a ThreadExc for testing.
+#
+#     Args:
+#         monkeypatch: pytest fixture used to modify code for testing
+#
+#     Yields:
+#         a thread exception handler
+#
+#     """
+#     # logger.debug(f"hook before: {threading.excepthook}")
+#     exc_hook = ExcHook()
+#
+#
+#     def mock_threading_excepthook(args: Any) -> None:
+#         """Build error message from exception.
+#
+#         Args:
+#             args: contains:
+#                       args.exc_type: Optional[Type[BaseException]]
+#                       args.exc_value: Optional[BaseException]
+#                       args.exc_traceback: Optional[TracebackType]
+#
+#         Raises:
+#             Exception: Test case thread test error
+#
+#         """
+#         exc_err_msg = (
+#             f"Test case excepthook: {args.exc_type}, "
+#             f"{args.exc_value}, {args.exc_traceback},"
+#             f" {args.thread}"
+#         )
+#         traceback.print_tb(args.exc_traceback)
+#         logger.debug(f"mock_threading_excepthook: {exc_err_msg=}")
+#
+#         exc_hook.exc_err_msg1 = exc_err_msg
+#         # raise Exception(f"mock_threading_excepthook: {exc_err_msg}")
+#
+#     monkeypatch.setattr(threading, "excepthook",
+#     mock_threading_excepthook)
+#     # logger.debug(f"hook after: {threading.excepthook}")
+#     new_hook = threading.excepthook
+#
+#     yield exc_hook
+#
+#     # the following check ensures that the test case waited via join
+#     for
+#     # any started threads to come home
+#     if threading.active_count() > 1:
+#         for thread in threading.enumerate():
+#             print(f"conftest thread: {thread}")
+#     assert threading.active_count() == 1
+#     logger.debug(f"exiting thread_exc with err message:
+#     {exc_hook.exc_err_msg1=} ")
+#     exc_hook.raise_exc_if_one()
+#
+#     # the following assert ensures -p no:threadexception was specified
+#     assert threading.excepthook == new_hook

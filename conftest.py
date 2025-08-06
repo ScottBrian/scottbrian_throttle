@@ -38,6 +38,9 @@ class SbtDocCheckerOutputChecker(DocCheckerOutputChecker):
             gots = got.split(sep="\n")
             if len(wants) == len(gots):
                 for idx, got_item in enumerate(gots):
+                    ####################################################
+                    # handle elapsed time case
+                    ####################################################
                     match_str = (
                         "request "
                         + f"{idx}"
@@ -45,27 +48,57 @@ class SbtDocCheckerOutputChecker(DocCheckerOutputChecker):
                     )
                     found_item = re.match(match_str, got_item)
                     if found_item:
-                        want_splits = wants[idx].split()
-                        got_splits = got_item.split()
-                        expected_value = float(want_splits[6])
-                        actual_value = float(got_splits[6])
-                        diff_value = abs(expected_value - actual_value)
-                        if diff_value > 0:
-                            # we want to avoid divide by zero, and we
-                            # want to have a way to determine a
-                            # reasonable variance when the expected or
-                            # actual value is zero.
-                            if expected_value == 0:
-                                expected_value = 1
+                        if self.time_difference_small(
+                            want_item=wants[idx], got_item=got_item
+                        ):
+                            want = re.sub(match_str, found_item.group(), want)
+                        continue
 
-                            # if the difference is withing spec, replace
-                            # the want with the got so it will pass.
-                            # Otherwise, leave it as is so it will fail.
-                            if (diff_value / abs(expected_value)) <= 0.20:
-                                want = re.sub(match_str, found_item.group(), want)
+                    ####################################################
+                    # handle throttle name case
+                    ####################################################
+                    # We only want to match on a name that is integers,
+                    # meaning the python id of the throttle. We still
+                    # want the doctest to fail if the other args are
+                    # misspecified, (e.g., requests=2 instead of
+                    # requests=3).
+                    match_str = " name=[0-9]+"
+                    found_item = re.search(match_str, got_item)
+                    self.msgs.append(f"{found_item=}, {match_str=}, {got_item=}")
+                    if found_item:
+                        want = re.sub(match_str, found_item.group(), want)
+                        self.msgs.append(
+                            f"{found_item=}, {match_str=}, {got_item=}, {want=}"
+                        )
 
-        # self.msgs.append(f"{want=}, {got=}")
+        self.msgs.append(f"{want=}, {got=}")
         return super().check_output(want, got, optionflags)
+
+    ####################################################################
+    # adjust_time_differences
+    ####################################################################
+    def time_difference_small(self, want_item: str, got_item: str) -> bool:
+        """Adjust the time differences in the want and got strings."""
+        want_splits = want_item.split()
+        got_splits = got_item.split()
+        expected_value = float(want_splits[6])
+        actual_value = float(got_splits[6])
+        diff_value = abs(expected_value - actual_value)
+        if diff_value > 0:
+            # we want to avoid divide by zero, and we
+            # want to have a way to determine a
+            # reasonable variance when the expected or
+            # actual value is zero.
+            if expected_value == 0:
+                expected_value = 1
+
+            # If the difference is withing spec, replace
+            # the want with the got so it will pass.
+            # Otherwise, leave it as is so it will fail.
+            if (diff_value / abs(expected_value)) <= 0.20:
+                return True
+
+        return False
 
 
 pytest_collect_file = Sybil(
