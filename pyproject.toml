@@ -19,10 +19,10 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
     "Operating System :: Microsoft :: Windows :: Windows 10"]
 dependencies = [
-    "more-itertools ~=10.7",
+    "more-itertools ~=10.8",
     "pandas ~=2.3",
 #    "scottbrian-utils ~=6.0",
-    "typing_extensions ~=4.14",
+    "typing_extensions ~=4.15",
     "wrapt ~=1.17",
     "scottbrian_utils @  file://C:/Users/Tiger/PycharmProjects/scottbrian_utils/dist/scottbrian_utils-6.0.0-py3-none-any.whl"
 ]

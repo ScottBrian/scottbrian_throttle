@@ -1397,12 +1397,13 @@ class ThrottleAsync(Throttle):
 
         :Example: instantiate a throttle for 20 requests per 1/2 minute
 
+        # noqa: W505
         >>> from scottbrian_throttle.throttle import Throttle
-        >>> request_throttle = ThrottleAsync(requests=30,
-        ...                                  seconds=30)
+        >>> request_throttle = ThrottleAsync(requests=3,
+        ...                                  seconds=4)
         ...
         >>> repr(request_throttle)
-        'ThrottleAsync(requests=30, seconds=30.0, name=3056774133840, async_q_size=4096)'
+        'ThrottleAsync(requests=3, seconds=4.0, name=3056774133840, async_q_size=4096)'
 
         >>> request_throttle.start_shutdown()
 

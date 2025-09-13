@@ -10,8 +10,8 @@ import itertools as it
 # from itertools import accumulate
 import logging
 import math
+import os
 import random
-import re
 import statistics as stats
 import sys
 import threading
@@ -30,6 +30,7 @@ from scottbrian_utils.exc_hook import ExcHook
 from scottbrian_utils.flower_box import print_flower_box_msg as flowers
 from scottbrian_utils.log_verifier import LogVer
 from scottbrian_utils.pauser import Pauser
+from scottbrian_utils.testlib_verifier import verify_lib
 
 ########################################################################
 # Local
@@ -166,6 +167,23 @@ def verify_throttle_expected_reqs(
 
 
 ########################################################################
+# TestThrottleCorrectSource
+########################################################################
+class TestThrottleCorrectSource:
+    """Verify that we are testing with correctly built code."""
+
+    ####################################################################
+    # test_unique_ts_correct_source
+    ####################################################################
+    def test_throttle_correct_source(self) -> None:
+        """Test unique_ts correct source."""
+        if "TOX_ENV_NAME" in os.environ:
+            testlib_path = verify_lib(obj_to_check=Throttle)
+            logger.debug(f"{testlib_path=}")
+            assert testlib_path.endswith("throttle.py")
+
+
+########################################################################
 # TestThrottleBasic class to test Throttle methods
 ########################################################################
 class TestThrottleErrors:
@@ -224,57 +242,6 @@ class TestThrottleErrors:
 ########################################################################
 class TestThrottleBasic:
     """Test basic functions of Throttle."""
-
-    ####################################################################
-    # test_throttle_correct_source
-    ####################################################################
-    def test_throttle_correct_source(self) -> None:
-        """Test timer correct source."""
-        print("\nmainline entered")
-        print(f"{inspect.getsourcefile(Throttle)=}")
-        print(f"{sys.version_info.major=}")
-        print(f"{sys.version_info.minor=}")
-
-        # if sys.version_info.minor == 12:
-        #     exp1 = (
-        #         "C:\\Users\\Tiger\\PycharmProjects\\scottbrian_throttle\\.tox"
-        #         "\\py312-pytest\\Lib\\site-packages\\scottbrian_throttle"
-        #         "\\throttle.py"
-        #     )
-        #     exp2 = (
-        #         "C:\\Users\\Tiger\\PycharmProjects\\scottbrian_throttle\\.tox"
-        #         "\\py312-coverage\\Lib\\site-packages\\scottbrian_throttle"
-        #         "\\throttle.py"
-        #     )
-        # elif sys.version_info.minor == 13:
-        #     exp1 = (
-        #         "C:\\Users\\Tiger\\PycharmProjects\\scottbrian_throttle\\.tox"
-        #         "\\py313-pytest\\Lib\\site-packages\\scottbrian_throttle"
-        #         "\\throttle.py"
-        #     )
-        #     exp2 = (
-        #         "C:\\Users\\Tiger\\PycharmProjects\\scottbrian_throttle\\.tox"
-        #         "\\py313-coverage\\Lib\\site-packages\\scottbrian_throttle"
-        #         "\\throttle.py"
-        #     )
-        # else:
-        #     exp1 = ""
-        #     exp2 = ""
-
-        exp1 = (
-            "C:\\Users\\Tiger\\PycharmProjects\\scottbrian_throttle\\.tox"
-            f"\\py3{sys.version_info.minor}-pytest\\Lib\\site-packages\\"
-            "scottbrian_throttle\\throttle.py"
-        )
-        exp2 = (
-            "C:\\Users\\Tiger\\PycharmProjects\\scottbrian_throttle\\.tox"
-            f"\\py3{sys.version_info.minor}-coverage\\Lib\\site-packages\\"
-            "scottbrian_throttle\\throttle.py"
-        )
-
-        actual = inspect.getsourcefile(Throttle)
-        assert (actual == exp1) or (actual == exp2)
-        print("mainline exiting")
 
     ####################################################################
     # len checks
@@ -812,8 +779,16 @@ class TestThrottleDecoratorRequestErrors:
             r"args.exc_value=ZeroDivisionError\('division by "
             r"zero'\), "
             "args.exc_traceback=<traceback object at 0x[0-9A-F]+>, "
-            "args.thread=<Thread(Thread-[0-9]+ "
-            r"\(schedule_requests\), started [0-9]+>"
+            "args.thread=<Thread\(Thread-[0-9]+ "
+            r"\(schedule_requests\), started [0-9]+\)>"
+        )
+
+        log_ver.add_pattern(
+            log_name="scottbrian_utils.exc_hook",
+            pattern="caller test_throttle.py::"
+            "TestThrottleDecoratorRequestErrors."
+            "test_pie_throttle_request_errors:[0-9]+ is raising Exception: "
+            f'"{zero_div_err_pattern}"',
         )
 
         with pytest.raises(ZeroDivisionError, match=zero_div_err_pattern):

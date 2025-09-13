@@ -2,8 +2,11 @@
   <dictionary name="project">
     <words>
       <w>autouse</w>
+      <w>basepython</w>
       <w>caplog</w>
+      <w>posargs</w>
       <w>scottbrian</w>
+      <w>threadexception</w>
     </words>
   </dictionary>
 </component>
