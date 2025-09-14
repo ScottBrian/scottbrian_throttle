@@ -4,7 +4,6 @@
 # Standard Library
 ########################################################################
 from dataclasses import dataclass
-import inspect
 import itertools as it
 
 # from itertools import accumulate
@@ -13,7 +12,6 @@ import math
 import os
 import random
 import statistics as stats
-import sys
 import threading
 import time
 from time import perf_counter_ns
@@ -747,10 +745,10 @@ class TestThrottleDecoratorRequestErrors:
         log_msg = (
             "throttle f1 send_request unhandled exception in request: division by zero"
         )
-        log_ver.add_msg(
+        log_ver.add_pattern(
             log_name="scottbrian_throttle.throttle",
-            log_level=logging.DEBUG,
-            log_msg=log_msg,
+            level=logging.DEBUG,
+            pattern=log_msg,
         )
         with pytest.raises(ZeroDivisionError):
 
@@ -768,10 +766,10 @@ class TestThrottleDecoratorRequestErrors:
             "throttle f2 schedule_requests unhandled exception in "
             "request: division by zero"
         )
-        log_ver.add_msg(
+        log_ver.add_pattern(
             log_name="scottbrian_throttle.throttle",
-            log_level=logging.DEBUG,
-            log_msg=log_msg,
+            level=logging.DEBUG,
+            pattern=log_msg,
         )
         zero_div_err_pattern = (
             "Test case excepthook: args.exc_type=<class "
@@ -779,7 +777,7 @@ class TestThrottleDecoratorRequestErrors:
             r"args.exc_value=ZeroDivisionError\('division by "
             r"zero'\), "
             "args.exc_traceback=<traceback object at 0x[0-9A-F]+>, "
-            "args.thread=<Thread\(Thread-[0-9]+ "
+            r"args.thread=<Thread\(Thread-[0-9]+ "
             r"\(schedule_requests\), started [0-9]+\)>"
         )
 
@@ -806,29 +804,12 @@ class TestThrottleDecoratorRequestErrors:
                 f"in {f2.throttle.shutdown_elapsed_time:.4f} "
                 "seconds"
             )
-            log_ver.add_msg(
+            log_ver.add_pattern(
                 log_name="scottbrian_throttle.throttle",
-                log_level=logging.DEBUG,
-                log_msg=log_msg,
+                level=logging.DEBUG,
+                pattern=log_msg,
             )
             thread_exc.raise_exc_if_one()
-
-        # For mode async, the schedule_requests thread will fail
-        # with the divide by zero error and cause the thread_exc
-        # code in conftest to get control and this will result in
-        # log records being written. Unfortunately, we can't simply
-        # add the expected log messages because they include memory
-        # addresses that we can't predict, so we will simply fish
-        # them out the actual log records and place them into our
-        # expected log records. This will allow this test case to
-        # succeed.
-        # for actual_record in caplog.record_tuples:
-        #     if "conftest" in actual_record[0]:
-        #         log_ver.add_msg(
-        #             log_name=actual_record[0],
-        #             log_level=logging.DEBUG,
-        #             log_msg=re.escape(actual_record[2]),
-        #         )
 
         ################################################################
         # sync_ec request failure
@@ -837,10 +818,10 @@ class TestThrottleDecoratorRequestErrors:
             "throttle my_f3 send_request unhandled exception in request: division by "
             "zero"
         )
-        log_ver.add_msg(
+        log_ver.add_pattern(
             log_name="scottbrian_throttle.throttle",
-            log_level=logging.DEBUG,
-            log_msg=log_msg,
+            level=logging.DEBUG,
+            pattern=log_msg,
         )
         with pytest.raises(ZeroDivisionError):
 
@@ -857,10 +838,10 @@ class TestThrottleDecoratorRequestErrors:
         log_msg = (
             "throttle f4 send_request unhandled exception in request: division by zero"
         )
-        log_ver.add_msg(
+        log_ver.add_pattern(
             log_name="scottbrian_throttle.throttle",
-            log_level=logging.DEBUG,
-            log_msg=log_msg,
+            level=logging.DEBUG,
+            pattern=log_msg,
         )
         with pytest.raises(ZeroDivisionError):
 
@@ -899,12 +880,30 @@ class TestThrottleDecoratorRequestErrors:
             "throttle f2 schedule_requests unhandled exception in "
             "request: division by zero"
         )
-        log_ver.add_msg(
+        log_ver.add_pattern(
             log_name="scottbrian_throttle.throttle",
-            log_level=logging.DEBUG,
-            log_msg=log_msg,
+            level=logging.DEBUG,
+            pattern=log_msg,
         )
-        with pytest.raises(Exception):
+
+        zero_div_err_pattern = (
+            "Test case excepthook: args.exc_type=<class "
+            "'ZeroDivisionError'>, "
+            r"args.exc_value=ZeroDivisionError\('division by "
+            r"zero'\), "
+            "args.exc_traceback=<traceback object at 0x[0-9A-F]+>, "
+            r"args.thread=<Thread\(Thread-[0-9]+ "
+            r"\(schedule_requests\), started [0-9]+\)>"
+        )
+
+        log_ver.add_pattern(
+            log_name="scottbrian_utils.exc_hook",
+            pattern="caller test_throttle.py::"
+            "TestThrottleDecoratorRequestErrors."
+            "test_async_pie_throttle_request_errors:[0-9]+ is raising Exception: "
+            f'"{zero_div_err_pattern}"',
+        )
+        with pytest.raises(ZeroDivisionError, match=zero_div_err_pattern):
 
             @throttle_async(requests=1, seconds=1)
             def f2() -> None:
@@ -919,10 +918,10 @@ class TestThrottleDecoratorRequestErrors:
                 f"in {f2.throttle.shutdown_elapsed_time:.4f} "
                 "seconds"
             )
-            log_ver.add_msg(
+            log_ver.add_pattern(
                 log_name="scottbrian_throttle.throttle",
-                log_level=logging.DEBUG,
-                log_msg=log_msg,
+                level=logging.DEBUG,
+                pattern=log_msg,
             )
             log_ver.test_msg("about to call thread_exc.raise_exc_if_one()")
             thread_exc.raise_exc_if_one()
@@ -3139,10 +3138,10 @@ class TestThrottleShutdownErrors:
             f"in {a_throttle1.shutdown_elapsed_time:.4f} "
             "seconds"
         )
-        log_ver.add_msg(
+        log_ver.add_pattern(
             log_name="scottbrian_throttle.throttle",
-            log_level=logging.DEBUG,
-            log_msg=log_msg,
+            level=logging.DEBUG,
+            pattern=log_msg,
         )
 
         ################################################################
@@ -3352,10 +3351,10 @@ def final_shutdown_and_verification(
         f"successfully completed in "
         f"{throttle.shutdown_elapsed_time:.4f} seconds"
     )
-    log_ver.add_msg(
+    log_ver.add_pattern(
         log_name="scottbrian_throttle.throttle",
-        log_level=logging.DEBUG,
-        log_msg=log_msg,
+        level=logging.DEBUG,
+        pattern=log_msg,
     )
 
     ################################################################
@@ -3495,10 +3494,10 @@ class TestThrottleShutdown:
                         "throttle hard start_shutdown request timed out with "
                         f"{timeout=:.4f}"
                     )
-                    log_ver.add_msg(
+                    log_ver.add_pattern(
                         log_name="scottbrian_throttle.throttle",
-                        log_level=logging.DEBUG,
-                        log_msg=log_msg,
+                        level=logging.DEBUG,
+                        pattern=log_msg,
                     )
 
                 else:  # retcode is RC_SHUTDOWN_HARD_COMPLETED_OK
@@ -3628,10 +3627,10 @@ class TestThrottleShutdown:
                         "throttle soft_timeout start_shutdown request timed out with "
                         f"{timeout=:.4f}"
                     )
-                    log_ver.add_msg(
+                    log_ver.add_pattern(
                         log_name="scottbrian_throttle.throttle",
-                        log_level=logging.DEBUG,
-                        log_msg=log_msg,
+                        level=logging.DEBUG,
+                        pattern=log_msg,
                     )
                     assert timeout <= shutdown_elapsed_time <= (timeout * 1.10)
 
@@ -3740,10 +3739,10 @@ class TestThrottleShutdown:
                         f"timeout={ss_timeout:.4f}"
                     )
 
-                    log_ver.add_msg(
+                    log_ver.add_pattern(
                         log_name="scottbrian_throttle.throttle",
-                        log_level=logging.DEBUG,
-                        log_msg=l_msg,
+                        level=logging.DEBUG,
+                        pattern=l_msg,
                     )
 
         ################################################################
@@ -3975,10 +3974,10 @@ class TestThrottleShutdown:
                         "throttle shutdown combos start_shutdown request timed "
                         f"out with {timeout=:.4f}"
                     )
-                    log_ver.add_msg(
+                    log_ver.add_pattern(
                         log_name="scottbrian_throttle.throttle",
-                        log_level=logging.DEBUG,
-                        log_msg=log_msg,
+                        level=logging.DEBUG,
+                        pattern=log_msg,
                     )
                 else:
                     assert a_throttle.async_q.empty()
@@ -4398,10 +4397,10 @@ class TestThrottleShutdown:
                     f"{func.throttle.shutdown_elapsed_time:.4f} seconds"
                 )
 
-            log_ver.add_msg(
+            log_ver.add_pattern(
                 log_name="scottbrian_throttle.throttle",
-                log_level=logging.DEBUG,
-                log_msg=log_msg,
+                level=logging.DEBUG,
+                pattern=log_msg,
             )
 
         if shutdown1_type_arg:
@@ -4435,10 +4434,10 @@ class TestThrottleShutdown:
                     f"{a_func.throttle.shutdown_elapsed_time:.4f} "
                     "seconds"
                 )
-                log_ver.add_msg(
+                log_ver.add_pattern(
                     log_name="scottbrian_throttle.throttle",
-                    log_level=logging.DEBUG,
-                    log_msg=log_msg,
+                    level=logging.DEBUG,
+                    pattern=log_msg,
                 )
 
         ################################################################
