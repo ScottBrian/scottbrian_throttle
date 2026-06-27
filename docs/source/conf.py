@@ -11,8 +11,8 @@
 # documentation root, use os.path.abspath to make it absolute, like shown here.
 #
 
-from os import fspath
 import sys
+from os import fspath
 from pathlib import Path
 
 proj_dir = Path.cwd().resolve().parents[1]  # back two directories
@@ -43,6 +43,10 @@ extensions = ['sphinx.ext.autodoc',
 
 autoclass_content = 'both'
 autodoc_member_order = 'groupwise'
+
+autodoc_typehints = "description"
+
+napoleon_use_rtype = False
 
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ['_templates']

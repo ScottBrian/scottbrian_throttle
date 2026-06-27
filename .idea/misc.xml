@@ -3,7 +3,7 @@
   <component name="Black">
     <option name="enabledOnReformat" value="true" />
     <option name="enabledOnSave" value="true" />
-    <option name="sdkName" value="Python 3.13 (scottbrian_throttle)" />
+    <option name="sdkName" value="Python 3.14 (scottbrian_throttle)" />
   </component>
   <component name="ProjectRootManager" version="2" project-jdk-name="Python 3.13 (scottbrian_throttle)" project-jdk-type="Python SDK" />
 </project>

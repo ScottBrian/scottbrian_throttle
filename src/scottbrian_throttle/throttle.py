@@ -332,12 +332,12 @@ request 9 sent at elapsed time: 4.5
 ########################################################################
 # Standard Library
 ########################################################################
-from abc import ABC, abstractmethod
 import functools
 import logging
 import queue
 import threading
 import time
+from abc import ABC, abstractmethod
 from typing import (
     Any,
     Callable,
@@ -352,14 +352,13 @@ from typing import (
     TypeVar,
     Union,
 )
-from typing_extensions import TypeAlias
-
 
 ########################################################################
 # Third Party
 ########################################################################
 from scottbrian_utils.pauser import Pauser
 from scottbrian_utils.timer import Timer
+from typing_extensions import TypeAlias
 from wrapt.decorators import decorator  # type: ignore
 
 ########################################################################

@@ -1,15 +1,9 @@
-from doctest import ELLIPSIS
-from doctest import OutputChecker as BaseOutputChecker
-
 import re
+from doctest import ELLIPSIS
 
+from scottbrian_utils.doc_checker import DocCheckerTestParser, DocCheckerOutputChecker
 from sybil import Sybil
 from sybil.parsers.rest import PythonCodeBlockParser
-
-from scottbrian_utils.time_hdr import get_datetime_match_string
-from scottbrian_utils.doc_checker import DocCheckerTestParser, DocCheckerOutputChecker
-
-from typing import Any
 
 
 class SbtDocCheckerOutputChecker(DocCheckerOutputChecker):
