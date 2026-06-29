@@ -459,7 +459,7 @@ class Throttle(ABC):
         "_next_target_time",
         "_target_interval",
         "_target_interval_ns",
-        "_wait_time",
+        "_wait_time_ns",
         "logger",
         "pauser",
         "requests",
@@ -531,7 +531,7 @@ class Throttle(ABC):
         self.sync_lock = threading.Lock()
         self._arrival_time = 0.0
         self._next_target_time: float = time.perf_counter_ns()
-        self._wait_time: float = 0.0
+        self._wait_time_ns: float = 0.0
         self.logger = logging.getLogger(__name__)
         self.pauser = Pauser()
 
@@ -1180,6 +1180,7 @@ class ThrottleSyncLb(ThrottleSync):
             # effect, so the design choice was made to update the target
             # time before calling the requested function.
             ############################################################
+            self._wait_time_ns = 0.0
             if self._arrival_time - self._next_target_time > self.lb_adjustment_ns:
                 # we are well beyond the target time - we need to start
                 # a new bucket with the first send entry added
@@ -1192,6 +1193,7 @@ class ThrottleSyncLb(ThrottleSync):
                 if self._arrival_time < self._next_target_time:
                     # we need to delay to allow the bucket to leak out
                     # enough to fit the next entry we are sending
+                    self._wait_time_ns = self._next_target_time - self._arrival_time
                     self.pauser.pause(
                         (self._next_target_time - self._arrival_time)
                         * Throttle.NS_2_SECS
