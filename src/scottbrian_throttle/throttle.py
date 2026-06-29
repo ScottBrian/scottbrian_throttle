@@ -1532,6 +1532,7 @@ class ThrottleAsync(Throttle):
             # in case we need to bail for shutdown, so we wait in 1
             # second or fewer increments and bail if we detect shutdown.
             ############################################################
+            self._wait_time_ns = self._next_target_time - time.perf_counter_ns()
             while True:
                 # handle shutdown
                 if self.throttle_state != ThrottleAsync._ACTIVE:
