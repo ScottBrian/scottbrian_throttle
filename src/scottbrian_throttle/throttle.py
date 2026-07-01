@@ -6,8 +6,8 @@ Throttle
 
 The throttle allows you to limit the rate at which a function is
 executed. This is helpful to avoid exceeding a limit, such as when
-sending requests to an internet service that specifies a limit as to the
-number of requests that can be sent in a specific time interval.
+sending requests to an internet service that specifies a limit on the
+number of requests that can be sent per some time interval.
 
 The throttle package include four different algorithms for the limiting
 control, each provided as a decorator or as a class:
@@ -33,7 +33,7 @@ control, each provided as a decorator or as a class:
        needed, delays the next request by a cumulative amount that
        reflects the current request and the requests that were sent
        early. This will ensure that the average send rate for all
-       requests stay within the send rate limit. This algorithm is best
+       requests stays within the send rate limit. This algorithm is best
        used when you have a steady stream of requests within the send
        rate limit, and an occasional burst of requests that the target
        service will tolerate.
@@ -501,10 +501,8 @@ class Throttle(ABC):
             self.requests = requests
         else:
             raise IncorrectRequestsSpecified(
-                "The requests "
-                "specification must be a "
-                "positive integer greater "
-                "than zero."
+                "The requests specification must be a positive integer "
+                "greater than zero."
             )
 
         ################################################################
@@ -514,9 +512,8 @@ class Throttle(ABC):
             self.seconds = seconds  # timedelta(seconds=seconds)
         else:
             raise IncorrectSecondsSpecified(
-                "The seconds specification "
-                "must be an integer or "
-                "float greater than zero."
+                "The seconds specification must be an integer or float "
+                "greater than zero."
             )
 
         if name is None:
