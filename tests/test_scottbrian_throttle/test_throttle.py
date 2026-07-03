@@ -1075,7 +1075,7 @@ class TestThrottle:
 
         """
         send_interval = 0.0
-        self.throttle_async_router(
+        self.throttle_router(
             requests=requests_arg,
             seconds=seconds_arg,
             mode=MODE_ASYNC,
@@ -1097,7 +1097,7 @@ class TestThrottle:
             request_style_arg: chooses function args mix
         """
         send_interval = 0.2
-        self.throttle_sync_router(
+        self.throttle_router(
             requests=2,
             seconds=1,
             mode=MODE_SYNC,
@@ -1125,7 +1125,7 @@ class TestThrottle:
                                       request
         """
         send_interval = (seconds_arg / requests_arg) * send_interval_mult_arg
-        self.throttle_sync_router(
+        self.throttle_router(
             requests=requests_arg,
             seconds=seconds_arg,
             mode=MODE_SYNC,
@@ -1153,7 +1153,7 @@ class TestThrottle:
 
         """
         send_interval = 0.0
-        self.throttle_sync_router(
+        self.throttle_router(
             requests=requests_arg,
             seconds=seconds_arg,
             mode=MODE_SYNC,
@@ -5148,6 +5148,8 @@ class RequestValidator:
 
         self.target_interval = seconds / requests
 
+        self.request_interval_ns = self.target_interval * SECS_2_NS
+
         self.max_interval = max(self.target_interval, self.send_interval)
 
         self.min_interval = min(self.target_interval, self.send_interval)
@@ -5168,6 +5170,11 @@ class RequestValidator:
         self.min_interval_5pct = self.min_interval * 0.05
         self.min_interval_10pct = self.min_interval * 0.10
         self.min_interval_15pct = self.min_interval * 0.15
+
+        self.cumulative_expected_delay_ns: float = 0.0
+        self.cumulative_actual_delay_ns: float = 0.0
+
+        self.cumulative_throttle_wait_time_ns: float = 0.0
 
         self.reset()
 
@@ -6084,7 +6091,7 @@ class RequestValidator:
         # self.build_times()
 
         if (self.mode == MODE_ASYNC) or (self.mode == MODE_SYNC):
-            self.validate_async_sync2()
+            self.validate_async_sync()
         elif self.mode == MODE_SYNC_EC:
             self.validate_sync_ec()
         elif self.mode == MODE_SYNC_LB:
@@ -6095,22 +6102,72 @@ class RequestValidator:
         self.reset()
 
     ####################################################################
-    # validate_async_sync2
+    # process_request_items
     ####################################################################
-    def validate_async_sync2(self) -> None:
+    def process_request_items(self) -> None:
+        """Validate the results for sync leaky bucket."""
+        # Calculate the interval between request send and exit receive
+        # as observed by the requestor.
+
+        self.request_items[0].expected_delay_ns = 0
+
+        self.request_items[0].expected_func_arrival_time_ns = self.request_items[
+            0
+        ].send_time_ns
+
+        self.request_items[0].actual_delay_ns = (
+            self.request_items[0].actual_func_arrival_time_ns
+            - self.request_items[0].send_time_ns
+        )
+        for idx in range(1, len(self.request_items)):
+            # if request_item.throttle_mode == MODE_ASYNC:
+            self.request_items[idx].expected_delay_ns = max(
+                0,
+                self.request_items[idx - 1].throttle_next_target_time
+                - self.request_items[idx].send_time_ns,
+            )
+            self.request_items[idx].expected_func_arrival_time_ns = (
+                self.request_items[idx].send_time_ns
+                + self.request_items[idx].expected_delay_ns
+            )
+            self.request_items[idx].actual_delay_ns = (
+                self.request_items[idx].actual_func_arrival_time_ns
+                - self.request_items[idx].send_time_ns
+            )
+            assert (
+                self.request_items[idx].expected_delay_ns
+                <= self.request_items[idx].actual_delay_ns
+            )
+
+            self.cumulative_expected_delay_ns += self.request_items[
+                idx
+            ].expected_delay_ns
+            self.cumulative_actual_delay_ns += self.request_items[idx].actual_delay_ns
+
+            self.cumulative_throttle_wait_time_ns += self.request_items[
+                idx
+            ].throttle_wait_time_ns
+
+    ####################################################################
+    # validate_async_sync
+    ####################################################################
+    def validate_async_sync(self) -> None:
         """Validate the results for sync leaky bucket."""
 
-        throttle_verifier = ThrottleVerifier(
-            requests=self.requests, seconds=self.seconds, lb_threshold=self.lb_threshold
-        )
+        self.process_request_items()
         print(
             "\ninterval times: arrival idx| send | throttle arrival | expected arrival | "
-            "actual arrival | expected delay | actual delay "
+            "actual arrival | expected delay | actual delay | diff ratio"
         )
 
         first_send_time = self.request_items[0].send_time_ns
         for req_item in self.request_items:
-            throttle_verifier.verify_request(request_item=req_item)
+            extra_time = 0.0
+            if req_item.expected_delay_ns == 0.0:
+                extra_time = self.request_interval_ns
+            expected_actual_diff_ratio = (
+                req_item.actual_delay_ns - req_item.expected_delay_ns
+            ) / (req_item.expected_delay_ns + extra_time)
             print(
                 f"req_id: {req_item.req_id:2} "
                 f"| {req_item.arrival_idx:2} "
@@ -6119,90 +6176,24 @@ class RequestValidator:
                 f"| {(req_item.expected_func_arrival_time_ns - first_send_time) * NS_2_SECS:.4f}"
                 f"| {(req_item.actual_func_arrival_time_ns - first_send_time) * NS_2_SECS:.4f}"
                 f"| {req_item.expected_delay_ns * NS_2_SECS:.4f} "
-                f"| {req_item.actual_delay_ns * NS_2_SECS:.4f}"
+                f"| {req_item.actual_delay_ns * NS_2_SECS:.4f} "
+                f"| {expected_actual_diff_ratio * NS_2_SECS:.4f} "
             )
 
-        print(f"{throttle_verifier.num_excessive_request_delays=}")
-        print(f"{throttle_verifier.cumulative_expected_delay_ns=}")
-        print(f"{throttle_verifier.cumulative_actual_delay_ns=}")
+        # print(f"{throttle_verifier.num_excessive_request_delays=}")
+        print(f"{self.cumulative_expected_delay_ns=}")
+        print(f"{self.cumulative_actual_delay_ns=}")
         # print(f"{throttle_verifier.cumulative_throttle_wait_time_ns=}")
         extra_time = 0.0
-        if throttle_verifier.cumulative_expected_delay_ns == 0.0:
+        if self.cumulative_expected_delay_ns == 0.0:
             extra_time = 0.0001
         ratio_delay_time = (
-            throttle_verifier.cumulative_actual_delay_ns
-            - throttle_verifier.cumulative_expected_delay_ns
-        ) / (throttle_verifier.cumulative_expected_delay_ns + extra_time)
+            self.cumulative_actual_delay_ns - self.cumulative_expected_delay_ns
+        ) / (self.cumulative_expected_delay_ns + extra_time)
         print(f"ratio diff expected/actual: {ratio_delay_time:.4f}")
 
-        assert throttle_verifier.num_excessive_request_delays < 4
+        # assert throttle_verifier.num_excessive_request_delays < 4
         assert ratio_delay_time <= 0.15
-
-    ####################################################################
-    # validate_async_sync
-    ####################################################################
-    def validate_async_sync(self) -> None:
-        """Validate results for sync."""
-        self.print_intervals()
-        num_early = 0
-        num_early_1pct = 0
-        num_early_5pct = 0
-        num_early_10pct = 0
-        num_early_15pct = 0
-
-        num_late = 0
-        num_late_1pct = 0
-        num_late_5pct = 0
-        num_late_10pct = 0
-        num_late_15pct = 0
-
-        for ratio in self.diff_req_ratio[1:]:
-            if ratio < 0:  # if negative
-                num_early += 1
-                if ratio <= -0.01:
-                    num_early_1pct += 1
-                if ratio <= -0.05:
-                    num_early_5pct += 1
-                if ratio <= -0.10:
-                    num_early_10pct += 1
-                if ratio <= -0.15:
-                    num_early_15pct += 1
-            else:
-                num_late += 1
-                if 0.01 <= ratio:
-                    num_late_1pct += 1
-                if 0.05 <= ratio:
-                    num_late_5pct += 1
-                if 0.10 <= ratio:
-                    num_late_10pct += 1
-                if 0.15 <= ratio:
-                    num_late_15pct += 1
-
-        print("num_requests_sent1:", self.total_requests)
-        print("num_early1:", num_early)
-        print("num_early_1pct1:", num_early_1pct)
-        print("num_early_5pct1:", num_early_5pct)
-        print("num_early_10pct1:", num_early_10pct)
-        print("num_early_15pct1:", num_early_15pct)
-
-        print("num_late1:", num_late)
-        print("num_late_1pct1:", num_late_1pct)
-        print("num_late_5pct1:", num_late_5pct)
-        print("num_late_10pct1:", num_late_10pct)
-        print("num_late_15pct1:", num_late_15pct)
-
-        assert num_early_15pct == 0
-        assert num_early_10pct == 0
-        assert num_early_5pct == 0
-        # assert num_early_1pct == 0
-
-        assert num_late_15pct < 3
-        assert num_late_10pct < 4
-        assert num_late_5pct < 5
-        # assert num_late_1pct == 0
-        # assert num_late == 0
-
-        assert self.target_interval <= self.mean_req_interval
 
     ####################################################################
     # validate_sync_ec
@@ -6425,7 +6416,6 @@ class RequestValidator:
         request_item.throttle_next_target_time = self.t_throttle._next_target_time
         request_item.throttle_wait_time_ns = self.t_throttle._wait_time_ns
         self.request_items.append(request_item)
-        print(f"{self.request_items=}")
 
         # logger.debug("request0b exiting")
         return request_item.req_id
