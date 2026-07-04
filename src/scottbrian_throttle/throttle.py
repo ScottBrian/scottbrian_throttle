@@ -9,11 +9,62 @@ executed. This is helpful to avoid exceeding a limit, such as when
 sending requests to an internet service that specifies a limit on the
 number of requests that can be sent per some time interval.
 
-The throttle package include four different algorithms for the limiting
-control, each provided as a decorator or as a class:
+The throttle can be used as a class or as a decorator.
 
-  1. **@throttle_sync** decorator and **ThrottleSync** class provide a
-     synchronous algorithm.
+When you instantiate the throttle as a class, you specify the number of
+requests that can be sent per second with the *num_requests* argument.
+This is used to calculate the request interval as 1/*num_request*.
+Method *get_interval_secs* can be used to obtain the request interval.
+Note that you can optionally specify a name for the throttle (the
+default will be the python id for the throttle instance).
+
+:Example: instantiate a throttle for 2 requests per second:
+
+>>> from scottbrian_throttle.throttle import Throttle
+>>> request_throttle = Throttle(num_requests=2, name="t1")
+>>> repr(request_throttle)
+'Throttle(num_requests=2, name=t1)'
+
+>>> print(f"{request_throttle.get_interval_secs()}")
+0.5
+
+
+To send a request, call the *send_request* method along with the target
+routine and any args or keyword args. The throttle checks to see whether
+the request interval has elapsed since the last request was sent, and if
+not, the throttle sleeps for the remaining request interval. After any
+delay, the throttle calls the target routine which then runs and
+returns control to the throttle which then returns control to the
+caller of *send_request*, passing back any return values from the
+target routine.
+
+>>> import time
+>>> def target_rtn(request_number, time_of_start):
+...     ret_value = (f'request {request_number} sent at elapsed time: '
+...                  f'{time.time() - time_of_start:0.1f}')
+...     return ret_value
+>>> start_time = time.time()
+>>> for i in range(10):
+...     ret_val = a_throttle.send_request(make_request, i, start_time)
+...     print(ret_val)
+request 0 sent at elapsed time: 0.0
+request 1 sent at elapsed time: 0.5
+request 2 sent at elapsed time: 1.0
+request 3 sent at elapsed time: 1.5
+request 4 sent at elapsed time: 2.0
+request 5 sent at elapsed time: 2.5
+request 6 sent at elapsed time: 3.0
+request 7 sent at elapsed time: 3.5
+request 8 sent at elapsed time: 4.0
+request 9 sent at elapsed time: 4.5
+
+
+The throttle also provides a leaky bucket implementation, configured by
+setting the *lb_count* to a value greater than 1. The leaky bucket
+is a concept where a number of requests can be sent immdesome ne
+
+  1. **Throttle** class provides both synchronous and asynchronous
+       operation:
 
        For synchronous throttling, you specify the *requests* and
        *seconds* which determine the send rate limit. The throttle
@@ -676,7 +727,7 @@ class ThrottleSync(Throttle):
 
         :Example: instantiate a throttle for 1 requests every 2 seconds
 
-         >>> from scottbrian_throttle.throttle import Throttle
+        >>> from scottbrian_throttle.throttle import Throttle
         >>> request_throttle = ThrottleSync(requests=1,
         ...                                 seconds=2)
         >>> repr(request_throttle)
@@ -726,9 +777,9 @@ class ThrottleSync(Throttle):
         #       time.perf_counter_ns
         # 2) as each request arrives, it is checked against the
         #    _next_target_time and:
-        #    a) if it arrived at or after _next_target_time, it is
+        #    a) if it arrives at or after _next_target_time, it is
         #       allowed to proceed without delay
-        #    b) if it arrived before the _next_target_time the request
+        #    b) if it arrives before the _next_target_time the request
         #       is delayed until _next_target_time is reached
         # 3) _next_target_time is increased by the target_interval
         #
@@ -749,7 +800,7 @@ class ThrottleSync(Throttle):
             # we update the target time before we send the request which
             # means we
             # face a possible scenario where we send a request that gets
-            # delayed en route to the service, but out next request
+            # delayed en route to the service, but our next request
             # arrives at the updated expected arrival time and is sent
             # out immediately, but it now arrives early relative to the
             # previous request, as observed by the service. If we update
@@ -902,7 +953,7 @@ class ThrottleSyncEc(ThrottleSync):
         #    d) _early_arrival_count is set to zero
         # 2) as each request arrives, it is checked against the
         #    _next_target_time and:
-        #    a) if it arrived at or after _next_target_time, it is
+        #    a) if it arrives at or after _next_target_time, it is
         #       allowed to proceed without delay and the
         #       _early_arrival_count is reset
         #    b) if it arrived before the _next_target_time, the
@@ -946,7 +997,7 @@ class ThrottleSyncEc(ThrottleSync):
             # next arrival time, whichever is later. Note that we update
             # the target time before we send the request which means we
             # face a possible scenario where we send a request that gets
-            # delayed en route to the service, but out next request
+            # delayed en route to the service, but our next request
             # arrives at the updated expected arrival time and is sent
             # out immediately, but it now arrives early relative to the
             # previous request, as observed by the service. If we update
@@ -1037,7 +1088,7 @@ class ThrottleSyncLb(ThrottleSync):
             self.lb_threshold = float(lb_threshold)
         else:
             raise IncorrectLbThresholdSpecified(
-                "lb_threshold must be an integer or float greater than " "zero."
+                "lb_threshold must be an integer or float greater than zero."
             )
 
         ################################################################
@@ -1138,7 +1189,7 @@ class ThrottleSyncLb(ThrottleSync):
             # requests are arriving after the target time and are thus
             # in compliance with the target interval, but eventually
             # the next target time will exceed the size of the bucket
-            # and request will get delayed to allow the target time
+            # and requests will get delayed to allow the target time
             # to catch up.
             ############################################################
 
