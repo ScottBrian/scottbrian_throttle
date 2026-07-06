@@ -62,7 +62,7 @@ caller will observe any delay imposed by the throttle. There is also an
 asynchronous mode that allows the caller to invoke *send_request* and
 receive control back immediately. In this case, the request is queued
 and is sent through the throttle from another thread. Note that the
-caller is unable to receive a return value from thee target routine via
+caller is unable to receive a return value from the target routine via
 the throttle, so some other protocol will need to be worked out if a
 return value is needed. Also, the caller may need to shut down the
 throttle at the end of its processing to ensure any in-progress requests
@@ -70,16 +70,16 @@ are complete.
 
 :Example: instantiate an asynchronous throttle and send some requests:
 
->>> asynch_throttle = Throttle(reqs_per_sec=2, asynch=True)
+>>> async_throttle = Throttle(reqs_per_sec=2, async_throttle=True)
 >>> def target_rtn2(request_number, time_of_start):
 ...     print(f'request {request_number} sent at elapsed time: '
 ...           f'{time.time() - time_of_start:0.1f}')
 >>> start_time = time.time()
 >>> for i in range(10):
-...     asynch_throttle.send_request(target_rtn2, i, start_time)
+...     async_throttle.send_request(target_rtn2, i, start_time)
 >>> # do other processing since not waiting for return from throttle
 >>> # after other processing, do a shutdown of the throttle
->>> asynch_throttle.shutdown()
+>>> async_throttle.shutdown()
 request 0 sent at elapsed time: 0.0
 request 1 sent at elapsed time: 0.5
 request 2 sent at elapsed time: 1.0
@@ -93,7 +93,7 @@ request 9 sent at elapsed time: 4.5
 
 
 The throttle also provides a leaky bucket implementation, configured by
-setting the *bucket_count* to a value greater than 1. In this case, some
+setting the *bucket_size* to a value greater than 1. In this case, some
 number of requests can be sent immediately. Each request is
 conceptually placed into a bucket that has with a hole in the bottom.
 The bucket leaks out at the request interval rate. The idea is that once
@@ -106,10 +106,10 @@ throttle acts like a shock absorber, allowing small bursts of requests
 to be sent without delay, with the limiting action kicking in as
 additional requests continue to rapidly arrive. The average request
 interval will decrease as the size of the bucket increases. Note that a
-*bucket_count* of 1 will effectively result in normal non-leaky bucket
+*bucket_size* of 1 will effectively result in normal non-leaky bucket
 behavior. Note also that an asynchronous leaky bucket throttle can be
-configured by specifying a *bucket_count* greater than 1 and
-*async=True*.
+configured by specifying a *bucket_size* greater than 1 and
+*async_throttle=True*.
 
 :Example: instantiate a leaky bucket throttle and send some requests:
 
@@ -214,7 +214,7 @@ import logging
 import queue
 import threading
 import time
-from abc import ABC, abstractmethod
+from abc import abstractmethod
 from typing import (
     Any,
     Callable,
@@ -276,14 +276,14 @@ class IncorrectLbThresholdSpecified(ThrottleError):
     pass
 
 
-class IncorrectRequestsSpecified(ThrottleError):
-    """Throttle exception for incorrect requests specification."""
+class IncorrectReqsPerSecSpecified(ThrottleError):
+    """Throttle exception for incorrect reqs_per_sec specification."""
 
     pass
 
 
-class IncorrectSecondsSpecified(ThrottleError):
-    """Throttle exception for incorrect seconds specification."""
+class IncorrectBucketSizeSpecified(ThrottleError):
+    """Throttle exception for incorrect bucket_size specification."""
 
     pass
 
@@ -307,12 +307,34 @@ class MissingLbThresholdSpecification(ThrottleError):
 
 
 ########################################################################
-# Throttle Base class
+# Throttle class
 ########################################################################
-class Throttle(ABC):
-    """Throttle base class."""
+class Throttle:
+    """Throttle class."""
 
     DEFAULT_ASYNC_Q_SIZE: Final[int] = 4096
+
+    ####################################################################
+    # start_shutdown request constants
+    ####################################################################
+    TYPE_SHUTDOWN_SOFT: Final[int] = 4
+    TYPE_SHUTDOWN_HARD: Final[int] = 8
+
+    ####################################################################
+    # start_shutdown return code constants
+    ####################################################################
+    RC_SHUTDOWN_SOFT_COMPLETED_OK: Final[int] = 0
+    RC_SHUTDOWN_HARD_COMPLETED_OK: Final[int] = 4
+    RC_SHUTDOWN_TIMED_OUT: Final[int] = 8
+
+    ####################################################################
+    # throttle state constants
+    ####################################################################
+    _ACTIVE: Final[int] = 0
+    _SOFT_SHUTDOWN_STARTED: Final[int] = 1
+    _HARD_SHUTDOWN_STARTED: Final[int] = 2
+    _SOFT_SHUTDOWN_COMPLETED: Final[int] = 3
+    _HARD_SHUTDOWN_COMPLETED: Final[int] = 4
 
     ####################################################################
     # send_request return codes
@@ -336,78 +358,254 @@ class Throttle(ABC):
         "_next_target_time",
         "_target_interval",
         "_target_interval_ns",
+        "_throttle_shutdown_started",
         "_wait_time_ns",
+        "async_q",
+        "async_q_size",
+        "async_throttle",
+        "bucket_size",
+        "lb_adjustment",
+        "lb_adjustment_ns",
         "logger",
         "pauser",
-        "requests",
-        "seconds",
+        "reqs_per_sec",
+        "request_scheduler_thread",
+        "shutdown_elapsed_time",
+        "shutdown_lock",
+        "shutdown_start_time",
         "sync_lock",
         "t_name",
+        "throttle_state",
     )
 
     ####################################################################
     # __init__
     ####################################################################
     def __init__(
-        self, *, requests: int, seconds: IntFloat, name: Optional[str] = None
+        self,
+        *,
+        reqs_per_sec: int | float,
+        bucket_size: int | float = 1,
+        async_throttle: bool = False,
+        async_q_size: Optional[int] = None,
+        name: Optional[str] = None,
     ) -> None:
         """Initialize an instance of the Throttle class.
 
         Args:
-            requests: The number of requests that can be made in
-                        the interval specified by seconds.
-            seconds: The number of seconds in which the number of
-                       requests specified in requests can be made.
+            reqs_per_sec: The number of requests that can be made in
+                          one second.
+            bucket_size: Specifies the number of requests that can be
+                         conceptually placed into the bucket for the
+                         leaky bucket algorithm. As requests arrive,
+                         the bucket is checked to determine if it has
+                         room for the request. If so, it is placed into
+                         the bucket and sent without delay. If not, the
+                         request is delayed until enough time has
+                         elapsed for the bucket to leak out enough to
+                         allow the request to fit. A specification of
+                         one for the bucket_count will effectively
+                         cause non-leaky bucket behavior, meaning that
+                         each request that arrives before the previous
+                         request interval has elapsed will be delayed.
+                         The bucket_count must be greater than or equal
+                         to 1.
+            async_throttle: If True, the throttle is asynchronous. If
+                    False, the default, the throttle is synchronous.
+            async_q_size: Specifies the size of the request
+                          queue for async requests. When the request
+                          queue is totally populated, any additional
+                          calls to send_request will be delayed
+                          until queued requests are removed and
+                          scheduled. The default is 4096 requests.
             name: The name used to identify the throttle in log messages
                 issued by the throttle. The default name is
                 the python id of the Throttle class instance.
 
 
         Raises:
-            IncorrectRequestsSpecified: The *requests* specification
-                must be a positive integer greater than zero.
-            IncorrectSecondsSpecified: The *seconds* specification must
-                be a positive int or float greater than zero.
-
+            IncorrectReqsPerSecSpecified: The *reqs_per_sec*
+                specification must be a positive int or float greater
+                than zero.
+            IncorrectAsyncQSizeSpecified: *async_q_size* must be an
+                integer greater than zero.
 
         """
         ################################################################
-        # requests
+        # reqs_per_sec
         ################################################################
-        if isinstance(requests, int) and (0 < requests):
-            self.requests = requests
+        if isinstance(reqs_per_sec, int | float) and (0 < reqs_per_sec):
+            self.reqs_per_sec = reqs_per_sec
         else:
-            raise IncorrectRequestsSpecified(
-                "The requests specification must be a positive integer "
-                "greater than zero."
+            raise IncorrectReqsPerSecSpecified(
+                "The reqs_per_sec specification must be a positive "
+                "int or float greater than zero."
+            )
+        ################################################################
+        # bucket_size
+        ################################################################
+        if isinstance(bucket_size, int | float) and (1 <= bucket_size):
+            self.bucket_size = bucket_size
+        else:
+            raise IncorrectBucketSizeSpecified(
+                "The bucket_size specification must be a positive "
+                "int or float greater than or equal to 1."
             )
 
         ################################################################
-        # seconds
+        # async_throttle
         ################################################################
-        if isinstance(seconds, (int, float)) and (0 < seconds):
-            self.seconds = seconds  # timedelta(seconds=seconds)
-        else:
-            raise IncorrectSecondsSpecified(
-                "The seconds specification must be an integer or float "
-                "greater than zero."
-            )
+        ################################################################
+        # States and processing for ThrottleAsync:
+        #
+        #     The Throttle is initialized with an empty async_q and the
+        #     scheduler thread is started and ready to receive work. The
+        #     starting state is 'active'.
+        #
+        #     1) state: active
+        #        a) send_request called (directly or via decorated func
+        #           call):
+        #           1) request is queued to the async_q
+        #           2) state remains 'active'
+        #        b) start_shutdown called:
+        #           1) state is changed to 'shutdown'
+        #           2) Any new requests are rejected. For "soft"
+        #           shutdown, scheduler schedules the remaining requests
+        #           currently queued on the async_q with the normal
+        #           interval. With "hard" shutdown, the scheduler
+        #           removes and discards the requests on the async_q.
+        #           3) scheduler exits
+        #           4) control returns after scheduler thread returns
+        #     2) state: shutdown
+        #        a) send_request called (directly or via decorated func
+        #           call):
+        #           1) request is ignored  (i.e, not queued to async_q)
+        #        b) start_shutdown called (non-decorator only):
+        #           1) state remains 'shutdown'
+        #           2) control returns immediately
+        ################################################################
+        self.async_throttle = async_throttle
 
-        if name is None:
-            self.t_name = str(id(self))
+        if async_q_size is not None:
+            if isinstance(async_q_size, int) and (0 < async_q_size):
+                self.async_q_size = async_q_size
+            else:
+                raise IncorrectAsyncQSizeSpecified(
+                    "async_q_size must be an integer greater than zero."
+                )
         else:
-            self.t_name = name
+            self.async_q_size = Throttle.DEFAULT_ASYNC_Q_SIZE
+        ################################################################
+        # Set remainder of async vars
+        ################################################################
+        self.shutdown_lock = threading.Lock()
+        self._throttle_shutdown_started = False
+        self.throttle_state = ThrottleAsync._ACTIVE
+        self.shutdown_start_time = 0.0
+        self.shutdown_elapsed_time = 0.0
+        self.async_q: queue.Queue[Throttle.Request] = queue.Queue(
+            maxsize=self.async_q_size
+        )
+        self.request_scheduler_thread: threading.Thread = threading.Thread(
+            target=self.schedule_requests
+        )
+
+        self.request_scheduler_thread.start()
+
+        ################################################################
+        # name
+        ################################################################
+        # if name is None:
+        #     self.t_name = str(id(self))
+        # else:
+        #     self.t_name = name
+        self.t_name = name or str(id(self))
+
         ################################################################
         # Set remainder of vars
         ################################################################
-        self._target_interval = seconds / requests
+        self._target_interval = 1 / reqs_per_sec
         self._target_interval_ns: float = self._target_interval * Throttle.SECS_2_NS
         self.sync_lock = threading.Lock()
         self._arrival_time = 0.0
-        self._next_target_time: float = time.perf_counter_ns()
         self._wait_time_ns: float = 0.0
         self.logger = logging.getLogger(__name__)
         self.pauser = Pauser()
+
+        ################################################################
+        # Set leaky bucket vars
+        ################################################################
+        self.lb_adjustment: float = max(
+            0.0, (self._target_interval * self.bucket_size) - self._target_interval
+        )
+        self.lb_adjustment_ns: float = self.lb_adjustment * Throttle.SECS_2_NS
+
+        # adjust _next_target_time for normal or lb algo
+        self._next_target_time = time.perf_counter_ns() - self.lb_adjustment_ns
+
+    ####################################################################
+    # repr
+    ####################################################################
+    def __repr__(self) -> str:
+        """Return a representation of the class.
+
+        Returns:
+            The representation as how the class is instantiated
+
+        :Example: instantiate a throttle for 1 requests every 2 seconds
+
+        >>> from scottbrian_throttle.throttle import Throttle
+        >>> request_throttle = ThrottleSync(reqs_per_sec=0.5)
+        >>> repr(request_throttle)
+        'ThrottleSync(reqs_per_sec=0.5 bucket_size=1, async_throttle=False, async_q_size=None, name=3056773933840)'
+
+        """
+        if TYPE_CHECKING:
+            __class__: Type[ThrottleSync]  # noqa: F842
+        classname = self.__class__.__name__
+        parms = (
+            f"reqs_per_sec={self.reqs_per_sec}, "
+            f"bucket_size={self.bucket_size}, "
+            f"async_throttle={self.async_throttle}, "
+            f"async_q_size={self.async_q_size}, "
+            f"name={self.t_name}"
+        )
+
+        return f"{classname}({parms})"
+
+    ####################################################################
+    # len
+    ####################################################################
+    def __len__(self) -> int:
+        """Return the number of items in the async_q.
+
+        Returns:
+            The number of entries in the async_q as an integer
+
+        For an asynchronous throttle, calls to the send_request add
+        request items to the async_q. The request items are eventually
+        removed and scheduled. The len of Throttle is the number of
+        request items on the async_q when the len function is called.
+        Note that the returned queue size is the approximate size as
+        described in the documentation for the python threading queue.
+
+        :Example: instantiate an asynchronous throttle for 1 request per second
+
+        >>> from scottbrian_throttle.throttle import Throttle
+        >>> import time
+        >>> def my_request():
+        ...     pass
+        >>> request_throttle = Throttle(reqs_per_sec=1,async_throttle=True)
+        >>> for i in range(3):  # quickly queue up 3 items
+        ...     _ = request_throttle.send_request(my_request)
+        >>> time.sleep(0.5)  # allow first request to be dequeued
+        >>> print(len(request_throttle))
+        2
+
+        >>> request_throttle.start_shutdown()
+
+        """
+        return self.async_q.qsize()
 
     ####################################################################
     # send_request
@@ -502,7 +700,7 @@ class Throttle(ABC):
     # get_expected_num_completed_reqs
     ####################################################################
     def get_expected_num_completed_reqs(self, interval: float) -> int:
-        """Calculate number of completed requests that completed.
+        """Calculate number of requests that completed.
 
         Args:
             interval: number of elapsed seconds that requests were being
@@ -521,55 +719,6 @@ class Throttle(ABC):
 ########################################################################
 class ThrottleSync(Throttle):
     """Throttle class for sync mode."""
-
-    ####################################################################
-    # __init__
-    ####################################################################
-    def __init__(
-        self, *, requests: int, seconds: IntFloat, name: Optional[str] = None
-    ) -> None:
-        """Initialize an instance of the Throttle class.
-
-        Args:
-            requests: The number of requests that can be made in
-                        the interval specified by seconds.
-            seconds: The number of seconds in which the number of
-                       requests specified in requests can be made.
-            name: The name used to identify the throttle in log messages
-                issued by the throttle. The default name is
-                the python id of the Throttle class instance.
-
-        """
-        super().__init__(requests=requests, seconds=seconds, name=name)
-
-    ####################################################################
-    # repr
-    ####################################################################
-    def __repr__(self) -> str:
-        """Return a representation of the class.
-
-        Returns:
-            The representation as how the class is instantiated
-
-        :Example: instantiate a throttle for 1 requests every 2 seconds
-
-        >>> from scottbrian_throttle.throttle import Throttle
-        >>> request_throttle = ThrottleSync(requests=1,
-        ...                                 seconds=2)
-        >>> repr(request_throttle)
-        'ThrottleSync(requests=1, seconds=2.0, name=3056773933840)'
-
-        """
-        if TYPE_CHECKING:
-            __class__: Type[ThrottleSync]  # noqa: F842
-        classname = self.__class__.__name__
-        parms = (
-            f"requests={self.requests}, "
-            f"seconds={float(self.seconds)}, "
-            f"name={self.t_name}"
-        )
-
-        return f"{classname}({parms})"
 
     ####################################################################
     # send_request
@@ -596,9 +745,9 @@ class ThrottleSync(Throttle):
         ################################################################
         # The SYNC_MODE Throttle algorithm works as follows:
         # 1) during throttle instantiation:
-        #    a) a target interval is calculated as seconds/requests.
-        #       For example, with a specification of 4 requests per 1
-        #       second, the target interval will be 0.25 seconds.
+        #    a) a target interval is calculated as 1/reqs_per_sec.
+        #       For example, with a specification of 4 reqs_per_sec,
+        #       the target interval will be 0.25 seconds.
         #    b) _next_target_time is set to a current time reference via
         #       time.perf_counter_ns
         # 2) as each request arrives, it is checked against the
@@ -656,311 +805,8 @@ class ThrottleSync(Throttle):
 ########################################################################
 # Throttle class
 ########################################################################
-class ThrottleSyncEc(ThrottleSync):
-    """Throttle class with early count algo."""
-
-    __slots__ = ("_early_arrival_count", "early_count")
-
-    ####################################################################
-    # __init__
-    ####################################################################
-    def __init__(
-        self,
-        *,
-        requests: int,
-        seconds: IntFloat,
-        name: Optional[str] = None,
-        early_count: int,
-    ) -> None:
-        """Initialize an instance of the early count Throttle class.
-
-        Args:
-            requests: The number of requests that can be made in
-                        the interval specified by seconds.
-            seconds: The number of seconds in which the number of
-                       requests specified in requests can be made.
-            name: The name used to identify the throttle in log messages
-                issued by the throttle. The default name is
-                the python id of the Throttle class instance.
-            early_count: Specifies the number of requests that are
-                           allowed to proceed immediately without delay.
-                           Note that a specification of 0 for the
-                           *early_count* will result in the same
-                           behavior as the ThrottleSync class.
-
-        Raises:
-            IncorrectEarlyCountSpecified: *early_count* must be an
-                integer greater than zero.
-
-        """
-        ################################################################
-        # early_count
-        ################################################################
-        super().__init__(requests=requests, seconds=seconds, name=name)
-
-        if isinstance(early_count, int) and (0 < early_count):
-            self.early_count = early_count
-        else:
-            raise IncorrectEarlyCountSpecified(
-                "early_count must be " "an integer greater" "than zero."
-            )
-
-        ################################################################
-        # Set remainder of vars
-        ################################################################
-        self._early_arrival_count = 0
-
-    ####################################################################
-    # repr
-    ####################################################################
-    def __repr__(self) -> str:
-        """Return a representation of the class.
-
-        Returns:
-            The representation as how the class is instantiated
-
-        :Example: instantiate a throttle for 2 requests per second
-
-         >>> from scottbrian_throttle.throttle import Throttle
-        >>> request_throttle = ThrottleSyncEc(requests=2,
-        ...                                   seconds=1,
-        ...                                   early_count=3)
-        >>> repr(request_throttle)
-        'ThrottleSyncEc(requests=2, seconds=1.0, name=3056806142800, early_count=3)'
-
-
-        .. # noqa: W505, E501
-
-        """
-        if TYPE_CHECKING:
-            __class__: Type[ThrottleSyncEc]  # noqa: F842
-        classname = self.__class__.__name__
-        parms = (
-            f"requests={self.requests}, "
-            f"seconds={float(self.seconds)}, "
-            f"name={self.t_name}, "
-            f"early_count={self.early_count}"
-        )
-
-        return f"{classname}({parms})"
-
-    ####################################################################
-    # send_request
-    ####################################################################
-    def send_request(self, func: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
-        """Send the request.
-
-        Args:
-            func: the request function to be run
-            args: the request function positional arguments
-            kwargs: the request function keyword arguments
-
-        Returns:
-              The return code from the request function (may be None)
-
-
-        Raises:
-            Exception: An exception occurred in the request target. It
-                will be logged and re-raised.
-
-        """
-        ################################################################
-        # SYNC_MODE_EC
-        ################################################################
-        ################################################################
-        # The ThrottleSyncEc algorithm works as follows:
-        # 1) during throttle instantiation:
-        #    a) a target interval is calculated as seconds/requests.
-        #       For example, with a specification of 4 requests per 1
-        #       second, the target interval will be 0.25 seconds.
-        #    b) _next_target_time is set to a current time reference via
-        #       time.perf_counter_ns
-        #    c) the specified early_count is saved
-        #    d) _early_arrival_count is set to zero
-        # 2) as each request arrives, it is checked against the
-        #    _next_target_time and:
-        #    a) if it arrives at or after _next_target_time, it is
-        #       allowed to proceed without delay and the
-        #       _early_arrival_count is reset
-        #    b) if it arrived before the _next_target_time, the
-        #       _early_arrival_count is increased by 1 and:
-        #       1) if _early_arrival_count is less than or equal to
-        #          early_count, the request is allowed to proceed
-        #          without delay
-        #       2) if _early_arrival_count is greater than early_count,
-        #          _early_arrival_count is reset and the request is
-        #          delayed until _next_target_time is reached
-        # 3) _next_target_time is increased by the target_interval
-        #
-        # Note that as each request is sent, the _next_target_time is
-        # increased. This means that once the early count is exhausted,
-        # the next request will be delayed for the sum of target
-        # intervals of the requests that were sent without delay. This
-        # allows short bursts of requests to go immediately while also
-        # ensuring that the average interval is not less than the
-        # target interval.
-        ################################################################
-        with self.sync_lock:
-            # set the time that this request is being made
-            self._arrival_time = time.perf_counter_ns()
-
-            if self._next_target_time <= self._arrival_time:
-                self._early_arrival_count = 0
-            else:
-                self._early_arrival_count += 1
-                if self.early_count < self._early_arrival_count:
-                    self._early_arrival_count = 0  # reset the count
-
-                    wait_time = (
-                        self._next_target_time - self._arrival_time
-                    ) * Throttle.NS_2_SECS
-
-                    self.pauser.pause(wait_time)
-
-            ############################################################
-            # Update the expected arrival time for the next request by
-            # adding the request interval to our current time or the
-            # next arrival time, whichever is later. Note that we update
-            # the target time before we send the request which means we
-            # face a possible scenario where we send a request that gets
-            # delayed en route to the service, but our next request
-            # arrives at the updated expected arrival time and is sent
-            # out immediately, but it now arrives early relative to the
-            # previous request, as observed by the service. If we update
-            # the target time after sending the request we avoid that
-            # scenario, but we would then be adding in the request
-            # processing time to the throttle delay with the undesirable
-            # effect that all requests will now be throttled more than
-            # they need to be.
-            ############################################################
-            self._next_target_time = (
-                max(float(time.perf_counter_ns()), self._next_target_time)
-                + self._target_interval_ns
-            )
-
-            ############################################################
-            # Call the request function and return with the request
-            # return value. We use try/except to log and re-raise any
-            # unhandled errors.
-            ############################################################
-            try:
-                return func(*args, **kwargs)
-            except Exception as e:
-                self.logger.debug(
-                    f"throttle {self.t_name} send_request unhandled exception in "
-                    f"request: {e}"
-                )
-                raise
-
-
-########################################################################
-# Throttle class
-########################################################################
 class ThrottleSyncLb(ThrottleSync):
     """Throttle class with leaky bucket algo."""
-
-    __slots__ = (
-        "_next_target_time",
-        "lb_adjustment",
-        "lb_adjustment_ns",
-        "lb_threshold",
-    )
-
-    ####################################################################
-    # __init__
-    ####################################################################
-    def __init__(
-        self,
-        *,
-        requests: int,
-        seconds: IntFloat,
-        name: Optional[str] = None,
-        lb_threshold: IntFloat,
-    ) -> None:
-        """Initialize an instance of the leaky bucket Throttle class.
-
-        Args:
-            requests: The number of requests that can be made in
-                        the interval specified by seconds.
-            seconds: The number of seconds in which the number of
-                       requests specified in requests can be made.
-            name: The name used to identify the throttle in log messages
-                issued by the throttle. The default name is
-                the python id of the Throttle class instance.
-            lb_threshold: Specifies the threshold for the leaky bucket.
-                            This is the number of requests that can be
-                            in the bucket such that the next request is
-                            allowed to proceed without delay. That
-                            request is added to the bucket, and then the
-                            bucket leaks out the requests. When the next
-                            request arrives, it will be delayed by
-                            whatever amount of time is needed for the
-                            bucket to have leaked enough to be at the
-                            threshold. A specification of zero for the
-                            lb_threshold will effectively cause all
-                            requests that are early to be delayed.
-
-        Raises:
-            IncorrectLbThresholdSpecified: *lb_threshold* must be an
-                integer or float greater than zero.
-
-        """
-        ################################################################
-        # lb_threshold
-        ################################################################
-        super().__init__(requests=requests, seconds=seconds, name=name)
-
-        if isinstance(lb_threshold, (int, float)) and (0 < lb_threshold):
-            self.lb_threshold = float(lb_threshold)
-        else:
-            raise IncorrectLbThresholdSpecified(
-                "lb_threshold must be an integer or float greater than zero."
-            )
-
-        ################################################################
-        # Set remainder of vars
-        ################################################################
-        self.lb_adjustment: float = max(
-            0.0, (self._target_interval * self.lb_threshold) - self._target_interval
-        )
-        self.lb_adjustment_ns: float = self.lb_adjustment * Throttle.SECS_2_NS
-
-        # adjust _next_target_time for lb algo
-        self._next_target_time = time.perf_counter_ns() - self.lb_adjustment_ns
-
-    ####################################################################
-    # repr
-    ####################################################################
-    def __repr__(self) -> str:
-        """Return a representation of the class.
-
-        Returns:
-            The representation as how the class is instantiated
-
-        :Example: instantiate a throttle for 20 requests per 1/2 minute
-
-        >>> from scottbrian_throttle.throttle import Throttle
-        >>> request_throttle = ThrottleSyncLb(requests=20,
-        ...                                   seconds=30,
-        ...                                   lb_threshold=4)
-        >>> repr(request_throttle)
-        'ThrottleSyncLb(requests=20, seconds=30.0, name=3056806388048, lb_threshold=4.0)'
-
-
-        .. # noqa: W505, E501
-
-        """
-        if TYPE_CHECKING:
-            __class__: Type[ThrottleSyncLb]  # noqa: F842
-        classname = self.__class__.__name__
-        parms = (
-            f"requests={self.requests}, "
-            f"seconds={float(self.seconds)}, "
-            f"name={self.t_name}, "
-            f"lb_threshold={self.lb_threshold}"
-        )
-
-        return f"{classname}({parms})"
 
     ####################################################################
     # MODE_SYNC_LB send_request
@@ -1097,136 +943,6 @@ class ThrottleAsync(Throttle):
     """An asynchronous throttle mechanism."""
 
     ####################################################################
-    # start_shutdown request constants
-    ####################################################################
-    TYPE_SHUTDOWN_SOFT: Final[int] = 4
-    TYPE_SHUTDOWN_HARD: Final[int] = 8
-
-    ####################################################################
-    # start_shutdown return code constants
-    ####################################################################
-    RC_SHUTDOWN_SOFT_COMPLETED_OK: Final[int] = 0
-    RC_SHUTDOWN_HARD_COMPLETED_OK: Final[int] = 4
-    RC_SHUTDOWN_TIMED_OUT: Final[int] = 8
-
-    ####################################################################
-    # throttle state constants
-    ####################################################################
-    _ACTIVE: Final[int] = 0
-    _SOFT_SHUTDOWN_STARTED: Final[int] = 1
-    _HARD_SHUTDOWN_STARTED: Final[int] = 2
-    _SOFT_SHUTDOWN_COMPLETED: Final[int] = 3
-    _HARD_SHUTDOWN_COMPLETED: Final[int] = 4
-
-    __slots__ = (
-        "_check_async_q_time",
-        "_check_async_q_time2",
-        "_throttle_shutdown_started",
-        "async_q",
-        "async_q_size",
-        "request_scheduler_thread",
-        "shutdown_elapsed_time",
-        "shutdown_lock",
-        "shutdown_start_time",
-        "throttle_state",
-    )
-
-    ####################################################################
-    # __init__
-    ####################################################################
-    def __init__(
-        self,
-        *,
-        requests: int,
-        seconds: IntFloat,
-        name: Optional[str] = None,
-        async_q_size: Optional[int] = None,
-    ) -> None:
-        """Initialize an instance of the ThrottleAsync class.
-
-        Args:
-            requests: The number of requests that can be made in
-                        the interval specified by seconds.
-            seconds: The number of seconds in which the number of
-                       requests specified in requests can be made.
-            name: The name used to identify the throttle in log messages
-                issued by the throttle. The default name is
-                the python id of the Throttle class instance.
-            async_q_size: Specifies the size of the request
-                            queue for async requests. When the request
-                            queue is totally populated, any additional
-                            calls to send_request will be delayed
-                            until queued requests are removed and
-                            scheduled. The default is 4096 requests.
-
-        Raises:
-            IncorrectAsyncQSizeSpecified: *async_q_size* must be an
-                integer greater than zero.
-
-        """
-        ################################################################
-        # States and processing for ThrottleAsync:
-        #
-        #     The Throttle is initialized with an empty async_q and the
-        #     scheduler thread is started and ready to receive work. The
-        #     starting state is 'active'.
-        #
-        #     1) state: active
-        #        a) send_request called (directly or via decorated func
-        #           call):
-        #           1) request is queued to the async_q
-        #           2) state remains 'active'
-        #        b) start_shutdown called:
-        #           1) state is changed to 'shutdown'
-        #           2) Any new requests are rejected. For "soft"
-        #           shutdown, scheduler schedules the remaining requests
-        #           currently queued on the async_q with the normal
-        #           interval. With "hard" shutdown, the scheduler
-        #           removes and discards the requests on the async_q.
-        #           3) scheduler exits
-        #           4) control returns after scheduler thread returns
-        #     2) state: shutdown
-        #        a) send_request called (directly or via decorated func
-        #           call):
-        #           1) request is ignored  (i.e, not queued to async_q)
-        #        b) start_shutdown called (non-decorator only):
-        #           1) state remains 'shutdown'
-        #           2) control returns immediately
-        ################################################################
-        ################################################################
-        # async_q_size
-        ################################################################
-        super().__init__(requests=requests, seconds=seconds, name=name)
-        if async_q_size is not None:
-            if isinstance(async_q_size, int) and (0 < async_q_size):
-                self.async_q_size = async_q_size
-            else:
-                raise IncorrectAsyncQSizeSpecified(
-                    "async_q_size must be an integer greater than zero."
-                )
-        else:
-            self.async_q_size = Throttle.DEFAULT_ASYNC_Q_SIZE
-
-        ################################################################
-        # Set remainder of vars
-        ################################################################
-        self.shutdown_lock = threading.Lock()
-        self._throttle_shutdown_started = False
-        self.throttle_state = ThrottleAsync._ACTIVE
-        self._check_async_q_time = 0.0
-        self._check_async_q_time2 = 0.0
-        self.shutdown_start_time = 0.0
-        self.shutdown_elapsed_time = 0.0
-        self.async_q: queue.Queue[Throttle.Request] = queue.Queue(
-            maxsize=self.async_q_size
-        )
-        self.request_scheduler_thread: threading.Thread = threading.Thread(
-            target=self.schedule_requests
-        )
-
-        self.request_scheduler_thread.start()
-
-    ####################################################################
     # len
     ####################################################################
     def __len__(self) -> int:
@@ -1361,18 +1077,7 @@ class ThrottleAsync(Throttle):
         # only wait for a second to allow us to detect shutdown in a
         # timely fashion.
         while True:
-            # obtained_nowait = False
-            # try:
-            #     self._check_async_q_time = time.perf_counter_ns()
-            #
-            #     request_item = self.async_q.get_nowait()
-            #     self._next_target_time = (time.perf_counter_ns()
-            #                               + self._target_interval_ns)
-            #     obtained_nowait = True
-            # except queue.Empty:
             try:
-                # self._check_async_q_time2 = time.perf_counter_ns()
-
                 request_item = self.async_q.get(block=True, timeout=1)
 
                 self._next_target_time = (
