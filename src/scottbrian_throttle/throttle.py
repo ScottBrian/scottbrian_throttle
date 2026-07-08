@@ -70,7 +70,7 @@ are complete.
 
 :Example: instantiate an asynchronous throttle and send some requests:
 
->>> async_throttle = Throttle(reqs_per_sec=2, async_mode=True)
+>>> async_throttle = Throttle(reqs_per_sec=2, throttle_mode=ThrottleMode.ASYNC)
 >>> def target_rtn2(request_number, time_of_start):
 ...     print(f'request {request_number} sent at elapsed time: '
 ...           f'{time.time() - time_of_start:0.1f}')
@@ -109,7 +109,7 @@ interval will decrease as the size of the bucket increases. Note that a
 *bucket_size* of 1 will effectively result in normal non-leaky bucket
 behavior. Note also that an asynchronous leaky bucket throttle can be
 configured by specifying a *bucket_size* greater than 1 and
-*async_mode=True*.
+*throttle_mode=ThrottleMode.Async*.
 
 :Example: instantiate a leaky bucket throttle and send some requests:
 
@@ -206,14 +206,16 @@ request 9 sent at elapsed time: 3.5
 
 """
 
-########################################################################
-# Standard Library
-########################################################################
 import functools
 import logging
 import queue
 import threading
 import time
+
+########################################################################
+# Standard Library
+########################################################################
+from enum import Enum, auto
 from typing import (
     Any,
     Callable,
@@ -286,6 +288,16 @@ class InvalidAsyncQSizeSpecified(ThrottleError):
 
 
 ########################################################################
+# Mode
+########################################################################
+class ThrottleMode(Enum):
+    """ThrottleMode is SYNC or ASYNC."""
+
+    SYNC = auto()
+    ASYNC = auto()
+
+
+########################################################################
 # Throttle class
 ########################################################################
 class Throttle:
@@ -342,7 +354,7 @@ class Throttle:
         "_wait_time_ns",
         "async_q",
         "async_q_size",
-        "async_mode",
+        "throttle_mode",
         "bucket_size",
         "lb_adjustment",
         "lb_adjustment_ns",
@@ -366,7 +378,7 @@ class Throttle:
         *,
         reqs_per_sec: int | float,
         bucket_size: int | float = 1,
-        async_mode: bool = False,
+        throttle_mode: ThrottleMode = ThrottleMode.SYNC,
         async_q_size: Optional[int] = None,
         name: Optional[str] = None,
     ) -> None:
@@ -390,8 +402,8 @@ class Throttle:
                          request interval has elapsed will be delayed.
                          The bucket_count must be greater than or equal
                          to 1.
-            async_mode: If True, the throttle is asynchronous. If
-                    False, the default, the throttle is synchronous.
+            throttle_mode: If ThrottleMode.ASYNC, the throttle is asynchronous. If
+                    ThrottleMode.SYNC, the default, the throttle is synchronous.
             async_q_size: Specifies the size of the request
                           queue for async requests. When the request
                           queue is totally populated, any additional
@@ -464,9 +476,9 @@ class Throttle:
         #           1) state remains 'shutdown'
         #           2) control returns immediately
         ################################################################
-        self.async_mode = async_mode
+        self.throttle_mode = throttle_mode
 
-        if self.async_mode:
+        if self.throttle_mode == ThrottleMode.ASYNC:
             if async_q_size is not None:
                 if isinstance(async_q_size, int) and (0 < async_q_size):
                     self.async_q_size = async_q_size
@@ -479,7 +491,8 @@ class Throttle:
         else:
             if async_q_size is not None and async_q_size != 0:
                 raise InvalidAsyncQSizeSpecified(
-                    "a non_zero async_q_size is not allowed when async_mode is False."
+                    "a non_zero async_q_size is not allowed when throttle_mode is "
+                    "ThrottleMode.SYNC."
                 )
             self.async_q_size = 0
 
@@ -514,7 +527,7 @@ class Throttle:
         # adjust _next_target_time for normal or lb algo
         self._next_target_time = time.perf_counter_ns() - self.lb_adjustment_ns
 
-        if self.async_mode:
+        if self.throttle_mode == ThrottleMode.ASYNC:
             ########################################################
             # Set remainder of async vars
             ########################################################
@@ -545,16 +558,16 @@ class Throttle:
         >>> from scottbrian_throttle.throttle import Throttle
         >>> request_throttle = ThrottleSync(reqs_per_sec=0.5)
         >>> repr(request_throttle)
-        'ThrottleSync(reqs_per_sec=0.5 bucket_size=1, async_mode=False, async_q_size=None, name=3056773933840)'
+        'ThrottleSync(reqs_per_sec=0.5 bucket_size=1, throttle_mode=ThrottleMode.SYNC, async_q_size=None, name=3056773933840)'
 
         """
         if TYPE_CHECKING:
-            __class__: Type[ThrottleSync]  # noqa: F842
+            __class__: Type[Throttle]  # noqa: F842
         classname = self.__class__.__name__
         parms = (
             f"reqs_per_sec={self.reqs_per_sec}, "
             f"bucket_size={self.bucket_size}, "
-            f"async_mode={self.async_mode}, "
+            f"throttle_mode={str(self.throttle_mode)}, "
             f"async_q_size={self.async_q_size}, "
             f"name={self.t_name}"
         )
@@ -583,7 +596,7 @@ class Throttle:
         >>> import time
         >>> def my_request():
         ...     pass
-        >>> request_throttle = Throttle(reqs_per_sec=1,async_mode=True)
+        >>> request_throttle = Throttle(reqs_per_sec=1,throttle_mode=ThrottleMode.ASYNC)
         >>> for i in range(3):  # quickly queue up 3 items
         ...     _ = request_throttle.send_request(my_request)
         >>> time.sleep(0.5)  # allow first request to be dequeued
@@ -692,8 +705,8 @@ class Throttle:
 
         Returns:
               The return value from the request function. For
-              async_mode = False, the return value may be any value
-              or None. For async_mode = True, the return value will
+              throttle_mode = False, the return value may be any value
+              or None. For throttle_mode = True, the return value will
               be None.
 
         Raises:
@@ -701,13 +714,13 @@ class Throttle:
                 will be logged and re-raised.
 
         """
-        if self.async_mode:
+        if self.throttle_mode == ThrottleMode.ASYNC:
             # if self.throttle_state != Throttle._ACTIVE:
             #     return Throttle.RC_THROTTLE_IS_SHUTDOWN
 
             # We obtain the shutdown lock to protect against the following
             # scenario:
-            # 1) send_request is entered for async mode and sees at
+            # 1) send_request is entered for async throttle_mode and sees at
             # the while statement that we are *not* in shutdown
             # 2) send_request proceeds to the try statement just
             # before the request will be queued to the async_q
@@ -1192,7 +1205,7 @@ def throttle(
     *,
     reqs_per_sec: int,
     bucket_size: int | float = 1,
-    async_mode: bool = False,
+    throttle_mode: ThrottleMode = ThrottleMode.SYNC,
     async_q_size: Optional[int] = None,
     name: Optional[str] = None,
 ) -> FuncWithThrottleAttr[F]:
@@ -1204,7 +1217,7 @@ def throttle(
     *,
     reqs_per_sec: int,
     bucket_size: int | float = 1,
-    async_mode: bool = False,
+    throttle_mode: ThrottleMode = ThrottleMode.SYNC,
     async_q_size: Optional[int] = None,
     name: Optional[str] = None,
 ) -> Callable[[F], FuncWithThrottleAttr[F]]:
@@ -1216,7 +1229,7 @@ def throttle(
     *,
     reqs_per_sec: int,
     bucket_size: int | float = 1,
-    async_mode: bool = False,
+    throttle_mode: ThrottleMode = ThrottleMode.SYNC,
     async_q_size: Optional[int] = None,
     name: Optional[str] = None,
 ) -> Union[F, FuncWithThrottleAttr[F]]:
@@ -1251,8 +1264,8 @@ def throttle(
                      request interval has elapsed will be delayed.
                      The bucket_count must be greater than or equal
                      to 1.
-        async_mode: If True, the throttle is asynchronous. If
-                False, the default, the throttle is synchronous.
+        throttle_mode: If ThrottleMode.ASYNC, the throttle is asynchronous. If
+                ThrottleeMode.SYNC, the default, the throttle is synchronous.
         async_q_size: Specifies the size of the request
                       queue for async requests. When the request
                       queue is totally populated, any additional
@@ -1321,7 +1334,7 @@ def throttle(
                 throttle,
                 reqs_per_sec=reqs_per_sec,
                 bucket_size=bucket_size,
-                async_mode=async_mode,
+                throttle_mode=throttle_mode,
                 async_q_size=async_q_size,
                 name=name,
             ),
@@ -1332,7 +1345,7 @@ def throttle(
     a_throttle = Throttle(
         reqs_per_sec=reqs_per_sec,
         bucket_size=bucket_size,
-        async_mode=async_mode,
+        throttle_mode=throttle_mode,
         async_q_size=async_q_size,
         name=name,
     )
