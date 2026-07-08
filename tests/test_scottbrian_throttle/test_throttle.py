@@ -33,22 +33,13 @@ from typing_extensions import TypeAlias
 ########################################################################
 from scottbrian_throttle.throttle import (
     Throttle,
-    ThrottleAsync,
-    ThrottleSync,
-    ThrottleSyncEc,
-    ThrottleSyncLb,
-    throttle_sync,
-    throttle_sync_ec,
-    throttle_sync_lb,
-    throttle_async,
-    FuncWithThrottleAsyncAttr,
+    FuncWithThrottleAttr,
     shutdown_throttle_funcs,
-    IncorrectRequestsSpecified,
-    IncorrectSecondsSpecified,
+    IncorrectReqsPerSecSpecified,
     IncorrectAsyncQSizeSpecified,
-    IncorrectEarlyCountSpecified,
-    IncorrectLbThresholdSpecified,
+    IncorrectBucketSizeSpecified,
     IncorrectShutdownTypeSpecified,
+    InvalidAsyncQSizeSpecified,
 )
 
 ########################################################################
@@ -168,14 +159,13 @@ class RequestThreadItem:
 MODE_ASYNC: Final[int] = 1
 MODE_SYNC: Final[int] = 2
 MODE_SYNC_LB: Final[int] = 3
-MODE_SYNC_EC: Final[int] = 4
 
 
 ########################################################################
 # verify_throttle_expected_reqs
 ########################################################################
 def verify_throttle_expected_reqs(
-    throttle: ThrottleAsync, start_time: float, req_time: ReqTime, log_ver: LogVer
+    throttle: Throttle, start_time: float, req_time: ReqTime, log_ver: LogVer
 ) -> None:
     elapsed_time_from_start = time.time() - start_time
     num_reqs_done = req_time.num_reqs
@@ -241,47 +231,40 @@ class TestThrottleErrors:
         ################################################################
         # bad requests
         ################################################################
-        with pytest.raises(IncorrectRequestsSpecified):
-            _ = ThrottleAsync(requests=0, seconds=1)
-        with pytest.raises(IncorrectRequestsSpecified):
-            _ = ThrottleAsync(requests=-1, seconds=1)
-        with pytest.raises(IncorrectRequestsSpecified):
-            _ = ThrottleAsync(requests="1", seconds=1)  # type: ignore
-
-        ################################################################
-        # bad seconds
-        ################################################################
-        with pytest.raises(IncorrectSecondsSpecified):
-            _ = ThrottleAsync(requests=1, seconds=0)
-        with pytest.raises(IncorrectSecondsSpecified):
-            _ = ThrottleAsync(requests=1, seconds=-1)
-        with pytest.raises(IncorrectSecondsSpecified):
-            _ = ThrottleAsync(requests=1, seconds="1")  # type: ignore
+        with pytest.raises(IncorrectReqsPerSecSpecified):
+            _ = Throttle(reqs_per_sec=0)
+        with pytest.raises(IncorrectReqsPerSecSpecified):
+            _ = Throttle(reqs_per_sec=-1)
+        with pytest.raises(IncorrectReqsPerSecSpecified):
+            _ = Throttle(reqs_per_sec="1")  # type: ignore
 
         ################################################################
         # bad async_q_size
         ################################################################
         with pytest.raises(IncorrectAsyncQSizeSpecified):
-            _ = ThrottleAsync(requests=1, seconds=1, async_q_size=-1)
+            _ = Throttle(reqs_per_sec=1, async_mode=True, async_q_size=-1)
         with pytest.raises(IncorrectAsyncQSizeSpecified):
-            _ = ThrottleAsync(requests=1, seconds=1, async_q_size=0)
+            _ = Throttle(reqs_per_sec=1, async_mode=True, async_q_size=0)
         with pytest.raises(IncorrectAsyncQSizeSpecified):
-            _ = ThrottleAsync(requests=1, seconds=1, async_q_size="1")  # type: ignore
+            _ = Throttle(reqs_per_sec=1, async_mode=True, async_q_size="1")  # type: ignore
 
         ################################################################
-        # bad early_count
+        # invalid async_q_size
         ################################################################
-        with pytest.raises(IncorrectEarlyCountSpecified):
-            _ = ThrottleSyncEc(requests=1, seconds=1, early_count=-1)
-        with pytest.raises(IncorrectEarlyCountSpecified):
-            _ = ThrottleSyncEc(requests=1, seconds=1, early_count="1")  # type: ignore
+        with pytest.raises(InvalidAsyncQSizeSpecified):
+            _ = Throttle(reqs_per_sec=1, async_q_size=-1)
+        with pytest.raises(InvalidAsyncQSizeSpecified):
+            _ = Throttle(reqs_per_sec=1, async_q_size=0)
+        with pytest.raises(InvalidAsyncQSizeSpecified):
+            _ = Throttle(reqs_per_sec=1, async_q_size="1")  # type: ignore
+
         ################################################################
         # bad lb_threshold
         ################################################################
-        with pytest.raises(IncorrectLbThresholdSpecified):
-            _ = ThrottleSyncLb(requests=1, seconds=1, lb_threshold=-1)
-        with pytest.raises(IncorrectLbThresholdSpecified):
-            _ = ThrottleSyncLb(requests=1, seconds=1, lb_threshold="1")  # type: ignore
+        with pytest.raises(IncorrectBucketSizeSpecified):
+            _ = Throttle(reqs_per_sec=1, bucket_size=-1)
+        with pytest.raises(IncorrectBucketSizeSpecified):
+            _ = Throttle(reqs_per_sec=1, bucket_size="1")  # type: ignore
 
 
 ########################################################################
@@ -291,283 +274,516 @@ class TestThrottleBasic:
     """Test basic functions of Throttle."""
 
     ####################################################################
-    # len checks
+    # len checks async_mode=False
     ####################################################################
-    @pytest.mark.parametrize("requests_arg", (1, 2, 3))
+    @pytest.mark.parametrize("num_reqs_to_send_arg", (1, 2, 3))
     @etrace(omit_caller=True)
-    def test_throttle_len_async(
+    def test_throttle_len_non_async(
         self,
-        requests_arg: int,
+        num_reqs_to_send_arg: int,
     ) -> None:
         """Test the len of async throttle.
 
         Args:
-            requests_arg: fixture that provides args
+            num_reqs_to_send_arg: number to send for len check
 
         """
         # create a throttle with a long enough interval to ensure that
         # we can populate the async_q and get the length before we start
         # removing requests from it
-        a_throttle = ThrottleAsync(
-            requests=requests_arg, seconds=requests_arg * 3
-        )  # 3 sec interval
+        a_throttle = Throttle(reqs_per_sec=0.3, async_mode=False)  # 3 sec interval
+
+        assert len(a_throttle) == 0
+
+        def dummy_func(an_event: threading.Event) -> None:
+            assert len(a_throttle) == 0
+            an_event.set()
+
+        event = threading.Event()
+
+        for i in range(num_reqs_to_send_arg):
+            a_throttle.send_request(dummy_func, event)
+
+        event.wait()
+
+        # assert is for 0 because there should be nothing queued
+        assert len(a_throttle) == 0
+
+    ####################################################################
+    # len checks with async_mode=True
+    ####################################################################
+    @pytest.mark.parametrize("num_reqs_to_send_arg", (1, 2, 3))
+    @etrace(omit_caller=True)
+    def test_throttle_len_async(
+        self,
+        num_reqs_to_send_arg: int,
+    ) -> None:
+        """Test the len of async throttle.
+
+        Args:
+            num_reqs_to_send_arg: number to send for len check
+
+        """
+        # create a throttle with a long enough interval to ensure that
+        # we can populate the async_q and get the length before we start
+        # removing requests from it
+        a_throttle = Throttle(reqs_per_sec=0.3, async_mode=True)  # 3 sec interval
 
         def dummy_func(an_event: threading.Event) -> None:
             an_event.set()
 
         event = threading.Event()
 
-        for i in range(requests_arg):
+        for i in range(num_reqs_to_send_arg):
             a_throttle.send_request(dummy_func, event)
 
         event.wait()
         # assert is for 1 less than queued because the first request
         # will be scheduled immediately
-        assert len(a_throttle) == requests_arg - 1
+        assert len(a_throttle) == num_reqs_to_send_arg - 1
         # start_shutdown returns when request_q cleanup completes
         a_throttle.start_shutdown()
         assert len(a_throttle) == 0
 
-        a_throttle.start_shutdown(shutdown_type=ThrottleAsync.TYPE_SHUTDOWN_HARD)
+        a_throttle.start_shutdown(shutdown_type=Throttle.TYPE_SHUTDOWN_HARD)
 
     ####################################################################
     # repr with mode async
     ####################################################################
-    @pytest.mark.parametrize("requests_arg", (1, 2, 3))
-    @pytest.mark.parametrize("seconds_arg", (0.3, 1, 2))
+    @pytest.mark.parametrize("reqs_per_sec_arg", (0.5, 1, 2))
+    @pytest.mark.parametrize("bucket_size_arg", (None, 1, 2.2))
+    @pytest.mark.parametrize("async_mode_arg", (None, False, True))
+    @pytest.mark.parametrize("async_q_size_arg", (None, 0, 20))
+    @pytest.mark.parametrize("name_arg", (None, "t1", "t2"))
     @etrace(omit_caller=True)
-    def test_throttle_repr_async(
-        self, requests_arg: int, seconds_arg: IntFloat
-    ) -> None:
-        """test_throttle repr mode 1 with various requests and seconds.
-
-        Args:
-            requests_arg: fixture that provides args
-            seconds_arg: fixture that provides args
-
-        """
-        ################################################################
-        # throttle with async_q_size not specified
-        ################################################################
-        a_throttle = ThrottleAsync(requests=requests_arg, seconds=seconds_arg)
-
-        t_id = id(a_throttle)
-
-        expected_repr_str = (
-            f"ThrottleAsync("
-            f"requests={requests_arg}, "
-            f"seconds={float(seconds_arg)}, "
-            f"name={t_id}, "
-            f"async_q_size={Throttle.DEFAULT_ASYNC_Q_SIZE})"
-        )
-
-        assert repr(a_throttle) == expected_repr_str
-
-        a_throttle.start_shutdown()
-
-        ################################################################
-        # throttle with async_q_size specified
-        ################################################################
-        q_size = requests_arg * 3
-        a_throttle = ThrottleAsync(
-            requests=requests_arg, seconds=seconds_arg, async_q_size=q_size
-        )
-
-        t_id = id(a_throttle)
-
-        expected_repr_str = (
-            f"ThrottleAsync("
-            f"requests={requests_arg}, "
-            f"seconds={float(seconds_arg)}, "
-            f"name={t_id}, "
-            f"async_q_size={q_size})"
-        )
-
-        assert repr(a_throttle) == expected_repr_str
-
-        a_throttle.start_shutdown()
-
-        ################################################################
-        # throttle with async_q_size not specified with name
-        ################################################################
-        a_throttle = ThrottleAsync(
-            requests=requests_arg, seconds=seconds_arg, name="my_t"
-        )
-
-        expected_repr_str = (
-            f"ThrottleAsync("
-            f"requests={requests_arg}, "
-            f"seconds={float(seconds_arg)}, "
-            f"name=my_t, "
-            f"async_q_size={Throttle.DEFAULT_ASYNC_Q_SIZE})"
-        )
-
-        assert repr(a_throttle) == expected_repr_str
-
-        a_throttle.start_shutdown()
-
-        ################################################################
-        # throttle with async_q_size specified with name
-        ################################################################
-        q_size = requests_arg * 3
-        t_name = "t_man"
-        a_throttle = ThrottleAsync(
-            requests=requests_arg, seconds=seconds_arg, name=t_name, async_q_size=q_size
-        )
-
-        expected_repr_str = (
-            f"ThrottleAsync("
-            f"requests={requests_arg}, "
-            f"seconds={float(seconds_arg)}, "
-            f"name={t_name}, "
-            f"async_q_size={q_size})"
-        )
-
-        assert repr(a_throttle) == expected_repr_str
-
-        a_throttle.start_shutdown()
-
-    ####################################################################
-    # repr with mode sync
-    ####################################################################
-    @pytest.mark.parametrize("requests_arg", (1, 2, 3))
-    @pytest.mark.parametrize("seconds_arg", (0.3, 1, 2))
-    def test_throttle_repr_sync(
+    def test_throttle_repr(
         self,
-        requests_arg: int,
-        seconds_arg: IntFloat,
-    ) -> None:
-        """test_throttle repr mode 2 with various requests and seconds.
-
-        Args:
-            requests_arg: fixture that provides args
-            seconds_arg: fixture that provides args
-        """
-        a_throttle = ThrottleSync(requests=requests_arg, seconds=seconds_arg)
-
-        t_id = id(a_throttle)
-
-        expected_repr_str = (
-            f"ThrottleSync("
-            f"requests={requests_arg}, "
-            f"seconds={float(seconds_arg)}, "
-            f"name={t_id})"
-        )
-
-        assert repr(a_throttle) == expected_repr_str
-
-        a_throttle = ThrottleSync(
-            requests=requests_arg, seconds=seconds_arg, name="my_synct"
-        )
-
-        expected_repr_str = (
-            f"ThrottleSync("
-            f"requests={requests_arg}, "
-            f"seconds={float(seconds_arg)}, "
-            f"name=my_synct)"
-        )
-
-        assert repr(a_throttle) == expected_repr_str
-
-    ####################################################################
-    # repr with mode sync early count
-    ####################################################################
-    @pytest.mark.parametrize("requests_arg", (1, 2, 3))
-    @pytest.mark.parametrize("seconds_arg", (0.3, 1, 2))
-    @pytest.mark.parametrize("early_count_arg", (1, 2, 3))
-    def test_throttle_repr_sync_ec(
-        self,
-        requests_arg: int,
-        seconds_arg: IntFloat,
-        early_count_arg: int,
-    ) -> None:
-        """test_throttle repr mode 2 with various requests and seconds.
-
-        Args:
-            requests_arg: fixture that provides args
-            seconds_arg: fixture that provides args
-            early_count_arg: fixture that provides args
-        """
-        a_throttle = ThrottleSyncEc(
-            requests=requests_arg, seconds=seconds_arg, early_count=early_count_arg
-        )
-
-        expected_repr_str = (
-            f"ThrottleSyncEc("
-            f"requests={requests_arg}, "
-            f"seconds={float(seconds_arg)}, "
-            f"name={id(a_throttle)}, "
-            f"early_count={early_count_arg})"
-        )
-
-        assert repr(a_throttle) == expected_repr_str
-
-        a_throttle = ThrottleSyncEc(
-            requests=requests_arg,
-            seconds=seconds_arg,
-            early_count=early_count_arg,
-            name="a_syncEC",
-        )
-
-        expected_repr_str = (
-            f"ThrottleSyncEc("
-            f"requests={requests_arg}, "
-            f"seconds={float(seconds_arg)}, "
-            f"name=a_syncEC, "
-            f"early_count={early_count_arg})"
-        )
-
-        assert repr(a_throttle) == expected_repr_str
-
-    ####################################################################
-    # repr with mode sync leaky bucket
-    ####################################################################
-    @pytest.mark.parametrize("requests_arg", (1, 2, 3))
-    @pytest.mark.parametrize("seconds_arg", (0.3, 1, 2))
-    @pytest.mark.parametrize("lb_threshold_arg", (1, 1.5, 3))
-    def test_throttle_repr_sync_lb(
-        self,
-        requests_arg: int,
-        seconds_arg: IntFloat,
-        lb_threshold_arg: IntFloat,
+        reqs_per_sec_arg: int,
+        bucket_size_arg: None | float | int,
+        async_mode_arg: None | bool,
+        async_q_size_arg: None | int,
+        name_arg: None | str,
     ) -> None:
         """test_throttle repr with various requests and seconds.
 
         Args:
-            requests_arg: fixture that provides args
-            seconds_arg: fixture that provides args
-            lb_threshold_arg: fixture that provides args
+            reqs_per_sec_arg: request per second
+            bucket_size_arg: leaky bucket size
+            async_mode_arg: async mode
+            async_q_size_arg: size of async q
+            name_arg: throttle name
+
+
         """
-        a_throttle = ThrottleSyncLb(
-            requests=requests_arg, seconds=seconds_arg, lb_threshold=lb_threshold_arg
-        )
+        ################################################################
+        # throttle with async_q_size_arg not specified
+        ################################################################
 
-        expected_repr_str = (
-            f"ThrottleSyncLb("
-            f"requests={requests_arg}, "
-            f"seconds={float(seconds_arg)}, "
-            f"name={id(a_throttle)}, "
-            f"lb_threshold={float(lb_threshold_arg)})"
-        )
+        # 0 0 0 0
+        if (
+            bucket_size_arg is None
+            and async_mode_arg is None
+            and async_q_size_arg is None
+            and name_arg is None
+        ):
+            a_throttle = Throttle(reqs_per_sec=reqs_per_sec_arg)
+            t_id = id(a_throttle)
+
+            expected_repr_str = (
+                f"Throttle("
+                f"reqs_per_sec={reqs_per_sec_arg}, "
+                f"bucket_size=1, "
+                f"async_mode=False, "
+                f"async_q_size=0, "
+                f"name={t_id}, "
+            )
+        # 0 0 0 1
+        elif (
+            bucket_size_arg is None
+            and async_mode_arg is None
+            and async_q_size_arg is None
+            and name_arg is not None
+        ):
+            a_throttle = Throttle(reqs_per_sec=reqs_per_sec_arg, name=name_arg)
+            t_id = id(a_throttle)
+
+            expected_repr_str = (
+                f"Throttle("
+                f"reqs_per_sec={reqs_per_sec_arg}, "
+                f"bucket_size=1, "
+                f"async_mode=False, "
+                f"async_q_size=0, "
+                f"name={name_arg}, "
+            )
+        # 0 0 1 0
+        elif (
+            bucket_size_arg is None
+            and async_mode_arg is None
+            and async_q_size_arg is not None
+            and name_arg is None
+        ):
+            # not a valid combo to have async_mode=False and async_q_size non-zero
+            async_q_size_arg = 0
+            a_throttle = Throttle(
+                reqs_per_sec=reqs_per_sec_arg, async_q_size=async_q_size_arg
+            )
+            t_id = id(a_throttle)
+
+            expected_repr_str = (
+                f"Throttle("
+                f"reqs_per_sec={reqs_per_sec_arg}, "
+                f"bucket_size=1, "
+                f"async_mode=False, "
+                f"async_q_size=0, "
+                f"name={t_id}, "
+            )
+        # 0 0 1 1
+        elif (
+            bucket_size_arg is None
+            and async_mode_arg is None
+            and async_q_size_arg is not None
+            and name_arg is not None
+        ):
+            # not a valid combo to have async_mode=False and async_q_size non-zero
+            async_q_size_arg = 0
+            a_throttle = Throttle(
+                reqs_per_sec=reqs_per_sec_arg,
+                async_q_size=async_q_size_arg,
+                name=name_arg,
+            )
+            t_id = id(a_throttle)
+
+            expected_repr_str = (
+                f"Throttle("
+                f"reqs_per_sec={reqs_per_sec_arg}, "
+                f"bucket_size=1, "
+                f"async_mode=False, "
+                f"async_q_size=0, "
+                f"name={name_arg}, "
+            )
+        # 0 1 0 0
+        elif (
+            bucket_size_arg is None
+            and async_mode_arg is not None
+            and async_q_size_arg is None
+            and name_arg is None
+        ):
+            if async_mode_arg:
+                async_q_size_arg = Throttle.DEFAULT_ASYNC_Q_SIZE
+            else:
+                async_q_size_arg = 0
+
+            a_throttle = Throttle(
+                reqs_per_sec=reqs_per_sec_arg, async_mode=async_mode_arg
+            )
+            t_id = id(a_throttle)
+
+            expected_repr_str = (
+                f"Throttle("
+                f"reqs_per_sec={reqs_per_sec_arg}, "
+                f"bucket_size=1, "
+                f"async_mode={async_mode_arg}, "
+                f"async_q_size={async_q_size_arg}, "
+                f"name={t_id}, "
+            )
+        # 0 1 0 1
+        elif (
+            bucket_size_arg is None
+            and async_mode_arg is not None
+            and async_q_size_arg is None
+            and name_arg is not None
+        ):
+            if async_mode_arg:
+                async_q_size_arg = Throttle.DEFAULT_ASYNC_Q_SIZE
+            else:
+                async_q_size_arg = 0
+            a_throttle = Throttle(
+                reqs_per_sec=reqs_per_sec_arg, async_mode=async_mode_arg, name=name_arg
+            )
+            t_id = id(a_throttle)
+
+            expected_repr_str = (
+                f"Throttle("
+                f"reqs_per_sec={reqs_per_sec_arg}, "
+                f"bucket_size=1, "
+                f"async_mode={async_mode_arg}, "
+                f"async_q_size={async_q_size_arg}, "
+                f"name={name_arg}, "
+            )
+        # 0 1 1 0
+        elif (
+            bucket_size_arg is None
+            and async_mode_arg is not None
+            and async_q_size_arg is not None
+            and name_arg is None
+        ):
+            if async_mode_arg:
+                if async_q_size_arg == 0:
+                    async_q_size_arg = 30
+            else:
+                async_q_size_arg = 0
+            a_throttle = Throttle(
+                reqs_per_sec=reqs_per_sec_arg,
+                async_mode=async_mode_arg,
+                async_q_size=async_q_size_arg,
+            )
+            t_id = id(a_throttle)
+
+            expected_repr_str = (
+                f"Throttle("
+                f"reqs_per_sec={reqs_per_sec_arg}, "
+                f"bucket_size=1, "
+                f"async_mode={async_mode_arg}, "
+                f"async_q_size={async_q_size_arg}, "
+                f"name={t_id}, "
+            )
+        # 0 1 1 1
+        elif (
+            bucket_size_arg is None
+            and async_mode_arg is not None
+            and async_q_size_arg is not None
+            and name_arg is not None
+        ):
+            if async_mode_arg:
+                if async_q_size_arg == 0:
+                    async_q_size_arg = 30
+            else:
+                async_q_size_arg = 0
+            a_throttle = Throttle(
+                reqs_per_sec=reqs_per_sec_arg,
+                async_mode=async_mode_arg,
+                async_q_size=async_q_size_arg,
+                name=name_arg,
+            )
+            t_id = id(a_throttle)
+
+            expected_repr_str = (
+                f"Throttle("
+                f"reqs_per_sec={reqs_per_sec_arg}, "
+                f"bucket_size=1, "
+                f"async_mode={async_mode_arg}, "
+                f"async_q_size={async_q_size_arg}, "
+                f"name={name_arg}, "
+            )
+
+        # 1 0 0 0
+        if (
+            bucket_size_arg is not None
+            and async_mode_arg is None
+            and async_q_size_arg is None
+            and name_arg is None
+        ):
+            a_throttle = Throttle(
+                reqs_per_sec=reqs_per_sec_arg, bucket_size=bucket_size_arg
+            )
+            t_id = id(a_throttle)
+
+            expected_repr_str = (
+                f"Throttle("
+                f"reqs_per_sec={reqs_per_sec_arg}, "
+                f"bucket_size={bucket_size_arg}, "
+                f"async_mode=False, "
+                f"async_q_size=0, "
+                f"name={t_id}, "
+            )
+        # 1 0 0 1
+        elif (
+            bucket_size_arg is not None
+            and async_mode_arg is None
+            and async_q_size_arg is None
+            and name_arg is not None
+        ):
+            a_throttle = Throttle(
+                reqs_per_sec=reqs_per_sec_arg,
+                bucket_size=bucket_size_arg,
+                name=name_arg,
+            )
+            t_id = id(a_throttle)
+
+            expected_repr_str = (
+                f"Throttle("
+                f"reqs_per_sec={reqs_per_sec_arg}, "
+                f"bucket_size={bucket_size_arg}, "
+                f"async_mode=False, "
+                f"async_q_size=0, "
+                f"name={name_arg}, "
+            )
+        # 1 0 1 0
+        elif (
+            bucket_size_arg is not None
+            and async_mode_arg is None
+            and async_q_size_arg is not None
+            and name_arg is None
+        ):
+            # not a valid combo to have async_mode=False and async_q_size non-zero
+            async_q_size_arg = 0
+            a_throttle = Throttle(
+                reqs_per_sec=reqs_per_sec_arg,
+                bucket_size=bucket_size_arg,
+                async_q_size=async_q_size_arg,
+            )
+            t_id = id(a_throttle)
+
+            expected_repr_str = (
+                f"Throttle("
+                f"reqs_per_sec={reqs_per_sec_arg}, "
+                f"bucket_size={bucket_size_arg}, "
+                f"async_mode=False, "
+                f"async_q_size=0, "
+                f"name={t_id}, "
+            )
+        # 1 0 1 1
+        elif (
+            bucket_size_arg is not None
+            and async_mode_arg is None
+            and async_q_size_arg is not None
+            and name_arg is not None
+        ):
+            # not a valid combo to have async_mode=False and async_q_size non-zero
+            async_q_size_arg = 0
+            a_throttle = Throttle(
+                reqs_per_sec=reqs_per_sec_arg,
+                bucket_size=bucket_size_arg,
+                async_q_size=async_q_size_arg,
+                name=name_arg,
+            )
+            t_id = id(a_throttle)
+
+            expected_repr_str = (
+                f"Throttle("
+                f"reqs_per_sec={reqs_per_sec_arg}, "
+                f"bucket_size={bucket_size_arg}, "
+                f"async_mode=False, "
+                f"async_q_size=0, "
+                f"name={name_arg}, "
+            )
+        # 1 1 0 0
+        elif (
+            bucket_size_arg is not None
+            and async_mode_arg is not None
+            and async_q_size_arg is None
+            and name_arg is None
+        ):
+            if async_mode_arg:
+                async_q_size_arg = Throttle.DEFAULT_ASYNC_Q_SIZE
+            else:
+                async_q_size_arg = 0
+
+            a_throttle = Throttle(
+                reqs_per_sec=reqs_per_sec_arg,
+                bucket_size=bucket_size_arg,
+                async_mode=async_mode_arg,
+            )
+            t_id = id(a_throttle)
+
+            expected_repr_str = (
+                f"Throttle("
+                f"reqs_per_sec={reqs_per_sec_arg}, "
+                f"bucket_size={bucket_size_arg}, "
+                f"async_mode={async_mode_arg}, "
+                f"async_q_size={async_q_size_arg}, "
+                f"name={t_id}, "
+            )
+        # 1 1 0 1
+        elif (
+            bucket_size_arg is not None
+            and async_mode_arg is not None
+            and async_q_size_arg is None
+            and name_arg is not None
+        ):
+            if async_mode_arg:
+                async_q_size_arg = Throttle.DEFAULT_ASYNC_Q_SIZE
+            else:
+                async_q_size_arg = 0
+            a_throttle = Throttle(
+                reqs_per_sec=reqs_per_sec_arg,
+                bucket_size=bucket_size_arg,
+                async_mode=async_mode_arg,
+                name=name_arg,
+            )
+            t_id = id(a_throttle)
+
+            expected_repr_str = (
+                f"Throttle("
+                f"reqs_per_sec={reqs_per_sec_arg}, "
+                f"bucket_size={bucket_size_arg}, "
+                f"async_mode={async_mode_arg}, "
+                f"async_q_size={async_q_size_arg}, "
+                f"name={name_arg}, "
+            )
+        # 1 1 1 0
+        elif (
+            bucket_size_arg is not None
+            and async_mode_arg is not None
+            and async_q_size_arg is not None
+            and name_arg is None
+        ):
+            if async_mode_arg:
+                if async_q_size_arg == 0:
+                    async_q_size_arg = 30
+            else:
+                async_q_size_arg = 0
+            a_throttle = Throttle(
+                reqs_per_sec=reqs_per_sec_arg,
+                bucket_size=bucket_size_arg,
+                async_mode=async_mode_arg,
+                async_q_size=async_q_size_arg,
+            )
+            t_id = id(a_throttle)
+
+            expected_repr_str = (
+                f"Throttle("
+                f"reqs_per_sec={reqs_per_sec_arg}, "
+                f"bucket_size={bucket_size_arg}, "
+                f"async_mode={async_mode_arg}, "
+                f"async_q_size={async_q_size_arg}, "
+                f"name={t_id}, "
+            )
+        # 1 1 1 1
+        elif (
+            bucket_size_arg is not None
+            and async_mode_arg is not None
+            and async_q_size_arg is not None
+            and name_arg is not None
+        ):
+            if async_mode_arg:
+                if async_q_size_arg == 0:
+                    async_q_size_arg = 30
+            else:
+                async_q_size_arg = 0
+            a_throttle = Throttle(
+                reqs_per_sec=reqs_per_sec_arg,
+                bucket_size=bucket_size_arg,
+                async_mode=async_mode_arg,
+                async_q_size=async_q_size_arg,
+                name=name_arg,
+            )
+            t_id = id(a_throttle)
+
+            expected_repr_str = (
+                f"Throttle("
+                f"reqs_per_sec={reqs_per_sec_arg}, "
+                f"bucket_size={bucket_size_arg}, "
+                f"async_mode={async_mode_arg}, "
+                f"async_q_size={async_q_size_arg}, "
+                f"name={name_arg}, "
+            )
+        else:
+            # cause failure since we should never reach this else
+            a_throttle = Throttle(reqs_per_sec=-1)
+            expected_repr_str = (
+                f"Throttle("
+                f"reqs_per_sec=None, "
+                f"bucket_size=None, "
+                f"async_mode=None, "
+                f"async_q_size=None, "
+                f"name=None, "
+            )
 
         assert repr(a_throttle) == expected_repr_str
 
-        a_throttle = ThrottleSyncLb(
-            requests=requests_arg,
-            seconds=seconds_arg,
-            lb_threshold=lb_threshold_arg,
-            name="a_syncLb",
-        )
-
-        expected_repr_str = (
-            f"ThrottleSyncLb("
-            f"requests={requests_arg}, "
-            f"seconds={float(seconds_arg)}, "
-            f"name=a_syncLb, "
-            f"lb_threshold={float(lb_threshold_arg)})"
-        )
-
-        assert repr(a_throttle) == expected_repr_str
+        if async_mode_arg:
+            a_throttle.start_shutdown()
 
     ####################################################################
     # test_throttle_async_queue_full
@@ -580,7 +796,7 @@ class TestThrottleBasic:
         def f1() -> None:
             print("42")
 
-        a_throttle = ThrottleAsync(requests=1, seconds=1, async_q_size=1)
+        a_throttle = Throttle(reqs_per_sec=1, async_q_size=1)
 
         for _ in range(3):
             a_throttle.send_request(f1)
@@ -602,7 +818,7 @@ class TestThrottleBasic:
             time.sleep(1)
             a_throttle.start_shutdown(timeout=0.001)
 
-        a_throttle = ThrottleAsync(requests=1, seconds=3, async_q_size=1)
+        a_throttle = Throttle(reqs_per_sec=1, seconds=3, async_q_size=1)
 
         f2_thread = threading.Thread(target=f2)
         f2_thread.start()
@@ -624,25 +840,25 @@ class TestThrottleDecoratorErrors:
         ################################################################
         # bad requests
         ################################################################
-        with pytest.raises(IncorrectRequestsSpecified):
+        with pytest.raises(IncorrectReqsPerSecSpecified):
 
-            @throttle_async(requests=0, seconds=1)
+            @throttle_async(reqs_per_sec=0)
             def f1() -> None:
                 print("42")
 
             f1()
 
-        with pytest.raises(IncorrectRequestsSpecified):
+        with pytest.raises(IncorrectReqsPerSecSpecified):
 
-            @throttle_async(requests=-1, seconds=1)
+            @throttle_async(reqs_per_sec=-1)
             def f2() -> None:
                 print("42")
 
             f2()
 
-        with pytest.raises(IncorrectRequestsSpecified):
+        with pytest.raises(IncorrectReqsPerSecSpecified):
 
-            @throttle_async(requests="1", seconds=1)  # type: ignore
+            @throttle_async(reqs_per_sec="1")  # type: ignore
             def f3() -> None:
                 print("42")
 
@@ -652,7 +868,7 @@ class TestThrottleDecoratorErrors:
         ################################################################
         with pytest.raises(IncorrectSecondsSpecified):
 
-            @throttle_async(requests=1, seconds=0)
+            @throttle_async(reqs_per_sec=1, seconds=0)
             def f4() -> None:
                 print("42")
 
@@ -660,14 +876,14 @@ class TestThrottleDecoratorErrors:
 
         with pytest.raises(IncorrectSecondsSpecified):
 
-            @throttle_async(requests=1, seconds=-1)
+            @throttle_async(reqs_per_sec=1, seconds=-1)
             def f5() -> None:
                 print("42")
 
             f5()
         with pytest.raises(IncorrectSecondsSpecified):
 
-            @throttle_async(requests=1, seconds="1")  # type: ignore
+            @throttle_async(reqs_per_sec=1, seconds="1")  # type: ignore
             def f6() -> None:
                 print("42")
 
@@ -677,28 +893,28 @@ class TestThrottleDecoratorErrors:
         # # bad mode
         # ################################################################
         # with pytest.raises(IncorrectModeSpecified):
-        #     @throttle(requests=1,
+        #     @throttle(reqs_per_sec=1,
         #               seconds=1,
         #               mode=-1)
         #     def f1() -> None:
         #         print('42')
         #     f1()
         # with pytest.raises(IncorrectModeSpecified):
-        #     @throttle(requests=1,
+        #     @throttle(reqs_per_sec=1,
         #               seconds=1,
         #               mode=0)
         #     def f1() -> None:
         #         print('42')
         #     f1()
         # with pytest.raises(IncorrectModeSpecified):
-        #     @throttle(requests=1,
+        #     @throttle(reqs_per_sec=1,
         #               seconds=1,
         #               mode=MODE_MAX+1)
         #     def f1() -> None:
         #         print('42')
         #     f1()
         # with pytest.raises(IncorrectModeSpecified):
-        #     @throttle(requests=1,
+        #     @throttle(reqs_per_sec=1,
         #               seconds=1,
         #               mode='1')  # type: ignore
         #     def f1() -> None:
@@ -710,21 +926,21 @@ class TestThrottleDecoratorErrors:
         ################################################################
         with pytest.raises(IncorrectAsyncQSizeSpecified):
 
-            @throttle_async(requests=1, seconds=1, async_q_size=-1)
+            @throttle_async(reqs_per_sec=1, async_q_size=-1)
             def f7() -> None:
                 print("42")
 
             f7()
         with pytest.raises(IncorrectAsyncQSizeSpecified):
 
-            @throttle_async(requests=1, seconds=1, async_q_size=0)
+            @throttle_async(reqs_per_sec=1, async_q_size=0)
             def f8() -> None:
                 print("42")
 
             f8()
         with pytest.raises(IncorrectAsyncQSizeSpecified):
 
-            @throttle_async(requests=1, seconds=1, async_q_size="1")  # type: ignore
+            @throttle_async(reqs_per_sec=1, async_q_size="1")  # type: ignore
             def f9() -> None:
                 print("42")
 
@@ -735,14 +951,14 @@ class TestThrottleDecoratorErrors:
         ################################################################
         with pytest.raises(IncorrectEarlyCountSpecified):
 
-            @throttle_sync_ec(requests=1, seconds=1, early_count=-1)
+            @throttle_sync_ec(reqs_per_sec=1, early_count=-1)
             def f10() -> None:
                 print("42")
 
             f10()
         with pytest.raises(IncorrectEarlyCountSpecified):
 
-            @throttle_sync_ec(requests=1, seconds=1, early_count="1")  # type: ignore
+            @throttle_sync_ec(reqs_per_sec=1, early_count="1")  # type: ignore
             def f11() -> None:
                 print("42")
 
@@ -752,14 +968,14 @@ class TestThrottleDecoratorErrors:
         ################################################################
         with pytest.raises(IncorrectLbThresholdSpecified):
 
-            @throttle_sync_lb(requests=1, seconds=1, lb_threshold=-1)
+            @throttle_sync_lb(reqs_per_sec=1, lb_threshold=-1)
             def f12() -> None:
                 print("42")
 
             f12()
         with pytest.raises(IncorrectLbThresholdSpecified):
 
-            @throttle_sync_lb(requests=1, seconds=1, lb_threshold="1")  # type: ignore
+            @throttle_sync_lb(reqs_per_sec=1, lb_threshold="1")  # type: ignore
             def f13() -> None:
                 print("42")
 
@@ -801,7 +1017,7 @@ class TestThrottleDecoratorRequestErrors:
         )
         with pytest.raises(ZeroDivisionError):
 
-            @throttle_sync(requests=1, seconds=1)
+            @throttle_sync(reqs_per_sec=1)
             def f1() -> None:
                 ans = 42 / 0
                 print(f"{ans=}")
@@ -840,7 +1056,7 @@ class TestThrottleDecoratorRequestErrors:
 
         with pytest.raises(ZeroDivisionError, match=zero_div_err_pattern):
 
-            @throttle_async(requests=1, seconds=1)
+            @throttle_async(reqs_per_sec=1)
             def f2() -> None:
                 ans = 42 / 0
                 print(f"{ans=}")
@@ -874,7 +1090,7 @@ class TestThrottleDecoratorRequestErrors:
         )
         with pytest.raises(ZeroDivisionError):
 
-            @throttle_sync_ec(requests=1, seconds=1, early_count=2, name="my_f3")
+            @throttle_sync_ec(reqs_per_sec=1, early_count=2, name="my_f3")
             def f3() -> None:
                 ans = 42 / 0
                 print(f"{ans=}")
@@ -894,7 +1110,7 @@ class TestThrottleDecoratorRequestErrors:
         )
         with pytest.raises(ZeroDivisionError):
 
-            @throttle_sync_lb(requests=1, seconds=1, lb_threshold=2)
+            @throttle_sync_lb(reqs_per_sec=1, lb_threshold=2)
             def f4() -> None:
                 ans = 42 / 0
                 print(f"{ans=}")
@@ -954,7 +1170,7 @@ class TestThrottleDecoratorRequestErrors:
         )
         with pytest.raises(ZeroDivisionError, match=zero_div_err_pattern):
 
-            @throttle_async(requests=1, seconds=1)
+            @throttle_async(reqs_per_sec=1)
             def f2() -> None:
                 ans = 42 / 0
                 print(f"{ans=}")
@@ -1020,7 +1236,7 @@ class TestThrottle:
         """
         send_interval = 0.0
         self.throttle_router(
-            requests=1,
+            reqs_per_sec=1,
             seconds=1,
             mode=MODE_ASYNC,
             early_count=0,
@@ -1032,23 +1248,26 @@ class TestThrottle:
     ####################################################################
     # test_throttle_async
     ####################################################################
-    @pytest.mark.parametrize("requests_arg", (1, 2, 3))
+    @pytest.mark.parametrize("reqs_per_sec_arg", (1, 2, 3))
     @pytest.mark.parametrize("seconds_arg", (0.3, 1, 2))
     @pytest.mark.parametrize("send_interval_mult_arg", (0.0, 0.9, 1.0, 1.1))
     def test_throttle_async(
-        self, requests_arg: int, seconds_arg: IntFloat, send_interval_mult_arg: float
+        self,
+        reqs_per_sec_arg: int,
+        seconds_arg: IntFloat,
+        send_interval_mult_arg: float,
     ) -> None:
         """Method to start throttle mode1 tests.
 
         Args:
-            requests_arg: number of requests per interval from fixture
+            reqs_per_sec_arg: number of requests per interval from fixture
             seconds_arg: interval for number of requests from fixture
             send_interval_mult_arg: interval between each send of a
                                       request
         """
-        send_interval = (seconds_arg / requests_arg) * send_interval_mult_arg
+        send_interval = (seconds_arg / reqs_per_sec_arg) * send_interval_mult_arg
         self.throttle_router(
-            requests=requests_arg,
+            reqs_per_sec=reqs_per_sec_arg,
             seconds=seconds_arg,
             mode=MODE_ASYNC,
             early_count=0,
@@ -1060,23 +1279,23 @@ class TestThrottle:
     ####################################################################
     # test_throttle_async
     ####################################################################
-    @pytest.mark.parametrize("requests_arg", (1, 2, 3))
+    @pytest.mark.parametrize("reqs_per_sec_arg", (1, 2, 3))
     @pytest.mark.parametrize("seconds_arg", (0.3, 1, 2))
     def test_throttle_multi_async(
         self,
-        requests_arg: int,
+        reqs_per_sec_arg: int,
         seconds_arg: IntFloat,
     ) -> None:
         """Method to start throttle multi tests.
 
         Args:
-            requests_arg: number of requests per interval from fixture
+            reqs_per_sec_arg: number of requests per interval from fixture
             seconds_arg: interval for number of requests from fixture
 
         """
         send_interval = 0.0
         self.throttle_router(
-            requests=requests_arg,
+            reqs_per_sec=reqs_per_sec_arg,
             seconds=seconds_arg,
             mode=MODE_ASYNC,
             early_count=0,
@@ -1098,7 +1317,7 @@ class TestThrottle:
         """
         send_interval = 0.2
         self.throttle_router(
-            requests=2,
+            reqs_per_sec=2,
             seconds=1,
             mode=MODE_SYNC,
             early_count=0,
@@ -1110,23 +1329,26 @@ class TestThrottle:
     ####################################################################
     # test_throttle_sync
     ####################################################################
-    @pytest.mark.parametrize("requests_arg", (1, 2, 3))
+    @pytest.mark.parametrize("reqs_per_sec_arg", (1, 2, 3))
     @pytest.mark.parametrize("seconds_arg", (0.3, 1, 2))
     @pytest.mark.parametrize("send_interval_mult_arg", (0.0, 0.9, 1.0, 1.1))
     def test_throttle_sync(
-        self, requests_arg: int, seconds_arg: IntFloat, send_interval_mult_arg: float
+        self,
+        reqs_per_sec_arg: int,
+        seconds_arg: IntFloat,
+        send_interval_mult_arg: float,
     ) -> None:
         """Method to start throttle sync tests.
 
         Args:
-            requests_arg: number of requests per interval from fixture
+            reqs_per_sec_arg: number of requests per interval from fixture
             seconds_arg: interval for number of requests from fixture
             send_interval_mult_arg: interval between each send of a
                                       request
         """
-        send_interval = (seconds_arg / requests_arg) * send_interval_mult_arg
+        send_interval = (seconds_arg / reqs_per_sec_arg) * send_interval_mult_arg
         self.throttle_router(
-            requests=requests_arg,
+            reqs_per_sec=reqs_per_sec_arg,
             seconds=seconds_arg,
             mode=MODE_SYNC,
             early_count=0,
@@ -1138,23 +1360,23 @@ class TestThrottle:
     ####################################################################
     # test_throttle_async
     ####################################################################
-    @pytest.mark.parametrize("requests_arg", (1, 2, 3))
+    @pytest.mark.parametrize("reqs_per_sec_arg", (1, 2, 3))
     @pytest.mark.parametrize("seconds_arg", (0.3, 1, 2))
     def test_throttle_multi_sync(
         self,
-        requests_arg: int,
+        reqs_per_sec_arg: int,
         seconds_arg: IntFloat,
     ) -> None:
         """Method to start throttle multi tests.
 
         Args:
-            requests_arg: number of requests per interval from fixture
+            reqs_per_sec_arg: number of requests per interval from fixture
             seconds_arg: interval for number of requests from fixture
 
         """
         send_interval = 0.0
         self.throttle_router(
-            requests=requests_arg,
+            reqs_per_sec=reqs_per_sec_arg,
             seconds=seconds_arg,
             mode=MODE_SYNC,
             early_count=0,
@@ -1177,7 +1399,7 @@ class TestThrottle:
         """
         send_interval = 0.4
         self.throttle_sync_ec_router(
-            requests=3,
+            reqs_per_sec=3,
             seconds=1,
             mode=MODE_SYNC_EC,
             early_count=1,
@@ -1189,13 +1411,13 @@ class TestThrottle:
     ####################################################################
     # test_throttle_sync_ec
     ####################################################################
-    @pytest.mark.parametrize("requests_arg", (1, 2, 3))
+    @pytest.mark.parametrize("reqs_per_sec_arg", (1, 2, 3))
     @pytest.mark.parametrize("seconds_arg", (0.3, 1, 2))
     @pytest.mark.parametrize("early_count_arg", (1, 2, 3))
     @pytest.mark.parametrize("send_interval_mult_arg", (0.0, 0.9, 1.0, 1.1))
     def test_throttle_sync_ec(
         self,
-        requests_arg: int,
+        reqs_per_sec_arg: int,
         seconds_arg: IntFloat,
         early_count_arg: int,
         send_interval_mult_arg: float,
@@ -1203,15 +1425,15 @@ class TestThrottle:
         """Method to start throttle sync_ec tests.
 
         Args:
-            requests_arg: number of requests per interval from fixture
+            reqs_per_sec_arg: number of requests per interval from fixture
             seconds_arg: interval for number of requests from fixture
             early_count_arg: count used for sync with early count algo
             send_interval_mult_arg: interval between each send of a
                                       request
         """
-        send_interval = (seconds_arg / requests_arg) * send_interval_mult_arg
+        send_interval = (seconds_arg / reqs_per_sec_arg) * send_interval_mult_arg
         self.throttle_sync_ec_router(
-            requests=requests_arg,
+            reqs_per_sec=reqs_per_sec_arg,
             seconds=seconds_arg,
             mode=MODE_SYNC_EC,
             early_count=early_count_arg,
@@ -1223,23 +1445,23 @@ class TestThrottle:
     ####################################################################
     # test_throttle_async
     ####################################################################
-    @pytest.mark.parametrize("requests_arg", (1, 2, 3))
+    @pytest.mark.parametrize("reqs_per_sec_arg", (1, 2, 3))
     @pytest.mark.parametrize("seconds_arg", (0.3, 1, 2))
     @pytest.mark.parametrize("early_count_arg", (1, 2, 3))
     def test_throttle_multi_sync_ec(
-        self, requests_arg: int, seconds_arg: IntFloat, early_count_arg: int
+        self, reqs_per_sec_arg: int, seconds_arg: IntFloat, early_count_arg: int
     ) -> None:
         """Method to start throttle multi tests.
 
         Args:
-            requests_arg: number of requests per interval from fixture
+            reqs_per_sec_arg: number of requests per interval from fixture
             seconds_arg: interval for number of requests from fixture
             early_count_arg: count used for sync with early count algo
 
         """
         send_interval = 0.0
         self.throttle_sync_ec_router(
-            requests=requests_arg,
+            reqs_per_sec=reqs_per_sec_arg,
             seconds=seconds_arg,
             mode=MODE_SYNC_EC,
             early_count=early_count_arg,
@@ -1261,7 +1483,7 @@ class TestThrottle:
         """
         send_interval = 0.5
         self.throttle_router(
-            requests=4,
+            reqs_per_sec=4,
             seconds=1,
             mode=MODE_SYNC_LB,
             early_count=0,
@@ -1273,13 +1495,13 @@ class TestThrottle:
     ####################################################################
     # test_throttle_sync_lb
     ####################################################################
-    @pytest.mark.parametrize("requests_arg", (1, 2, 3))
+    @pytest.mark.parametrize("reqs_per_sec_arg", (1, 2, 3))
     @pytest.mark.parametrize("seconds_arg", (0.3, 1, 2))
     @pytest.mark.parametrize("lb_threshold_arg", (0.5, 1, 1.5, 3))
     @pytest.mark.parametrize("send_interval_mult_arg", (0.0, 0.9, 1.0, 1.1))
     def test_throttle_sync_lb(
         self,
-        requests_arg: int,
+        reqs_per_sec_arg: int,
         seconds_arg: IntFloat,
         lb_threshold_arg: IntFloat,
         send_interval_mult_arg: float,
@@ -1287,15 +1509,15 @@ class TestThrottle:
         """Method to start throttle sync_lb tests.
 
         Args:
-            requests_arg: number of requests per interval from fixture
+            reqs_per_sec_arg: number of requests per interval from fixture
             seconds_arg: interval for number of requests from fixture
             lb_threshold_arg: threshold used with sync leaky bucket algo
             send_interval_mult_arg: interval between each send of a
                                       request
         """
-        send_interval = (seconds_arg / requests_arg) * send_interval_mult_arg
+        send_interval = (seconds_arg / reqs_per_sec_arg) * send_interval_mult_arg
         self.throttle_router(
-            requests=requests_arg,
+            reqs_per_sec=reqs_per_sec_arg,
             seconds=seconds_arg,
             mode=MODE_SYNC_LB,
             early_count=0,
@@ -1307,23 +1529,23 @@ class TestThrottle:
     ####################################################################
     # test_throttle_multi_sync_lb
     ####################################################################
-    @pytest.mark.parametrize("requests_arg", (1, 2, 3))
+    @pytest.mark.parametrize("reqs_per_sec_arg", (1, 2, 3))
     @pytest.mark.parametrize("seconds_arg", (0.3, 1, 2))
     @pytest.mark.parametrize("lb_threshold_arg", (1, 1.5, 3))
     def test_throttle_multi_sync_lb(
-        self, requests_arg: int, seconds_arg: IntFloat, lb_threshold_arg: int
+        self, reqs_per_sec_arg: int, seconds_arg: IntFloat, lb_threshold_arg: int
     ) -> None:
         """Method to start throttle multi tests.
 
         Args:
-            requests_arg: number of requests per interval from fixture
+            reqs_per_sec_arg: number of requests per interval from fixture
             seconds_arg: interval for number of requests from fixture
             lb_threshold_arg: threshold used with sync leaky bucket algo
 
         """
         send_interval = 0.0
         self.throttle_router(
-            requests=requests_arg,
+            reqs_per_sec=reqs_per_sec_arg,
             seconds=seconds_arg,
             mode=MODE_SYNC_LB,
             early_count=0,
@@ -1442,18 +1664,18 @@ class TestThrottle:
         # Instantiate Throttle
         ##############################################################
         if mode == MODE_ASYNC:
-            a_throttle = ThrottleAsync(
-                requests=requests, seconds=seconds, async_q_size=num_reqs_to_do
+            a_throttle = Throttle(
+                reqs_per_sec=requests, seconds=seconds, async_q_size=num_reqs_to_do
             )
         elif mode == MODE_SYNC:
-            a_throttle = ThrottleSync(requests=requests, seconds=seconds)
+            a_throttle = ThrottleSync(reqs_per_sec=requests, seconds=seconds)
         elif mode == MODE_SYNC_EC:
             a_throttle = ThrottleSyncEc(
-                requests=requests, seconds=seconds, early_count=early_count
+                reqs_per_sec=requests, seconds=seconds, early_count=early_count
             )
         elif mode == MODE_SYNC_LB:
             a_throttle = ThrottleSyncLb(
-                requests=requests, seconds=seconds, lb_threshold=lb_threshold
+                reqs_per_sec=requests, seconds=seconds, lb_threshold=lb_threshold
             )
         else:
             raise InvalidModeNum("The Mode must be 1, 2, 3, or 4")
@@ -1462,12 +1684,12 @@ class TestThrottle:
         # Instantiate Request Validator
         ################################################################
         request_validator = RequestValidator(
-            requests=requests,
+            reqs_per_sec=requests,
             seconds=seconds,
             mode=mode,
             early_count=early_count,
             lb_threshold=lb_threshold,
-            total_requests=num_reqs_to_do,
+            total_reqs_per_sec=num_reqs_to_do,
             send_interval=send_interval,
             send_intervals=send_intervals,
             t_throttle=a_throttle,
@@ -1479,9 +1701,7 @@ class TestThrottle:
             self.make_reqs2(request_validator, request_style)
             if mode == MODE_ASYNC:
                 logger.debug(f"throttle_router doing throttle shutdown")
-                a_throttle.start_shutdown(
-                    shutdown_type=ThrottleAsync.TYPE_SHUTDOWN_SOFT
-                )
+                a_throttle.start_shutdown(shutdown_type=Throttle.TYPE_SHUTDOWN_SOFT)
             logger.debug(f"throttle_router validating series")
             request_validator.validate_series2()  # validate for the series
         else:
@@ -1510,9 +1730,7 @@ class TestThrottle:
 
             if mode == MODE_ASYNC:
                 logger.debug(f"throttle_router doing throttle shutdown")
-                a_throttle.start_shutdown(
-                    shutdown_type=ThrottleAsync.TYPE_SHUTDOWN_SOFT
-                )
+                a_throttle.start_shutdown(shutdown_type=Throttle.TYPE_SHUTDOWN_SOFT)
 
             logger.debug(f"throttle_router validating series")
             request_validator.validate_series2()
@@ -1555,18 +1773,18 @@ class TestThrottle:
         ################################################################
         # Instantiate Throttle
         ################################################################
-        a_throttle = ThrottleSync(requests=requests, seconds=seconds)
+        a_throttle = ThrottleSync(reqs_per_sec=requests, seconds=seconds)
 
         ################################################################
         # Instantiate Request Validator
         ################################################################
         request_validator = RequestValidator(
-            requests=requests,
+            reqs_per_sec=requests,
             seconds=seconds,
             mode=mode,
             early_count=early_count,
             lb_threshold=lb_threshold,
-            total_requests=num_reqs_to_do,
+            total_reqs_per_sec=num_reqs_to_do,
             send_interval=send_interval,
             send_intervals=send_intervals,
             t_throttle=a_throttle,
@@ -1636,19 +1854,19 @@ class TestThrottle:
         # Instantiate Throttle
         ################################################################
         a_throttle = ThrottleSyncEc(
-            requests=requests, seconds=seconds, early_count=early_count
+            reqs_per_sec=requests, seconds=seconds, early_count=early_count
         )
 
         ################################################################
         # Instantiate Request Validator
         ################################################################
         request_validator = RequestValidator(
-            requests=requests,
+            reqs_per_sec=requests,
             seconds=seconds,
             mode=mode,
             early_count=early_count,
             lb_threshold=lb_threshold,
-            total_requests=num_reqs_to_do,
+            total_reqs_per_sec=num_reqs_to_do,
             send_interval=send_interval,
             send_intervals=send_intervals,
             t_throttle=a_throttle,
@@ -1720,19 +1938,19 @@ class TestThrottle:
         # Instantiate Throttle
         ################################################################
         a_throttle = ThrottleSyncLb(
-            requests=requests, seconds=seconds, lb_threshold=lb_threshold
+            reqs_per_sec=requests, seconds=seconds, lb_threshold=lb_threshold
         )
 
         ################################################################
         # Instantiate Request Validator
         ################################################################
         request_validator = RequestValidator(
-            requests=requests,
+            reqs_per_sec=requests,
             seconds=seconds,
             mode=mode,
             early_count=early_count,
             lb_threshold=lb_threshold,
-            total_requests=num_reqs_to_do,
+            total_reqs_per_sec=num_reqs_to_do,
             send_interval=send_interval,
             send_intervals=send_intervals,
             t_throttle=a_throttle,
@@ -1805,20 +2023,20 @@ class TestThrottle:
         ################################################################
         # Instantiate Throttle
         ################################################################
-        a_throttle = ThrottleAsync(
-            requests=requests, seconds=seconds, async_q_size=num_reqs_to_do
+        a_throttle = Throttle(
+            reqs_per_sec=requests, seconds=seconds, async_q_size=num_reqs_to_do
         )
 
         ################################################################
         # Instantiate Request Validator
         ################################################################
         request_validator = RequestValidator(
-            requests=requests,
+            reqs_per_sec=requests,
             seconds=seconds,
             mode=mode,
             early_count=early_count,
             lb_threshold=lb_threshold,
-            total_requests=num_reqs_to_do,
+            total_reqs_per_sec=num_reqs_to_do,
             send_interval=send_interval,
             send_intervals=send_intervals,
             t_throttle=a_throttle,
@@ -1827,7 +2045,7 @@ class TestThrottle:
 
         if num_threads == 0:
             self.make_reqs(request_validator, request_style)
-            a_throttle.start_shutdown(shutdown_type=ThrottleAsync.TYPE_SHUTDOWN_SOFT)
+            a_throttle.start_shutdown(shutdown_type=Throttle.TYPE_SHUTDOWN_SOFT)
             request_validator.validate_series()  # validate for the series
         else:
             mr_threads = []
@@ -1846,7 +2064,7 @@ class TestThrottle:
             for mr_thread in mr_threads:
                 mr_thread.join()
 
-            a_throttle.start_shutdown(shutdown_type=ThrottleAsync.TYPE_SHUTDOWN_SOFT)
+            a_throttle.start_shutdown(shutdown_type=Throttle.TYPE_SHUTDOWN_SOFT)
 
             for start_times in start_times_list:
                 request_validator.start_times += start_times.copy()
@@ -2157,7 +2375,7 @@ class TestThrottle:
         # Instantiate Request Validator
         ################################################################
         pauser = Pauser()
-        requests_arg = 4
+        reqs_per_sec_arg = 4
         seconds_arg = 1
         send_interval = 0.1
 
@@ -2174,7 +2392,7 @@ class TestThrottle:
         ################################################################
         # f0
         ################################################################
-        @throttle_async(requests=requests_arg, seconds=seconds_arg)
+        @throttle_async(reqs_per_sec=reqs_per_sec_arg, seconds=seconds_arg)
         def f0() -> Any:
             request_validator.callback0()
 
@@ -2183,7 +2401,7 @@ class TestThrottle:
         ################################################################
         # f1
         ################################################################
-        @throttle_async(requests=requests_arg, seconds=seconds_arg)
+        @throttle_async(reqs_per_sec=reqs_per_sec_arg, seconds=seconds_arg)
         def f1(idx: int) -> Any:
             request_validator.callback1(idx)
 
@@ -2192,16 +2410,16 @@ class TestThrottle:
         ################################################################
         # f2
         ################################################################
-        @throttle_async(requests=requests_arg, seconds=seconds_arg)
+        @throttle_async(reqs_per_sec=reqs_per_sec_arg, seconds=seconds_arg)
         def f2(idx: int, requests: int) -> Any:
             request_validator.callback2(idx, requests)
 
-        call_list.append(("f2", "(i, requests_arg)", "0"))
+        call_list.append(("f2", "(i, reqs_per_sec_arg)", "0"))
 
         ################################################################
         # f3
         ################################################################
-        @throttle_async(requests=requests_arg, seconds=seconds_arg)
+        @throttle_async(reqs_per_sec=reqs_per_sec_arg, seconds=seconds_arg)
         def f3(*, idx: int) -> Any:
             request_validator.callback3(idx=idx)
 
@@ -2210,7 +2428,7 @@ class TestThrottle:
         ################################################################
         # f4
         ################################################################
-        @throttle_async(requests=requests_arg, seconds=seconds_arg)
+        @throttle_async(reqs_per_sec=reqs_per_sec_arg, seconds=seconds_arg)
         def f4(*, idx: int, seconds: float) -> Any:
             request_validator.callback4(idx=idx, seconds=seconds)
 
@@ -2219,7 +2437,7 @@ class TestThrottle:
         ################################################################
         # f5
         ################################################################
-        @throttle_async(requests=requests_arg, seconds=seconds_arg)
+        @throttle_async(reqs_per_sec=reqs_per_sec_arg, seconds=seconds_arg)
         def f5(idx: int, *, interval: float) -> Any:
             request_validator.callback5(idx, interval=interval)
 
@@ -2228,7 +2446,7 @@ class TestThrottle:
         ################################################################
         # f6
         ################################################################
-        @throttle_async(requests=requests_arg, seconds=seconds_arg)
+        @throttle_async(reqs_per_sec=reqs_per_sec_arg, seconds=seconds_arg)
         def f6(idx: int, requests: int, *, seconds: float, interval: float) -> Any:
             request_validator.callback6(
                 idx, requests, seconds=seconds, interval=interval
@@ -2237,7 +2455,7 @@ class TestThrottle:
         call_list.append(
             (
                 "f6",
-                "(i, requests_arg, seconds=seconds_arg, " "interval=send_interval)",
+                "(i, reqs_per_sec_arg, seconds=seconds_arg, " "interval=send_interval)",
                 "0",
             )
         )
@@ -2246,12 +2464,12 @@ class TestThrottle:
         # Instantiate the validator
         ################################################################
         request_validator = RequestValidator(
-            requests=requests_arg,
+            reqs_per_sec=reqs_per_sec_arg,
             seconds=seconds_arg,
             mode=MODE_ASYNC,
             early_count=0,
             lb_threshold=0,
-            total_requests=num_reqs_to_do,
+            total_reqs_per_sec=num_reqs_to_do,
             send_interval=send_interval,
             send_intervals=send_intervals,
             t_throttle=eval(call_list[request_style_arg][0]).throttle,
@@ -2275,16 +2493,19 @@ class TestThrottle:
     ####################################################################
     # test_pie_throttle_async
     ####################################################################
-    @pytest.mark.parametrize("requests_arg", (1, 2, 3))
+    @pytest.mark.parametrize("reqs_per_sec_arg", (1, 2, 3))
     @pytest.mark.parametrize("seconds_arg", (0.3, 1, 2))
     @pytest.mark.parametrize("send_interval_mult_arg", (0.0, 0.9, 1.0, 1.1))
     def test_pie_throttle_async(
-        self, requests_arg: int, seconds_arg: IntFloat, send_interval_mult_arg: float
+        self,
+        reqs_per_sec_arg: int,
+        seconds_arg: IntFloat,
+        send_interval_mult_arg: float,
     ) -> None:
         """Method to start throttle mode1 tests.
 
         Args:
-            requests_arg: number of requests per interval from fixture
+            reqs_per_sec_arg: number of requests per interval from fixture
             seconds_arg: interval for number of requests from fixture
             send_interval_mult_arg: interval between each send of a
                                       request
@@ -2293,7 +2514,7 @@ class TestThrottle:
         # Instantiate Request Validator
         ################################################################
         pauser = Pauser()
-        send_interval = (seconds_arg / requests_arg) * send_interval_mult_arg
+        send_interval = (seconds_arg / reqs_per_sec_arg) * send_interval_mult_arg
 
         ################################################################
         # get send interval list
@@ -2303,7 +2524,7 @@ class TestThrottle:
         ################################################################
         # Decorate functions with throttle
         ################################################################
-        @throttle_async(requests=requests_arg, seconds=seconds_arg)
+        @throttle_async(reqs_per_sec=reqs_per_sec_arg, seconds=seconds_arg)
         def f0() -> Any:
             request_validator.callback0()
 
@@ -2311,12 +2532,12 @@ class TestThrottle:
         # Instantiate the validator
         ################################################################
         request_validator = RequestValidator(
-            requests=requests_arg,
+            reqs_per_sec=reqs_per_sec_arg,
             seconds=seconds_arg,
             mode=MODE_ASYNC,
             early_count=0,
             lb_threshold=0,
-            total_requests=num_reqs_to_do,
+            total_reqs_per_sec=num_reqs_to_do,
             send_interval=send_interval,
             send_intervals=send_intervals,
             t_throttle=f0.throttle,
@@ -2353,10 +2574,10 @@ class TestThrottle:
         # Instantiate Request Validator
         ################################################################
         pauser = Pauser()
-        requests_arg = 2
+        reqs_per_sec_arg = 2
         seconds_arg = 0.5
         send_interval_mult_arg = 1.0
-        send_interval = (seconds_arg / requests_arg) * send_interval_mult_arg
+        send_interval = (seconds_arg / reqs_per_sec_arg) * send_interval_mult_arg
 
         ################################################################
         # get send interval list
@@ -2371,7 +2592,7 @@ class TestThrottle:
         ################################################################
         # f0
         ################################################################
-        @throttle_sync(requests=requests_arg, seconds=seconds_arg)
+        @throttle_sync(reqs_per_sec=reqs_per_sec_arg, seconds=seconds_arg)
         def f0() -> int:
             request_validator.callback0()
             return 42
@@ -2381,7 +2602,7 @@ class TestThrottle:
         ################################################################
         # f1
         ################################################################
-        @throttle_sync(requests=requests_arg, seconds=seconds_arg)
+        @throttle_sync(reqs_per_sec=reqs_per_sec_arg, seconds=seconds_arg)
         def f1(idx: int) -> int:
             request_validator.callback1(idx)
             return idx + 42 + 1
@@ -2391,17 +2612,17 @@ class TestThrottle:
         ################################################################
         # f2
         ################################################################
-        @throttle_sync(requests=requests_arg, seconds=seconds_arg)
+        @throttle_sync(reqs_per_sec=reqs_per_sec_arg, seconds=seconds_arg)
         def f2(idx: int, requests: int) -> int:
             request_validator.callback2(idx, requests)
             return idx + 42 + 2
 
-        call_list.append(("f2", "(i, requests_arg)", "i + 42 + 2"))
+        call_list.append(("f2", "(i, reqs_per_sec_arg)", "i + 42 + 2"))
 
         ################################################################
         # f3
         ################################################################
-        @throttle_sync(requests=requests_arg, seconds=seconds_arg)
+        @throttle_sync(reqs_per_sec=reqs_per_sec_arg, seconds=seconds_arg)
         def f3(*, idx: int) -> int:
             request_validator.callback3(idx=idx)
             return idx + 42 + 3
@@ -2411,7 +2632,7 @@ class TestThrottle:
         ################################################################
         # f4
         ################################################################
-        @throttle_sync(requests=requests_arg, seconds=seconds_arg)
+        @throttle_sync(reqs_per_sec=reqs_per_sec_arg, seconds=seconds_arg)
         def f4(*, idx: int, seconds: float) -> int:
             request_validator.callback4(idx=idx, seconds=seconds)
             return idx + 42 + 4
@@ -2421,7 +2642,7 @@ class TestThrottle:
         ################################################################
         # f5
         ################################################################
-        @throttle_sync(requests=requests_arg, seconds=seconds_arg)
+        @throttle_sync(reqs_per_sec=reqs_per_sec_arg, seconds=seconds_arg)
         def f5(idx: int, *, interval: float) -> int:
             request_validator.callback5(idx, interval=interval)
             return idx + 42 + 5
@@ -2433,7 +2654,7 @@ class TestThrottle:
         ################################################################
         # f6
         ################################################################
-        @throttle_sync(requests=requests_arg, seconds=seconds_arg)
+        @throttle_sync(reqs_per_sec=reqs_per_sec_arg, seconds=seconds_arg)
         def f6(idx: int, requests: int, *, seconds: float, interval: float) -> int:
             request_validator.callback6(
                 idx, requests, seconds=seconds, interval=interval
@@ -2443,7 +2664,7 @@ class TestThrottle:
         call_list.append(
             (
                 "f6",
-                "(i, requests_arg, seconds=seconds_arg,"
+                "(i, reqs_per_sec_arg, seconds=seconds_arg,"
                 " interval=send_interval_mult_arg)",
                 "i + 42 + 6",
             )
@@ -2453,12 +2674,12 @@ class TestThrottle:
         # Instantiate the validator
         ################################################################
         request_validator = RequestValidator(
-            requests=requests_arg,
+            reqs_per_sec=reqs_per_sec_arg,
             seconds=seconds_arg,
             mode=MODE_SYNC,
             early_count=0,
             lb_threshold=0,
-            total_requests=num_reqs_to_do,
+            total_reqs_per_sec=num_reqs_to_do,
             send_interval=send_interval,
             send_intervals=send_intervals,
             t_throttle=eval(call_list[request_style_arg][0]).throttle,
@@ -2479,16 +2700,19 @@ class TestThrottle:
     ####################################################################
     # test_throttle_sync
     ####################################################################
-    @pytest.mark.parametrize("requests_arg", (1, 2, 3))
+    @pytest.mark.parametrize("reqs_per_sec_arg", (1, 2, 3))
     @pytest.mark.parametrize("seconds_arg", (0.3, 1, 2))
     @pytest.mark.parametrize("send_interval_mult_arg", (0.0, 0.9, 1.0, 1.1))
     def test_pie_throttle_sync(
-        self, requests_arg: int, seconds_arg: IntFloat, send_interval_mult_arg: float
+        self,
+        reqs_per_sec_arg: int,
+        seconds_arg: IntFloat,
+        send_interval_mult_arg: float,
     ) -> None:
         """Method to start throttle sync tests.
 
         Args:
-            requests_arg: number of requests per interval from fixture
+            reqs_per_sec_arg: number of requests per interval from fixture
             seconds_arg: interval for number of requests from fixture
             send_interval_mult_arg: interval between each send of a
                                       request
@@ -2497,7 +2721,7 @@ class TestThrottle:
         # Instantiate Request Validator
         ################################################################
         pauser = Pauser()
-        send_interval = (seconds_arg / requests_arg) * send_interval_mult_arg
+        send_interval = (seconds_arg / reqs_per_sec_arg) * send_interval_mult_arg
 
         ################################################################
         # get send interval list
@@ -2507,7 +2731,7 @@ class TestThrottle:
         ################################################################
         # Decorate functions with throttle
         ################################################################
-        @throttle_sync(requests=requests_arg, seconds=seconds_arg)
+        @throttle_sync(reqs_per_sec=reqs_per_sec_arg, seconds=seconds_arg)
         def f1(idx: int) -> int:
             request_validator.callback1(idx)
             return idx + 42 + 1
@@ -2516,12 +2740,12 @@ class TestThrottle:
         # Instantiate the validator
         ################################################################
         request_validator = RequestValidator(
-            requests=requests_arg,
+            reqs_per_sec=reqs_per_sec_arg,
             seconds=seconds_arg,
             mode=MODE_SYNC,
             early_count=0,
             lb_threshold=0,
-            total_requests=num_reqs_to_do,
+            total_reqs_per_sec=num_reqs_to_do,
             send_interval=send_interval,
             send_intervals=send_intervals,
             t_throttle=f1.throttle,
@@ -2557,12 +2781,12 @@ class TestThrottle:
         # Instantiate Request Validator
         ################################################################
         pauser = Pauser()
-        requests_arg = 3
+        reqs_per_sec_arg = 3
         seconds_arg = 0.9
         early_count_arg = 2
         send_interval_mult_arg = 1.0
 
-        send_interval = (seconds_arg / requests_arg) * send_interval_mult_arg
+        send_interval = (seconds_arg / reqs_per_sec_arg) * send_interval_mult_arg
 
         ################################################################
         # get send interval list
@@ -2578,7 +2802,9 @@ class TestThrottle:
         # f0
         ################################################################
         @throttle_sync_ec(
-            requests=requests_arg, seconds=seconds_arg, early_count=early_count_arg
+            reqs_per_sec=reqs_per_sec_arg,
+            seconds=seconds_arg,
+            early_count=early_count_arg,
         )
         def f0() -> int:
             request_validator.callback0()
@@ -2590,7 +2816,9 @@ class TestThrottle:
         # f1
         ################################################################
         @throttle_sync_ec(
-            requests=requests_arg, seconds=seconds_arg, early_count=early_count_arg
+            reqs_per_sec=reqs_per_sec_arg,
+            seconds=seconds_arg,
+            early_count=early_count_arg,
         )
         def f1(idx: int) -> int:
             request_validator.callback1(idx)
@@ -2602,19 +2830,23 @@ class TestThrottle:
         # f2
         ################################################################
         @throttle_sync_ec(
-            requests=requests_arg, seconds=seconds_arg, early_count=early_count_arg
+            reqs_per_sec=reqs_per_sec_arg,
+            seconds=seconds_arg,
+            early_count=early_count_arg,
         )
         def f2(idx: int, requests: int) -> int:
             request_validator.callback2(idx, requests)
             return idx + 42 + 2
 
-        call_list.append(("f2", "(i, requests_arg)", "i + 42 + 2"))
+        call_list.append(("f2", "(i, reqs_per_sec_arg)", "i + 42 + 2"))
 
         ################################################################
         # f3
         ################################################################
         @throttle_sync_ec(
-            requests=requests_arg, seconds=seconds_arg, early_count=early_count_arg
+            reqs_per_sec=reqs_per_sec_arg,
+            seconds=seconds_arg,
+            early_count=early_count_arg,
         )
         def f3(*, idx: int) -> int:
             request_validator.callback3(idx=idx)
@@ -2626,7 +2858,9 @@ class TestThrottle:
         # f4
         ################################################################
         @throttle_sync_ec(
-            requests=requests_arg, seconds=seconds_arg, early_count=early_count_arg
+            reqs_per_sec=reqs_per_sec_arg,
+            seconds=seconds_arg,
+            early_count=early_count_arg,
         )
         def f4(*, idx: int, seconds: float) -> int:
             request_validator.callback4(idx=idx, seconds=seconds)
@@ -2638,7 +2872,9 @@ class TestThrottle:
         # f5
         ################################################################
         @throttle_sync_ec(
-            requests=requests_arg, seconds=seconds_arg, early_count=early_count_arg
+            reqs_per_sec=reqs_per_sec_arg,
+            seconds=seconds_arg,
+            early_count=early_count_arg,
         )
         def f5(idx: int, *, interval: float) -> int:
             request_validator.callback5(idx, interval=interval)
@@ -2652,7 +2888,9 @@ class TestThrottle:
         # f6
         ################################################################
         @throttle_sync_ec(
-            requests=requests_arg, seconds=seconds_arg, early_count=early_count_arg
+            reqs_per_sec=reqs_per_sec_arg,
+            seconds=seconds_arg,
+            early_count=early_count_arg,
         )
         def f6(idx: int, requests: int, *, seconds: float, interval: float) -> int:
             request_validator.callback6(
@@ -2663,7 +2901,7 @@ class TestThrottle:
         call_list.append(
             (
                 "f6",
-                "(i, requests_arg,"
+                "(i, reqs_per_sec_arg,"
                 "seconds=seconds_arg,"
                 "interval=send_interval_mult_arg)",
                 "i + 42 + 6",
@@ -2674,12 +2912,12 @@ class TestThrottle:
         # Instantiate the validator
         ################################################################
         request_validator = RequestValidator(
-            requests=requests_arg,
+            reqs_per_sec=reqs_per_sec_arg,
             seconds=seconds_arg,
             mode=MODE_SYNC_EC,
             early_count=early_count_arg,
             lb_threshold=0,
-            total_requests=num_reqs_to_do,
+            total_reqs_per_sec=num_reqs_to_do,
             send_interval=send_interval,
             send_intervals=send_intervals,
             t_throttle=eval(call_list[request_style_arg][0]).throttle,
@@ -2699,13 +2937,13 @@ class TestThrottle:
     ####################################################################
     # test_throttle_sync_ec
     ####################################################################
-    @pytest.mark.parametrize("requests_arg", (1, 2, 3))
+    @pytest.mark.parametrize("reqs_per_sec_arg", (1, 2, 3))
     @pytest.mark.parametrize("seconds_arg", (0.3, 1, 2))
     @pytest.mark.parametrize("early_count_arg", (1, 2, 3))
     @pytest.mark.parametrize("send_interval_mult_arg", (0.0, 0.9, 1.0, 1.1))
     def test_pie_throttle_sync_ec(
         self,
-        requests_arg: int,
+        reqs_per_sec_arg: int,
         seconds_arg: IntFloat,
         early_count_arg: int,
         send_interval_mult_arg: float,
@@ -2713,7 +2951,7 @@ class TestThrottle:
         """Method to start throttle sync_ec tests.
 
         Args:
-            requests_arg: number of requests per interval from fixture
+            reqs_per_sec_arg: number of requests per interval from fixture
             seconds_arg: interval for number of requests from fixture
             early_count_arg: count used for sync with early count algo
             send_interval_mult_arg: interval between each send of a
@@ -2723,7 +2961,7 @@ class TestThrottle:
         # Instantiate Request Validator
         ################################################################
         pauser = Pauser()
-        send_interval = (seconds_arg / requests_arg) * send_interval_mult_arg
+        send_interval = (seconds_arg / reqs_per_sec_arg) * send_interval_mult_arg
 
         ################################################################
         # get send interval list
@@ -2734,7 +2972,9 @@ class TestThrottle:
         # Decorate functions with throttle
         ################################################################
         @throttle_sync_ec(
-            requests=requests_arg, seconds=seconds_arg, early_count=early_count_arg
+            reqs_per_sec=reqs_per_sec_arg,
+            seconds=seconds_arg,
+            early_count=early_count_arg,
         )
         def f5(idx: int, *, interval: float) -> int:
             request_validator.callback5(idx, interval=interval)
@@ -2744,12 +2984,12 @@ class TestThrottle:
         # Instantiate the validator
         ################################################################
         request_validator = RequestValidator(
-            requests=requests_arg,
+            reqs_per_sec=reqs_per_sec_arg,
             seconds=seconds_arg,
             mode=MODE_SYNC_EC,
             early_count=early_count_arg,
             lb_threshold=0,
-            total_requests=num_reqs_to_do,
+            total_reqs_per_sec=num_reqs_to_do,
             send_interval=send_interval,
             send_intervals=send_intervals,
             t_throttle=f5.throttle,
@@ -2781,12 +3021,12 @@ class TestThrottle:
         # Instantiate Request Validator
         ################################################################
         pauser = Pauser()
-        requests_arg = 3
+        reqs_per_sec_arg = 3
         seconds_arg = 0.7
         lb_threshold_arg = 4
         send_interval_mult_arg = 0.3
 
-        send_interval = (seconds_arg / requests_arg) * send_interval_mult_arg
+        send_interval = (seconds_arg / reqs_per_sec_arg) * send_interval_mult_arg
 
         ################################################################
         # get send interval list
@@ -2802,7 +3042,9 @@ class TestThrottle:
         # f0
         ################################################################
         @throttle_sync_lb(
-            requests=requests_arg, seconds=seconds_arg, lb_threshold=lb_threshold_arg
+            reqs_per_sec=reqs_per_sec_arg,
+            seconds=seconds_arg,
+            lb_threshold=lb_threshold_arg,
         )
         def f0() -> int:
             request_validator.callback0()
@@ -2814,7 +3056,9 @@ class TestThrottle:
         # f1
         ################################################################
         @throttle_sync_lb(
-            requests=requests_arg, seconds=seconds_arg, lb_threshold=lb_threshold_arg
+            reqs_per_sec=reqs_per_sec_arg,
+            seconds=seconds_arg,
+            lb_threshold=lb_threshold_arg,
         )
         def f1(idx: int) -> int:
             request_validator.callback1(idx)
@@ -2826,19 +3070,23 @@ class TestThrottle:
         # f2
         ################################################################
         @throttle_sync_lb(
-            requests=requests_arg, seconds=seconds_arg, lb_threshold=lb_threshold_arg
+            reqs_per_sec=reqs_per_sec_arg,
+            seconds=seconds_arg,
+            lb_threshold=lb_threshold_arg,
         )
         def f2(idx: int, requests: int) -> int:
             request_validator.callback2(idx, requests)
             return idx + 42 + 2
 
-        call_list.append(("f2", "(i, requests_arg)", "i + 42 + 2"))
+        call_list.append(("f2", "(i, reqs_per_sec_arg)", "i + 42 + 2"))
 
         ################################################################
         # f3
         ################################################################
         @throttle_sync_lb(
-            requests=requests_arg, seconds=seconds_arg, lb_threshold=lb_threshold_arg
+            reqs_per_sec=reqs_per_sec_arg,
+            seconds=seconds_arg,
+            lb_threshold=lb_threshold_arg,
         )
         def f3(*, idx: int) -> int:
             request_validator.callback3(idx=idx)
@@ -2850,7 +3098,9 @@ class TestThrottle:
         # f4
         ################################################################
         @throttle_sync_lb(
-            requests=requests_arg, seconds=seconds_arg, lb_threshold=lb_threshold_arg
+            reqs_per_sec=reqs_per_sec_arg,
+            seconds=seconds_arg,
+            lb_threshold=lb_threshold_arg,
         )
         def f4(*, idx: int, seconds: float) -> int:
             request_validator.callback4(idx=idx, seconds=seconds)
@@ -2862,7 +3112,9 @@ class TestThrottle:
         # f5
         ################################################################
         @throttle_sync_lb(
-            requests=requests_arg, seconds=seconds_arg, lb_threshold=lb_threshold_arg
+            reqs_per_sec=reqs_per_sec_arg,
+            seconds=seconds_arg,
+            lb_threshold=lb_threshold_arg,
         )
         def f5(idx: int, *, interval: float) -> int:
             request_validator.callback5(idx, interval=interval)
@@ -2876,7 +3128,9 @@ class TestThrottle:
         # f6
         ################################################################
         @throttle_sync_lb(
-            requests=requests_arg, seconds=seconds_arg, lb_threshold=lb_threshold_arg
+            reqs_per_sec=reqs_per_sec_arg,
+            seconds=seconds_arg,
+            lb_threshold=lb_threshold_arg,
         )
         def f6(idx: int, requests: int, *, seconds: float, interval: float) -> int:
             request_validator.callback6(
@@ -2887,7 +3141,7 @@ class TestThrottle:
         call_list.append(
             (
                 "f6",
-                "(i, requests_arg,"
+                "(i, reqs_per_sec_arg,"
                 "seconds=seconds_arg,"
                 " interval=send_interval_mult_arg)",
                 "i + 42 + 6",
@@ -2898,12 +3152,12 @@ class TestThrottle:
         # Instantiate the validator
         ################################################################
         request_validator = RequestValidator(
-            requests=requests_arg,
+            reqs_per_sec=reqs_per_sec_arg,
             seconds=seconds_arg,
             mode=MODE_SYNC_LB,
             early_count=0,
             lb_threshold=lb_threshold_arg,
-            total_requests=num_reqs_to_do,
+            total_reqs_per_sec=num_reqs_to_do,
             send_interval=send_interval,
             send_intervals=send_intervals,
             t_throttle=eval(call_list[request_style_arg][0]).throttle,
@@ -2923,13 +3177,13 @@ class TestThrottle:
     ####################################################################
     # test_throttle_sync_lb
     ####################################################################
-    @pytest.mark.parametrize("requests_arg", (1, 2, 3))
+    @pytest.mark.parametrize("reqs_per_sec_arg", (1, 2, 3))
     @pytest.mark.parametrize("seconds_arg", (0.3, 1, 2))
     @pytest.mark.parametrize("lb_threshold_arg", (1, 1.5, 3))
     @pytest.mark.parametrize("send_interval_mult_arg", (0.0, 0.9, 1.0, 1.1))
     def test_pie_throttle_sync_lb(
         self,
-        requests_arg: int,
+        reqs_per_sec_arg: int,
         seconds_arg: IntFloat,
         lb_threshold_arg: IntFloat,
         send_interval_mult_arg: float,
@@ -2937,7 +3191,7 @@ class TestThrottle:
         """Method to start throttle sync_lb tests.
 
         Args:
-            requests_arg: number of requests per interval from fixture
+            reqs_per_sec_arg: number of requests per interval from fixture
             seconds_arg: interval for number of requests from fixture
             lb_threshold_arg: threshold used with sync leaky bucket algo
             send_interval_mult_arg: interval between each send of a
@@ -2947,7 +3201,7 @@ class TestThrottle:
         # Instantiate Request Validator
         ################################################################
         pauser = Pauser()
-        send_interval = (seconds_arg / requests_arg) * send_interval_mult_arg
+        send_interval = (seconds_arg / reqs_per_sec_arg) * send_interval_mult_arg
 
         ################################################################
         # get send interval list
@@ -2958,7 +3212,9 @@ class TestThrottle:
         # Decorate functions with throttle
         ################################################################
         @throttle_sync_lb(
-            requests=requests_arg, seconds=seconds_arg, lb_threshold=lb_threshold_arg
+            reqs_per_sec=reqs_per_sec_arg,
+            seconds=seconds_arg,
+            lb_threshold=lb_threshold_arg,
         )
         def f6(idx: int, requests: int, *, seconds: float, interval: float) -> int:
             request_validator.callback6(
@@ -2970,12 +3226,12 @@ class TestThrottle:
         # Instantiate the validator
         ################################################################
         request_validator = RequestValidator(
-            requests=requests_arg,
+            reqs_per_sec=reqs_per_sec_arg,
             seconds=seconds_arg,
             mode=MODE_SYNC_LB,
             early_count=0,
             lb_threshold=lb_threshold_arg,
-            total_requests=num_reqs_to_do,
+            total_reqs_per_sec=num_reqs_to_do,
             send_interval=send_interval,
             send_intervals=send_intervals,
             t_throttle=f6.throttle,
@@ -2989,7 +3245,10 @@ class TestThrottle:
             pauser.pause(s_interval)  # first one is 0.0
             request_validator.before_req_times.append(perf_counter_ns())
             rc = f6(
-                i, requests_arg, seconds=seconds_arg, interval=send_interval_mult_arg
+                i,
+                reqs_per_sec_arg,
+                seconds=seconds_arg,
+                interval=send_interval_mult_arg,
             )
             request_validator.after_req_times.append(perf_counter_ns())
             assert rc == i + 42 + 6
@@ -3044,12 +3303,12 @@ def issue_shutdown_log_entry(
 # issue_remaining_requests_log_entry
 ########################################################################
 def issue_remaining_requests_log_entry(
-    throttle: ThrottleAsync, log_ver: LogVer
+    throttle: Throttle, log_ver: LogVer
 ) -> tuple[bool, int]:
     """Log the remaining requests log message.
 
     Args:
-        throttle: the ThrottleAsync being tested
+        throttle: the Throttle being tested
         log_ver: log verifier used to test log messages
 
     Returns:
@@ -3105,112 +3364,112 @@ class TestThrottleMisc:
     ####################################################################
     # test_get_interval_secs
     ####################################################################
-    @pytest.mark.parametrize("requests_arg", (1, 2, 3))
+    @pytest.mark.parametrize("reqs_per_sec_arg", (1, 2, 3))
     @pytest.mark.parametrize("seconds_arg", (0.3, 1, 2))
-    def test_get_interval_secs(self, requests_arg: int, seconds_arg: float) -> None:
+    def test_get_interval_secs(self, reqs_per_sec_arg: int, seconds_arg: float) -> None:
         """Method to test get interval in seconds.
 
         Args:
-            requests_arg: number of requests specified for the throttle
+            reqs_per_sec_arg: number of requests specified for the throttle
             seconds_arg: number of seconds specified for the throttle
 
         """
         ################################################################
         # create a sync mode throttle
         ################################################################
-        a_throttle1 = ThrottleSync(requests=requests_arg, seconds=seconds_arg)
+        a_throttle1 = ThrottleSync(reqs_per_sec=reqs_per_sec_arg, seconds=seconds_arg)
 
-        interval = seconds_arg / requests_arg
+        interval = seconds_arg / reqs_per_sec_arg
         assert interval == a_throttle1.get_interval_secs()
 
     ####################################################################
     # test_get_interval_ns
     ####################################################################
-    @pytest.mark.parametrize("requests_arg", (1, 2, 3))
+    @pytest.mark.parametrize("reqs_per_sec_arg", (1, 2, 3))
     @pytest.mark.parametrize("seconds_arg", (0.3, 1, 2))
-    def test_get_interval_ns(self, requests_arg: int, seconds_arg: float) -> None:
+    def test_get_interval_ns(self, reqs_per_sec_arg: int, seconds_arg: float) -> None:
         """Method to test get interval in nanoseconds.
 
         Args:
-            requests_arg: number of requests specified for the throttle
+            reqs_per_sec_arg: number of requests specified for the throttle
             seconds_arg: number of seconds specified for the throttle
 
         """
         ################################################################
         # create a sync mode throttle
         ################################################################
-        a_throttle1 = ThrottleSync(requests=requests_arg, seconds=seconds_arg)
+        a_throttle1 = ThrottleSync(reqs_per_sec=reqs_per_sec_arg, seconds=seconds_arg)
 
-        interval = (seconds_arg / requests_arg) * 1000000000
+        interval = (seconds_arg / reqs_per_sec_arg) * 1000000000
         assert interval == a_throttle1.get_interval_ns()
 
     ####################################################################
     # test_get_completion_time_secs
     ####################################################################
-    @pytest.mark.parametrize("requests_arg", (1, 2, 3))
+    @pytest.mark.parametrize("reqs_per_sec_arg", (1, 2, 3))
     @pytest.mark.parametrize("seconds_arg", (0.3, 1, 2))
     def test_get_completion_time_secs(
-        self, requests_arg: int, seconds_arg: float
+        self, reqs_per_sec_arg: int, seconds_arg: float
     ) -> None:
         """Method to test get completion time in seconds.
 
         Args:
-            requests_arg: number of requests specified for the throttle
+            reqs_per_sec_arg: number of requests specified for the throttle
             seconds_arg: number of seconds specified for the throttle
 
         """
         ################################################################
         # create a sync mode throttle
         ################################################################
-        a_throttle1 = ThrottleSync(requests=requests_arg, seconds=seconds_arg)
+        a_throttle1 = ThrottleSync(reqs_per_sec=reqs_per_sec_arg, seconds=seconds_arg)
 
-        interval = seconds_arg / requests_arg
+        interval = seconds_arg / reqs_per_sec_arg
         for num_reqs in range(1, 10):
             exp_completion_time = (num_reqs - 1) * interval
             actual_completion_time = a_throttle1.get_completion_time_secs(
-                requests=num_reqs, from_start=True
+                reqs_per_sec=num_reqs, from_start=True
             )
             assert actual_completion_time == exp_completion_time
 
         for num_reqs in range(1, 10):
             exp_completion_time = num_reqs * interval
             actual_completion_time = a_throttle1.get_completion_time_secs(
-                requests=num_reqs, from_start=False
+                reqs_per_sec=num_reqs, from_start=False
             )
             assert actual_completion_time == exp_completion_time
 
     ####################################################################
     # test_get_completion_time_ns
     ####################################################################
-    @pytest.mark.parametrize("requests_arg", (1, 2, 3))
+    @pytest.mark.parametrize("reqs_per_sec_arg", (1, 2, 3))
     @pytest.mark.parametrize("seconds_arg", (0.3, 1, 2))
     def test_get_completion_time_ns(
-        self, requests_arg: int, seconds_arg: float
+        self, reqs_per_sec_arg: int, seconds_arg: float
     ) -> None:
         """Method to test get completion time in nanoseconds.
 
         Args:
-            requests_arg: number of requests specified for the throttle
+            reqs_per_sec_arg: number of requests specified for the throttle
             seconds_arg: number of seconds specified for the throttle
 
         """
         ################################################################
         # create a sync mode throttle
         ################################################################
-        a_throttle1 = ThrottleSync(requests=requests_arg, seconds=seconds_arg)
+        a_throttle1 = ThrottleSync(reqs_per_sec=reqs_per_sec_arg, seconds=seconds_arg)
 
-        interval = (seconds_arg / requests_arg) * 1000000000
+        interval = (seconds_arg / reqs_per_sec_arg) * 1000000000
         for num_reqs in range(1, 10):
             exp_completion_time = (num_reqs - 1) * interval
             actual_completion_time = a_throttle1.get_completion_time_ns(
-                requests=num_reqs, from_start=True
+                reqs_per_sec=num_reqs, from_start=True
             )
             assert actual_completion_time == exp_completion_time
 
         for num_reqs in range(1, 10):
             exp_completion_time = num_reqs * interval
             actual_completion_time = a_throttle1.get_completion_time_ns(
-                requests=num_reqs, from_start=False
+                reqs_per_sec=num_reqs, from_start=False
             )
             assert actual_completion_time == exp_completion_time
 
@@ -3242,9 +3501,9 @@ class TestThrottleShutdownErrors:
         ################################################################
         # create a sync mode throttle
         ################################################################
-        requests_arg = 4
+        reqs_per_sec_arg = 4
         seconds_arg = 1
-        a_throttle1 = ThrottleSync(requests=requests_arg, seconds=seconds_arg)
+        a_throttle1 = ThrottleSync(reqs_per_sec=reqs_per_sec_arg, seconds=seconds_arg)
 
         ################################################################
         # do some requests
@@ -3314,10 +3573,10 @@ class TestThrottleShutdownErrors:
         ################################################################
         # create an async mode throttle
         ################################################################
-        requests_arg = 6
+        reqs_per_sec_arg = 6
         seconds_arg = 2
-        a_throttle1 = ThrottleAsync(
-            requests=requests_arg, seconds=seconds_arg, name="test1"
+        a_throttle1 = Throttle(
+            reqs_per_sec=reqs_per_sec_arg, seconds=seconds_arg, name="test1"
         )
 
         ################################################################
@@ -3428,7 +3687,7 @@ def f2_target(req_time: ReqTime, log_ver: LogVer) -> None:
 ########################################################################
 def get_async_throttle(
     requests: int, seconds: float, async_q_size: int, name: Optional[str] = None
-) -> tuple[ThrottleAsync, float]:
+) -> tuple[Throttle, float]:
     """Obtain an async throttle and return it.
 
     Args:
@@ -3438,8 +3697,8 @@ def get_async_throttle(
         async_q_size: max number of requests that will be queued
 
     """
-    a_throttle = ThrottleAsync(
-        requests=requests, seconds=seconds, name=name, async_q_size=async_q_size
+    a_throttle = Throttle(
+        reqs_per_sec=requests, seconds=seconds, name=name, async_q_size=async_q_size
     )
 
     assert a_throttle.async_q
@@ -3454,7 +3713,7 @@ def get_async_throttle(
 # queue_first_batch_requests
 ########################################################################
 def queue_first_batch_requests(
-    throttle: ThrottleAsync, num_reqs: int, num_sleep_reqs: int, log_ver: LogVer
+    throttle: Throttle, num_reqs: int, num_sleep_reqs: int, log_ver: LogVer
 ) -> tuple[float, ReqTime]:
     """Queue the request to the asyn throttle.
 
@@ -3514,7 +3773,7 @@ def queue_first_batch_requests(
 # queue_more_requests
 ########################################################################
 def queue_more_requests(
-    throttle: ThrottleAsync, num_reqs: int, req_time: ReqTime, log_ver: LogVer
+    throttle: Throttle, num_reqs: int, req_time: ReqTime, log_ver: LogVer
 ) -> None:
     """Queue the request to the asyn throttle.
 
@@ -3538,7 +3797,7 @@ def queue_more_requests(
 # final_shutdown_and_verification
 ########################################################################
 def final_shutdown_and_verification(
-    throttle: ThrottleAsync,
+    throttle: Throttle,
     req_time: ReqTime,
     log_ver: LogVer,
     ret_code: int,
@@ -3568,11 +3827,11 @@ def final_shutdown_and_verification(
     # f1 messages are logged. This is needed to ensure the
     # verify log results below will be able to match the added
     # pattern for the lagging message
-    if ret_code == ThrottleAsync.RC_SHUTDOWN_TIMED_OUT:
+    if ret_code == Throttle.RC_SHUTDOWN_TIMED_OUT:
         ret_code = throttle.start_shutdown(
-            shutdown_type=ThrottleAsync.TYPE_SHUTDOWN_HARD, timeout=60
+            shutdown_type=Throttle.TYPE_SHUTDOWN_HARD, timeout=60
         )
-    assert ret_code != ThrottleAsync.RC_SHUTDOWN_TIMED_OUT
+    assert ret_code != Throttle.RC_SHUTDOWN_TIMED_OUT
 
     assert throttle.async_q.empty()
     assert not throttle.request_scheduler_thread.is_alive()
@@ -3609,19 +3868,19 @@ class TestThrottleShutdown:
     short_long_items = ("Short", "Long")
     short_long_combos = it.product(short_long_items, repeat=3)
 
-    @pytest.mark.parametrize("requests_arg", (1, 2, 3))
+    @pytest.mark.parametrize("reqs_per_sec_arg", (1, 2, 3))
     @pytest.mark.parametrize("short_long_timeout_arg", short_long_combos)
     @etrace(omit_parms="caplog", omit_caller=True, log_ver=True)
     def test_throttle_hard_shutdown_timeout(
         self,
-        requests_arg: int,
+        reqs_per_sec_arg: int,
         short_long_timeout_arg: str,
         caplog: pytest.LogCaptureFixture,
     ) -> None:
         """Method to test shutdown scenarios.
 
         Args:
-            requests_arg: how many requests per seconds
+            reqs_per_sec_arg: how many requests per seconds
             short_long_timeout_arg: whether to do short or long timeout
             caplog: pytest fixture to capture log output
 
@@ -3639,7 +3898,7 @@ class TestThrottleShutdown:
         log_ver.add_call_seq(name="alpha", seq=alpha_call_seq)
 
         a_throttle, interval = get_async_throttle(
-            requests=requests_arg,
+            reqs_per_sec=reqs_per_sec_arg,
             seconds=seconds_arg,
             name="hard",
             async_q_size=num_reqs_to_make,
@@ -3663,7 +3922,7 @@ class TestThrottleShutdown:
         # test cases failing and leaving the throttle active with its
         # requests showing up in the next test case logs.
         ################################################################
-        ret_code = ThrottleAsync.RC_SHUTDOWN_TIMED_OUT
+        ret_code = Throttle.RC_SHUTDOWN_TIMED_OUT
         try:
             num_first_batch = sleep_reqs_to_do * 2
 
@@ -3689,13 +3948,13 @@ class TestThrottleShutdown:
             for short_long in short_long_timeout_arg:
                 if short_long == "Short":
                     timeout = 0.001
-                    if ret_code == ThrottleAsync.RC_SHUTDOWN_TIMED_OUT:
-                        exp_ret_code = ThrottleAsync.RC_SHUTDOWN_TIMED_OUT
+                    if ret_code == Throttle.RC_SHUTDOWN_TIMED_OUT:
+                        exp_ret_code = Throttle.RC_SHUTDOWN_TIMED_OUT
                     else:
-                        exp_ret_code = ThrottleAsync.RC_SHUTDOWN_HARD_COMPLETED_OK
+                        exp_ret_code = Throttle.RC_SHUTDOWN_HARD_COMPLETED_OK
                 else:
                     timeout = 10
-                    exp_ret_code = ThrottleAsync.RC_SHUTDOWN_HARD_COMPLETED_OK
+                    exp_ret_code = Throttle.RC_SHUTDOWN_HARD_COMPLETED_OK
 
                 log_ver.test_msg(f"about to shutdown with {timeout=}")
 
@@ -3709,7 +3968,7 @@ class TestThrottleShutdown:
                     num_reqs_done_before_shutdown = a_req_time.num_reqs
 
                 ret_code = a_throttle.start_shutdown(
-                    shutdown_type=ThrottleAsync.TYPE_SHUTDOWN_HARD, timeout=timeout
+                    shutdown_type=Throttle.TYPE_SHUTDOWN_HARD, timeout=timeout
                 )
 
                 async_q_empty, num_reqs = issue_remaining_requests_log_entry(
@@ -3721,7 +3980,7 @@ class TestThrottleShutdown:
                 assert num_reqs_done_before_shutdown == a_req_time.num_reqs
 
                 assert ret_code == exp_ret_code
-                if ret_code == ThrottleAsync.RC_SHUTDOWN_TIMED_OUT:
+                if ret_code == Throttle.RC_SHUTDOWN_TIMED_OUT:
                     assert async_q_empty is False
 
                     log_msg = (
@@ -3746,18 +4005,18 @@ class TestThrottleShutdown:
             )
 
         finally:
-            a_throttle.start_shutdown(ThrottleAsync.TYPE_SHUTDOWN_HARD)
+            a_throttle.start_shutdown(Throttle.TYPE_SHUTDOWN_HARD)
 
     ####################################################################
     # test_throttle_shutdown
     ####################################################################
-    @pytest.mark.parametrize("requests_arg", (1, 2, 3))
+    @pytest.mark.parametrize("reqs_per_sec_arg", (1, 2, 3))
     @pytest.mark.parametrize("sleep_delay_arg", (0.10, 0.30, 1.25))
     @pytest.mark.parametrize("timeout3_arg", (0.10, 0.75, 1.25))
     @etrace(omit_parms="caplog", omit_caller=True, log_ver=True)
     def test_throttle_soft_shutdown_timeout(
         self,
-        requests_arg: int,
+        reqs_per_sec_arg: int,
         sleep_delay_arg: float,
         timeout3_arg: float,
         caplog: pytest.LogCaptureFixture,
@@ -3765,7 +4024,7 @@ class TestThrottleShutdown:
         """Method to test shutdown scenarios.
 
         Args:
-            requests_arg: how many requests per seconds
+            reqs_per_sec_arg: how many requests per seconds
             sleep_delay_arg: how many requests as a ratio to total
                                requests to schedule before starting
                                shutdown
@@ -3785,7 +4044,7 @@ class TestThrottleShutdown:
         log_ver.add_call_seq(name="alpha", seq=alpha_call_seq)
 
         a_throttle, interval = get_async_throttle(
-            requests=requests_arg,
+            reqs_per_sec=reqs_per_sec_arg,
             seconds=seconds_arg,
             name="soft_timeout",
             async_q_size=num_reqs_to_make,
@@ -3844,7 +4103,7 @@ class TestThrottleShutdown:
                 log_ver.test_msg(f"about to shutdown with {timeout=}")
 
                 ret_code = a_throttle.start_shutdown(
-                    shutdown_type=ThrottleAsync.TYPE_SHUTDOWN_SOFT, timeout=timeout
+                    shutdown_type=Throttle.TYPE_SHUTDOWN_SOFT, timeout=timeout
                 )
 
                 shutdown_elapsed_time = time.time() - shutdown_start_time
@@ -3856,7 +4115,7 @@ class TestThrottleShutdown:
 
                 prev_reqs_done = exp_reqs_done
 
-                if ret_code == ThrottleAsync.RC_SHUTDOWN_TIMED_OUT:
+                if ret_code == Throttle.RC_SHUTDOWN_TIMED_OUT:
                     log_msg = (
                         "throttle soft_timeout start_shutdown request timed out with "
                         f"{timeout=:.4f}"
@@ -3870,9 +4129,9 @@ class TestThrottleShutdown:
 
                 if exp_reqs_done == num_reqs_to_make:
                     assert (
-                        ThrottleAsync.RC_SHUTDOWN_SOFT_COMPLETED_OK
+                        Throttle.RC_SHUTDOWN_SOFT_COMPLETED_OK
                         == a_throttle.start_shutdown(
-                            shutdown_type=ThrottleAsync.TYPE_SHUTDOWN_SOFT,
+                            shutdown_type=Throttle.TYPE_SHUTDOWN_SOFT,
                             timeout=timeout,
                         )
                     )
@@ -3896,7 +4155,7 @@ class TestThrottleShutdown:
             )
 
         finally:
-            a_throttle.start_shutdown(ThrottleAsync.TYPE_SHUTDOWN_HARD)
+            a_throttle.start_shutdown(Throttle.TYPE_SHUTDOWN_HARD)
 
     ####################################################################
     # test_throttle_shutdown
@@ -3904,19 +4163,19 @@ class TestThrottleShutdown:
     timeout_items = (0.0, 0.10, 0.75, 1.25)
     multi_timeout_combos = it.combinations_with_replacement(timeout_items, 3)
 
-    @pytest.mark.parametrize("requests_arg", (1, 2, 3))
+    @pytest.mark.parametrize("reqs_per_sec_arg", (1, 2, 3))
     @pytest.mark.parametrize("multi_timeout_arg", multi_timeout_combos)
     @etrace(omit_parms="caplog", omit_caller=True, log_ver=True)
     def test_throttle_mutil_soft_shutdown(
         self,
-        requests_arg: int,
+        reqs_per_sec_arg: int,
         multi_timeout_arg: tuple[float, float, float],
         caplog: pytest.LogCaptureFixture,
     ) -> None:
         """Method to test multi soft shutdown scenarios.
 
         Args:
-            requests_arg: how many requests per seconds
+            reqs_per_sec_arg: how many requests per seconds
             multi_timeout_arg: timeout time factors
             caplog: pytest fixture to capture log output
 
@@ -3934,7 +4193,7 @@ class TestThrottleShutdown:
         log_ver.add_call_seq(name="alpha", seq=alpha_call_seq)
 
         a_throttle, interval = get_async_throttle(
-            requests=requests_arg,
+            reqs_per_sec=reqs_per_sec_arg,
             seconds=seconds_arg,
             name="multi soft",
             async_q_size=num_reqs_to_make,
@@ -3944,7 +4203,7 @@ class TestThrottleShutdown:
         )
 
         # shutdown_completed = False
-        ret_code = ThrottleAsync.RC_SHUTDOWN_TIMED_OUT
+        ret_code = Throttle.RC_SHUTDOWN_TIMED_OUT
 
         def soft_shutdown(ss_timeout: float) -> None:
             """Do soft shutdown.
@@ -3955,7 +4214,7 @@ class TestThrottleShutdown:
             # nonlocal shutdown_completed
             nonlocal ret_code
             rc = a_throttle.start_shutdown(
-                shutdown_type=ThrottleAsync.TYPE_SHUTDOWN_SOFT, timeout=ss_timeout
+                shutdown_type=Throttle.TYPE_SHUTDOWN_SOFT, timeout=ss_timeout
             )
 
             log_ver.test_msg(f"soft shutdown {rc=} with {ss_timeout=:.4f}")
@@ -3963,11 +4222,11 @@ class TestThrottleShutdown:
             #     return
 
             if ss_timeout == 0.0 or ss_timeout == no_timeout_secs:
-                assert rc == ThrottleAsync.RC_SHUTDOWN_SOFT_COMPLETED_OK
-                ret_code = ThrottleAsync.RC_SHUTDOWN_SOFT_COMPLETED_OK
+                assert rc == Throttle.RC_SHUTDOWN_SOFT_COMPLETED_OK
+                ret_code = Throttle.RC_SHUTDOWN_SOFT_COMPLETED_OK
                 # shutdown_completed = True
             else:
-                if rc == ThrottleAsync.RC_SHUTDOWN_TIMED_OUT:
+                if rc == Throttle.RC_SHUTDOWN_TIMED_OUT:
                     l_msg = (
                         "throttle multi soft start_shutdown request timed out with "
                         f"timeout={ss_timeout:.4f}"
@@ -4062,7 +4321,7 @@ class TestThrottleShutdown:
             )
 
         finally:
-            a_throttle.start_shutdown(ThrottleAsync.TYPE_SHUTDOWN_HARD)
+            a_throttle.start_shutdown(Throttle.TYPE_SHUTDOWN_HARD)
 
     ####################################################################
     # test_throttle_shutdown
@@ -4073,13 +4332,13 @@ class TestThrottleShutdown:
     hard_soft_items = ("Hard", "Soft")
     hard_soft_combos = it.product(hard_soft_items, repeat=3)
 
-    @pytest.mark.parametrize("requests_arg", (1, 2, 3))
+    @pytest.mark.parametrize("reqs_per_sec_arg", (1, 2, 3))
     @pytest.mark.parametrize("short_long_timeout_arg", short_long_combos)
     @pytest.mark.parametrize("hard_soft_combo_arg", hard_soft_combos)
     @etrace(omit_parms="caplog", omit_caller=True, log_ver=True)
     def test_throttle_shutdown_combos(
         self,
-        requests_arg: int,
+        reqs_per_sec_arg: int,
         short_long_timeout_arg: str,
         hard_soft_combo_arg: str,
         caplog: pytest.LogCaptureFixture,
@@ -4087,7 +4346,7 @@ class TestThrottleShutdown:
         """Method to test shutdown scenarios.
 
         Args:
-            requests_arg: how many requests per seconds
+            reqs_per_sec_arg: how many requests per seconds
             short_long_timeout_arg: whether to do short or long timeout
             hard_soft_combo_arg: whether to do hard of soft
             caplog: pytest fixture to capture log output
@@ -4120,7 +4379,7 @@ class TestThrottleShutdown:
         log_ver.add_call_seq(name="alpha", seq=alpha_call_seq)
 
         a_throttle, interval = get_async_throttle(
-            requests=requests_arg,
+            reqs_per_sec=reqs_per_sec_arg,
             seconds=seconds_arg,
             name="shutdown combos",
             async_q_size=num_reqs_to_make,
@@ -4136,7 +4395,7 @@ class TestThrottleShutdown:
         # test cases failing and leaving the throttle active with its
         # requests showing up in the next test case logs.
         ################################################################
-        ret_code = ThrottleAsync.RC_SHUTDOWN_TIMED_OUT
+        ret_code = Throttle.RC_SHUTDOWN_TIMED_OUT
         try:
             num_first_batch = sleep_reqs_to_do * 2
             start_time, a_req_time = queue_first_batch_requests(
@@ -4158,34 +4417,30 @@ class TestThrottleShutdown:
 
             hard_shutdown_issued = False
             last_num_reqs_done = -1
-            exp_ret_code = ThrottleAsync.RC_SHUTDOWN_TIMED_OUT
+            exp_ret_code = Throttle.RC_SHUTDOWN_TIMED_OUT
             for short_long, hard_soft in zip(
                 short_long_timeout_arg, hard_soft_combo_arg
             ):
                 if hard_soft == "Soft":
-                    shutdown_type = ThrottleAsync.TYPE_SHUTDOWN_SOFT
+                    shutdown_type = Throttle.TYPE_SHUTDOWN_SOFT
                     if short_long == "Short":
                         timeout = 0.0001
                     else:
                         timeout = None
-                        if exp_ret_code == ThrottleAsync.RC_SHUTDOWN_TIMED_OUT:
+                        if exp_ret_code == Throttle.RC_SHUTDOWN_TIMED_OUT:
                             if hard_shutdown_issued is True:
-                                exp_ret_code = (
-                                    ThrottleAsync.RC_SHUTDOWN_HARD_COMPLETED_OK
-                                )
+                                exp_ret_code = Throttle.RC_SHUTDOWN_HARD_COMPLETED_OK
                             else:
-                                exp_ret_code = (
-                                    ThrottleAsync.RC_SHUTDOWN_SOFT_COMPLETED_OK
-                                )
+                                exp_ret_code = Throttle.RC_SHUTDOWN_SOFT_COMPLETED_OK
                 else:
-                    shutdown_type = ThrottleAsync.TYPE_SHUTDOWN_HARD
+                    shutdown_type = Throttle.TYPE_SHUTDOWN_HARD
                     hard_shutdown_issued = True
                     if short_long == "Short":
                         timeout = 0.0001
                     else:
                         timeout = None
-                        if exp_ret_code == ThrottleAsync.RC_SHUTDOWN_TIMED_OUT:
-                            exp_ret_code = ThrottleAsync.RC_SHUTDOWN_HARD_COMPLETED_OK
+                        if exp_ret_code == Throttle.RC_SHUTDOWN_TIMED_OUT:
+                            exp_ret_code = Throttle.RC_SHUTDOWN_HARD_COMPLETED_OK
 
                 log_ver.test_msg(
                     f"about to shutdown with {timeout=} and {shutdown_type=}"
@@ -4203,7 +4458,7 @@ class TestThrottleShutdown:
                 )
 
                 assert ret_code == exp_ret_code
-                if ret_code == ThrottleAsync.RC_SHUTDOWN_TIMED_OUT:
+                if ret_code == Throttle.RC_SHUTDOWN_TIMED_OUT:
                     log_msg = (
                         "throttle shutdown combos start_shutdown request timed "
                         f"out with {timeout=:.4f}"
@@ -4227,21 +4482,24 @@ class TestThrottleShutdown:
             )
 
         finally:
-            a_throttle.start_shutdown(ThrottleAsync.TYPE_SHUTDOWN_HARD)
+            a_throttle.start_shutdown(Throttle.TYPE_SHUTDOWN_HARD)
 
     ####################################################################
     # test_throttle_shutdown
     ####################################################################
-    @pytest.mark.parametrize("requests_arg", (1, 2, 3))
+    @pytest.mark.parametrize("reqs_per_sec_arg", (1, 2, 3))
     @pytest.mark.parametrize("timeout1_arg", (True, False))
     @etrace(omit_parms="caplog", omit_caller=True, log_ver=True)
     def test_throttle_soft_shutdown_terminated_by_hard(
-        self, requests_arg: int, timeout1_arg: bool, caplog: pytest.LogCaptureFixture
+        self,
+        reqs_per_sec_arg: int,
+        timeout1_arg: bool,
+        caplog: pytest.LogCaptureFixture,
     ) -> None:
         """Method to test shutdown scenarios.
 
         Args:
-            requests_arg: how many requests per seconds
+            reqs_per_sec_arg: how many requests per seconds
             timeout1_arg: whether to issue timeout
             caplog: pytest fixture to capture log output
 
@@ -4258,7 +4516,7 @@ class TestThrottleShutdown:
         log_ver.add_call_seq(name="alpha", seq=alpha_call_seq)
 
         a_throttle, interval = get_async_throttle(
-            requests=requests_arg,
+            reqs_per_sec=reqs_per_sec_arg,
             seconds=seconds_arg,
             name="soft hard",
             async_q_size=num_reqs_to_make,
@@ -4275,16 +4533,16 @@ class TestThrottleShutdown:
             """
             if timeout_tf:
                 rc = a_throttle.start_shutdown(
-                    shutdown_type=ThrottleAsync.TYPE_SHUTDOWN_SOFT,
+                    shutdown_type=Throttle.TYPE_SHUTDOWN_SOFT,
                     timeout=max_timeout_seconds,
                 )
             else:
                 rc = a_throttle.start_shutdown(
-                    shutdown_type=ThrottleAsync.TYPE_SHUTDOWN_SOFT
+                    shutdown_type=Throttle.TYPE_SHUTDOWN_SOFT
                 )
 
             log_ver.test_msg(f"soft shutdown {rc=} with {timeout_tf=}")
-            assert rc == ThrottleAsync.RC_SHUTDOWN_HARD_COMPLETED_OK
+            assert rc == Throttle.RC_SHUTDOWN_HARD_COMPLETED_OK
 
         soft_shutdown_thread = threading.Thread(
             target=soft_shutdown, args=(timeout1_arg,)
@@ -4340,9 +4598,9 @@ class TestThrottleShutdown:
                 "started soft shutdown."
             )
             ret_code = a_throttle.start_shutdown(
-                shutdown_type=ThrottleAsync.TYPE_SHUTDOWN_HARD
+                shutdown_type=Throttle.TYPE_SHUTDOWN_HARD
             )
-            assert ret_code == ThrottleAsync.RC_SHUTDOWN_HARD_COMPLETED_OK
+            assert ret_code == Throttle.RC_SHUTDOWN_HARD_COMPLETED_OK
             assert abs(a_req_time.num_reqs - exp_reqs_done) <= 1
 
             # wait for the soft_shutdown thread to end
@@ -4357,7 +4615,7 @@ class TestThrottleShutdown:
             )
 
         finally:
-            a_throttle.start_shutdown(ThrottleAsync.TYPE_SHUTDOWN_HARD)
+            a_throttle.start_shutdown(Throttle.TYPE_SHUTDOWN_HARD)
 
     ####################################################################
     # test_shutdown_throttle_funcs
@@ -4414,28 +4672,28 @@ class TestThrottleShutdown:
         f3_reqs = 2
         f4_reqs = 4
 
-        @throttle_async(requests=f1_reqs, seconds=seconds_arg, name="my_best_f1")
+        @throttle_async(reqs_per_sec=f1_reqs, seconds=seconds_arg, name="my_best_f1")
         def f1(req_time: ReqTime) -> None:
             issue_shutdown_log_entry(func_name="f1", req_time=req_time, log_ver=log_ver)
 
         ################################################################
         # f2
         ################################################################
-        @throttle_async(requests=f2_reqs, seconds=seconds_arg)
+        @throttle_async(reqs_per_sec=f2_reqs, seconds=seconds_arg)
         def f2(req_time: ReqTime) -> None:
             issue_shutdown_log_entry(func_name="f2", req_time=req_time, log_ver=log_ver)
 
         ################################################################
         # f3
         ################################################################
-        @throttle_async(requests=f3_reqs, seconds=seconds_arg)
+        @throttle_async(reqs_per_sec=f3_reqs, seconds=seconds_arg)
         def f3(req_time: ReqTime) -> None:
             issue_shutdown_log_entry(func_name="f3", req_time=req_time, log_ver=log_ver)
 
         ################################################################
         # f4
         ################################################################
-        @throttle_async(requests=f4_reqs, seconds=seconds_arg)
+        @throttle_async(reqs_per_sec=f4_reqs, seconds=seconds_arg)
         def f4(req_time: ReqTime) -> None:
             issue_shutdown_log_entry(func_name="f4", req_time=req_time, log_ver=log_ver)
 
@@ -4478,9 +4736,9 @@ class TestThrottleShutdown:
         if 0 <= mean_reqs_to_make <= 22:
             shutdown1_type_arg = None
         elif 22 <= mean_reqs_to_make <= 43:
-            shutdown1_type_arg = ThrottleAsync.TYPE_SHUTDOWN_SOFT
+            shutdown1_type_arg = Throttle.TYPE_SHUTDOWN_SOFT
         else:
-            shutdown1_type_arg = ThrottleAsync.TYPE_SHUTDOWN_HARD
+            shutdown1_type_arg = Throttle.TYPE_SHUTDOWN_HARD
 
         log_ver.test_msg(f"{mean_reqs_to_make=}, {shutdown1_type_arg=}")
 
@@ -4494,14 +4752,14 @@ class TestThrottleShutdown:
 
         timeout_arg = None
         if (
-            (shutdown1_type_arg != ThrottleAsync.TYPE_SHUTDOWN_HARD)
+            (shutdown1_type_arg != Throttle.TYPE_SHUTDOWN_HARD)
             and (num_shutdown1_funcs_arg == 2)
             and (f1_num_reqs_arg > 0)
             and (f2_num_reqs_arg > 0)
         ):
             timeout_arg = min(f1_exp_elapsed_seconds, f2_exp_elapsed_seconds) / 2
         elif (
-            (shutdown1_type_arg != ThrottleAsync.TYPE_SHUTDOWN_HARD)
+            (shutdown1_type_arg != Throttle.TYPE_SHUTDOWN_HARD)
             and (num_shutdown1_funcs_arg == 3)
             and (f1_num_reqs_arg > 0)
             and (f2_num_reqs_arg > 0)
@@ -4613,7 +4871,7 @@ class TestThrottleShutdown:
                 assert ret_code is True
 
         funcs_shutdown_complete_msg_added: list[
-            FuncWithThrottleAsyncAttr[Callable[..., Any]]
+            FuncWithThrottleAttr[Callable[..., Any]]
         ] = []
         for func in funcs_to_shutdown:
             if func.throttle.shutdown_elapsed_time == 0.0:
@@ -4719,8 +4977,6 @@ class TestThrottleShutdown:
         log_ver.print_match_results(match_results, print_matched=True)
         log_ver.verify_log_results(match_results)
 
-
-ThrottleType = Union[ThrottleSync, ThrottleSyncEc, ThrottleSyncLb, ThrottleAsync]
 
 SECS_2_NS: Final[int] = 1000000000
 NS_2_SECS: Final[float] = 0.000000001
@@ -5010,7 +5266,7 @@ class RequestValidator:
         total_requests: int,
         send_interval: float,
         send_intervals: list[float],
-        t_throttle: ThrottleType,
+        t_throttle: Throttle,
         num_threads: int = 0,
     ) -> None:
         """Initialize the RequestValidator object.
@@ -5281,13 +5537,13 @@ class RequestValidator:
     ####################################################################
     def print_vars(self) -> None:
         """Print the vars for the test case."""
-        print(f"\n{self.requests=}")
+        print(f"\n{self.reqs_per_sec=}")
         print(f"{self.seconds=}")
         print(f"{self.mode=}")
         print(f"{self.early_count=}")
         print(f"{self.lb_threshold=}")
         print(f"{self.send_interval=}")
-        print(f"{self.total_requests=}")
+        print(f"{self.total_reqs_per_sec=}")
         print(f"{self.target_interval=}")
         print(f"{self.send_interval=}")
         print(f"{self.min_interval=}")
@@ -5303,7 +5559,7 @@ class RequestValidator:
     # add_func_throttles
     ####################################################################
     def add_func_throttles(
-        self, *args: FuncWithThrottleAsyncAttr[Callable[..., Any]]
+        self, *args: FuncWithThrottleAttr[Callable[..., Any]]
     ) -> None:
         """Add the throttles for decorated functions to the validator.
 
@@ -6338,7 +6594,9 @@ class RequestValidator:
         """Validate the results for sync leaky bucket."""
 
         throttle_verifier = ThrottleVerifier(
-            requests=self.requests, seconds=self.seconds, lb_threshold=self.lb_threshold
+            reqs_per_sec=self.requests,
+            seconds=self.seconds,
+            lb_threshold=self.lb_threshold,
         )
         print(
             "\ninterval times: idx| throttle arrival interval sec | throttle wait_time sec | func arrival interval sec"
@@ -6884,7 +7142,7 @@ class TestThrottleDocstrings:
         import time
         from scottbrian_throttle.throttle import throttle_sync
 
-        @throttle_sync(requests=3, seconds=1)
+        @throttle_sync(reqs_per_sec=3)
         def make_request(idx: int, previous_arrival_time: float) -> float:
             arrival_time = time.time()
             if idx == 0:
@@ -6910,7 +7168,7 @@ class TestThrottleDocstrings:
         from scottbrian_throttle.throttle import throttle_sync
         import time
 
-        @throttle_sync(requests=1, seconds=1)
+        @throttle_sync(reqs_per_sec=1)
         def make_request() -> None:
             time.sleep(0.1)  # simulate request that takes 1/10 second
 
@@ -6939,7 +7197,7 @@ class TestThrottleDocstrings:
         from scottbrian_throttle.throttle import ThrottleSync
         import time
 
-        a_throttle = ThrottleSync(requests=1, seconds=1)
+        a_throttle = ThrottleSync(reqs_per_sec=1)
 
         def make_request() -> None:
             time.sleep(0.1)  # simulate request that takes 1/10 second
