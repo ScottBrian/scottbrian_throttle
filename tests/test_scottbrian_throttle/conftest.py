@@ -68,9 +68,5 @@ def thread_exc(
         a thread exception handler
 
     """
-    if "skip_thread_exc" in request.keywords:
-        yield None
-        return
-
     with ExcHook(monkeypatch) as exc_hook:
         yield exc_hook

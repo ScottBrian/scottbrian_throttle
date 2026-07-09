@@ -211,7 +211,6 @@ import logging
 import queue
 import threading
 import time
-
 ########################################################################
 # Standard Library
 ########################################################################
@@ -859,6 +858,7 @@ class Throttle:
                 # effect, so the design choice was made to update the target
                 # time before calling the requested function.
                 ########################################################
+                self._arrival_time = time.perf_counter_ns()
                 self._wait_time_ns = 0.0
                 if self._next_target_time + self.lb_adjustment_ns < self._arrival_time:
                     # we are well beyond the target time - we need to start

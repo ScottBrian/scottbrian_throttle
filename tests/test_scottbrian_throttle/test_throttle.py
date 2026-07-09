@@ -984,7 +984,6 @@ class TestThrottleDecoratorErrors:
 class TestThrottleDecoratorRequestErrors:
     """TestThrottleDecoratorErrors class."""
 
-    @pytest.mark.skip_thread_exc
     def test_pie_throttle_request_errors(
         self, caplog: pytest.LogCaptureFixture, thread_exc: ExcHook
     ) -> None:
@@ -1014,7 +1013,7 @@ class TestThrottleDecoratorRequestErrors:
         )
         with pytest.raises(ZeroDivisionError):
 
-            @throttle(reqs_per_sec=1, throttle_mode=ThrottleMode.ASYNC)
+            @throttle(reqs_per_sec=1)
             def f1() -> None:
                 ans = 42 / 0
                 print(f"{ans=}")
@@ -1022,62 +1021,10 @@ class TestThrottleDecoratorRequestErrors:
             f1()
 
         ################################################################
-        # async request failure
-        ################################################################
-        log_msg = (
-            "throttle f2 schedule_requests unhandled exception in "
-            "request: division by zero"
-        )
-        log_ver.add_pattern(
-            log_name="scottbrian_throttle.throttle",
-            level=logging.DEBUG,
-            pattern=log_msg,
-        )
-        zero_div_err_pattern = (
-            "Test case excepthook: args.exc_type=<class "
-            "'ZeroDivisionError'>, "
-            r"args.exc_value=ZeroDivisionError\('division by "
-            r"zero'\), "
-            "args.exc_traceback=<traceback object at 0x[0-9A-F]+>, "
-            r"args.thread=<Thread\(Thread-[0-9]+ "
-            r"\(schedule_requests\), started [0-9]+\)>"
-        )
-
-        log_ver.add_pattern(
-            log_name="scottbrian_utils.exc_hook",
-            pattern="caller test_throttle.py::"
-            "TestThrottleDecoratorRequestErrors."
-            "test_pie_throttle_request_errors:[0-9]+ is raising Exception: "
-            f'"{zero_div_err_pattern}"',
-        )
-
-        with pytest.raises(ZeroDivisionError, match=zero_div_err_pattern):
-
-            @throttle(reqs_per_sec=1, throttle_mode=ThrottleMode.ASYNC)
-            def f2() -> None:
-                ans = 42 / 0
-                print(f"{ans=}")
-
-            f2()
-            f2()
-            f2.throttle.start_shutdown()
-            log_msg = (
-                "throttle f2 start_shutdown request successfully completed "
-                f"in {f2.throttle.shutdown_elapsed_time:.4f} "
-                "seconds"
-            )
-            log_ver.add_pattern(
-                log_name="scottbrian_throttle.throttle",
-                level=logging.DEBUG,
-                pattern=log_msg,
-            )
-            thread_exc.raise_exc_if_one()
-
-        ################################################################
         # sync_lb request failure
         ################################################################
         log_msg = (
-            "throttle f4 send_request unhandled exception in request: division by zero"
+            "throttle f2 send_request unhandled exception in request: division by zero"
         )
         log_ver.add_pattern(
             log_name="scottbrian_throttle.throttle",
@@ -1087,11 +1034,11 @@ class TestThrottleDecoratorRequestErrors:
         with pytest.raises(ZeroDivisionError):
 
             @throttle(reqs_per_sec=1, bucket_size=2)
-            def f4() -> None:
+            def f2() -> None:
                 ans = 42 / 0
                 print(f"{ans=}")
 
-            f4()
+            f2()
 
         match_results = log_ver.get_match_results(caplog=caplog)
         log_ver.print_match_results(match_results)
@@ -1195,7 +1142,6 @@ class TestThrottle:
     The following keywords with various values and in all combinations
     are tested:
         requests - various increments
-        seconds - various increments, both int and float
         throttle_enabled - true/false
 
     """
@@ -1213,7 +1159,6 @@ class TestThrottle:
         send_interval = 0.0
         self.throttle_router(
             reqs_per_sec=1,
-            seconds=1,
             mode=MODE_ASYNC,
             early_count=0,
             bucket_size=0,
@@ -1225,26 +1170,22 @@ class TestThrottle:
     # test_throttle_async
     ####################################################################
     @pytest.mark.parametrize("reqs_per_sec_arg", (1, 2, 3))
-    @pytest.mark.parametrize("seconds_arg", (0.3, 1, 2))
     @pytest.mark.parametrize("send_interval_mult_arg", (0.0, 0.9, 1.0, 1.1))
     def test_throttle_async(
         self,
         reqs_per_sec_arg: int,
-        seconds_arg: IntFloat,
         send_interval_mult_arg: float,
     ) -> None:
         """Method to start throttle mode1 tests.
 
         Args:
             reqs_per_sec_arg: number of requests per interval from fixture
-            seconds_arg: interval for number of requests from fixture
             send_interval_mult_arg: interval between each send of a
                                       request
         """
-        send_interval = (seconds_arg / reqs_per_sec_arg) * send_interval_mult_arg
+        send_interval = (1 / reqs_per_sec_arg) * send_interval_mult_arg
         self.throttle_router(
             reqs_per_sec=reqs_per_sec_arg,
-            seconds=seconds_arg,
             mode=MODE_ASYNC,
             early_count=0,
             bucket_size=0,
@@ -1256,23 +1197,19 @@ class TestThrottle:
     # test_throttle_async
     ####################################################################
     @pytest.mark.parametrize("reqs_per_sec_arg", (1, 2, 3))
-    @pytest.mark.parametrize("seconds_arg", (0.3, 1, 2))
     def test_throttle_multi_async(
         self,
         reqs_per_sec_arg: int,
-        seconds_arg: IntFloat,
     ) -> None:
         """Method to start throttle multi tests.
 
         Args:
             reqs_per_sec_arg: number of requests per interval from fixture
-            seconds_arg: interval for number of requests from fixture
 
         """
         send_interval = 0.0
         self.throttle_router(
             reqs_per_sec=reqs_per_sec_arg,
-            seconds=seconds_arg,
             mode=MODE_ASYNC,
             early_count=0,
             bucket_size=0,
@@ -1294,7 +1231,6 @@ class TestThrottle:
         send_interval = 0.2
         self.throttle_router(
             reqs_per_sec=2,
-            seconds=1,
             mode=MODE_SYNC,
             early_count=0,
             bucket_size=0,
@@ -1306,26 +1242,22 @@ class TestThrottle:
     # test_throttle_sync
     ####################################################################
     @pytest.mark.parametrize("reqs_per_sec_arg", (1, 2, 3))
-    @pytest.mark.parametrize("seconds_arg", (0.3, 1, 2))
     @pytest.mark.parametrize("send_interval_mult_arg", (0.0, 0.9, 1.0, 1.1))
     def test_throttle_sync(
         self,
         reqs_per_sec_arg: int,
-        seconds_arg: IntFloat,
         send_interval_mult_arg: float,
     ) -> None:
         """Method to start throttle sync tests.
 
         Args:
             reqs_per_sec_arg: number of requests per interval from fixture
-            seconds_arg: interval for number of requests from fixture
             send_interval_mult_arg: interval between each send of a
                                       request
         """
-        send_interval = (seconds_arg / reqs_per_sec_arg) * send_interval_mult_arg
+        send_interval = (1 / reqs_per_sec_arg) * send_interval_mult_arg
         self.throttle_router(
             reqs_per_sec=reqs_per_sec_arg,
-            seconds=seconds_arg,
             mode=MODE_SYNC,
             early_count=0,
             bucket_size=0,
@@ -1337,110 +1269,21 @@ class TestThrottle:
     # test_throttle_async
     ####################################################################
     @pytest.mark.parametrize("reqs_per_sec_arg", (1, 2, 3))
-    @pytest.mark.parametrize("seconds_arg", (0.3, 1, 2))
     def test_throttle_multi_sync(
         self,
         reqs_per_sec_arg: int,
-        seconds_arg: IntFloat,
     ) -> None:
         """Method to start throttle multi tests.
 
         Args:
             reqs_per_sec_arg: number of requests per interval from fixture
-            seconds_arg: interval for number of requests from fixture
 
         """
         send_interval = 0.0
         self.throttle_router(
             reqs_per_sec=reqs_per_sec_arg,
-            seconds=seconds_arg,
             mode=MODE_SYNC,
             early_count=0,
-            bucket_size=0,
-            send_interval=send_interval,
-            request_style=1,
-            num_threads=8,
-        )
-
-    ####################################################################
-    # test_throttle_sync_ec
-    ####################################################################
-    @pytest.mark.parametrize("request_style_arg", (0, 1, 2, 3, 4, 5, 6))
-    def test_throttle_sync_ec_args_style(self, request_style_arg: int) -> None:
-        """Method to start throttle sync_ec tests.
-
-        Args:
-            request_style_arg: chooses function args mix
-
-        """
-        send_interval = 0.4
-        self.throttle_sync_ec_router(
-            reqs_per_sec=3,
-            seconds=1,
-            mode=MODE_SYNC_EC,
-            early_count=1,
-            bucket_size=0,
-            send_interval=send_interval,
-            request_style=request_style_arg,
-        )
-
-    ####################################################################
-    # test_throttle_sync_ec
-    ####################################################################
-    @pytest.mark.parametrize("reqs_per_sec_arg", (1, 2, 3))
-    @pytest.mark.parametrize("seconds_arg", (0.3, 1, 2))
-    @pytest.mark.parametrize("early_count_arg", (1, 2, 3))
-    @pytest.mark.parametrize("send_interval_mult_arg", (0.0, 0.9, 1.0, 1.1))
-    def test_throttle_sync_ec(
-        self,
-        reqs_per_sec_arg: int,
-        seconds_arg: IntFloat,
-        early_count_arg: int,
-        send_interval_mult_arg: float,
-    ) -> None:
-        """Method to start throttle sync_ec tests.
-
-        Args:
-            reqs_per_sec_arg: number of requests per interval from fixture
-            seconds_arg: interval for number of requests from fixture
-            early_count_arg: count used for sync with early count algo
-            send_interval_mult_arg: interval between each send of a
-                                      request
-        """
-        send_interval = (seconds_arg / reqs_per_sec_arg) * send_interval_mult_arg
-        self.throttle_sync_ec_router(
-            reqs_per_sec=reqs_per_sec_arg,
-            seconds=seconds_arg,
-            mode=MODE_SYNC_EC,
-            early_count=early_count_arg,
-            bucket_size=0,
-            send_interval=send_interval,
-            request_style=0,
-        )
-
-    ####################################################################
-    # test_throttle_async
-    ####################################################################
-    @pytest.mark.parametrize("reqs_per_sec_arg", (1, 2, 3))
-    @pytest.mark.parametrize("seconds_arg", (0.3, 1, 2))
-    @pytest.mark.parametrize("early_count_arg", (1, 2, 3))
-    def test_throttle_multi_sync_ec(
-        self, reqs_per_sec_arg: int, seconds_arg: IntFloat, early_count_arg: int
-    ) -> None:
-        """Method to start throttle multi tests.
-
-        Args:
-            reqs_per_sec_arg: number of requests per interval from fixture
-            seconds_arg: interval for number of requests from fixture
-            early_count_arg: count used for sync with early count algo
-
-        """
-        send_interval = 0.0
-        self.throttle_sync_ec_router(
-            reqs_per_sec=reqs_per_sec_arg,
-            seconds=seconds_arg,
-            mode=MODE_SYNC_EC,
-            early_count=early_count_arg,
             bucket_size=0,
             send_interval=send_interval,
             request_style=1,
@@ -1460,7 +1303,6 @@ class TestThrottle:
         send_interval = 0.5
         self.throttle_router(
             reqs_per_sec=4,
-            seconds=1,
             mode=MODE_SYNC_LB,
             early_count=0,
             bucket_size=1,
@@ -1472,13 +1314,11 @@ class TestThrottle:
     # test_throttle_sync_lb
     ####################################################################
     @pytest.mark.parametrize("reqs_per_sec_arg", (1, 2, 3))
-    @pytest.mark.parametrize("seconds_arg", (0.3, 1, 2))
     @pytest.mark.parametrize("bucket_size_arg", (0.5, 1, 1.5, 3))
     @pytest.mark.parametrize("send_interval_mult_arg", (0.0, 0.9, 1.0, 1.1))
     def test_throttle_sync_lb(
         self,
         reqs_per_sec_arg: int,
-        seconds_arg: IntFloat,
         bucket_size_arg: IntFloat,
         send_interval_mult_arg: float,
     ) -> None:
@@ -1486,15 +1326,13 @@ class TestThrottle:
 
         Args:
             reqs_per_sec_arg: number of requests per interval from fixture
-            seconds_arg: interval for number of requests from fixture
             bucket_size_arg: threshold used with sync leaky bucket algo
             send_interval_mult_arg: interval between each send of a
                                       request
         """
-        send_interval = (seconds_arg / reqs_per_sec_arg) * send_interval_mult_arg
+        send_interval = (1 / reqs_per_sec_arg) * send_interval_mult_arg
         self.throttle_router(
             reqs_per_sec=reqs_per_sec_arg,
-            seconds=seconds_arg,
             mode=MODE_SYNC_LB,
             early_count=0,
             bucket_size=bucket_size_arg,
@@ -1506,23 +1344,20 @@ class TestThrottle:
     # test_throttle_multi_sync_lb
     ####################################################################
     @pytest.mark.parametrize("reqs_per_sec_arg", (1, 2, 3))
-    @pytest.mark.parametrize("seconds_arg", (0.3, 1, 2))
     @pytest.mark.parametrize("bucket_size_arg", (1, 1.5, 3))
     def test_throttle_multi_sync_lb(
-        self, reqs_per_sec_arg: int, seconds_arg: IntFloat, bucket_size_arg: int
+        self, reqs_per_sec_arg: int, bucket_size_arg: int
     ) -> None:
         """Method to start throttle multi tests.
 
         Args:
             reqs_per_sec_arg: number of requests per interval from fixture
-            seconds_arg: interval for number of requests from fixture
             bucket_size_arg: threshold used with sync leaky bucket algo
 
         """
         send_interval = 0.0
         self.throttle_router(
             reqs_per_sec=reqs_per_sec_arg,
-            seconds=seconds_arg,
             mode=MODE_SYNC_LB,
             early_count=0,
             bucket_size=bucket_size_arg,
@@ -1602,8 +1437,7 @@ class TestThrottle:
     ##################################################################
     def throttle_router(
         self,
-        requests: int,
-        seconds: IntFloat,
+        reqs_per_sec: float,
         mode: int,
         early_count: int,
         bucket_size: IntFloat,
@@ -1614,8 +1448,7 @@ class TestThrottle:
         """Method test_throttle_router.
 
         Args:
-            requests: number of requests per interval
-            seconds: interval for number of requests
+            reqs_per_sec: number of requests per interval
             mode: async or sync_EC or sync_LB
             early_count: count used for sync with early count algo
             bucket_size: threshold used with sync leaky bucket algo
