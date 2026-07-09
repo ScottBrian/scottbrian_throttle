@@ -71,12 +71,6 @@ class InvalidRouteNum(ErrorTstThrottle):
     pass
 
 
-class InvalidModeNum(ErrorTstThrottle):
-    """InvalidModeNum exception class."""
-
-    pass
-
-
 class BadRequestStyleArg(ErrorTstThrottle):
     """BadRequestStyleArg exception class."""
 
@@ -112,7 +106,7 @@ class RequestItem:
 
     req_id: int = 0
     create_time: float = 0.0  # also the start time
-    throttle_mode: int = 0
+    throttle_mode: ThrottleMode = ThrottleMode.SYNC
 
     # send_interval set by sender when sending request
     send_interval: float = 0.0
@@ -153,14 +147,6 @@ class RequestThreadItem:
     thread_create_time: float = 0.0
     num_reqs: int = 0
     send_intervals: list[float | int] = field(default_factory=list)
-
-
-########################################################################
-# mode_arg fixture
-########################################################################
-MODE_ASYNC: Final[int] = 1
-MODE_SYNC: Final[int] = 2
-MODE_SYNC_LB: Final[int] = 3
 
 
 ########################################################################
@@ -231,7 +217,7 @@ class TestThrottleErrors:
     def test_throttle_bad_args(self) -> None:
         """test_throttle using bad arguments."""
         ################################################################
-        # bad requests
+        # bad reqs_per_sec
         ################################################################
         with pytest.raises(IncorrectReqsPerSecSpecified):
             _ = Throttle(reqs_per_sec=0)
@@ -376,7 +362,7 @@ class TestThrottleBasic:
         async_q_size_arg: None | int,
         name_arg: None | str,
     ) -> None:
-        """test_throttle repr with various requests and seconds.
+        """test_throttle repr with various reqs_per_sec.
 
         Args:
             reqs_per_sec_arg: request per second
@@ -885,7 +871,7 @@ class TestThrottleDecoratorErrors:
     def test_pie_throttle_bad_args(self) -> None:
         """test_throttle using bad arguments."""
         ################################################################
-        # bad requests
+        # bad reqs_per_sec
         ################################################################
         with pytest.raises(IncorrectReqsPerSecSpecified):
 
@@ -1132,16 +1118,15 @@ class TestThrottle:
     calling with the function as the first parameter, and calling the
     decorator with the function specified after the call. This test is
     especially useful to ensure that the type hints are working
-    correctly, and that all combinations are accepted by python.
+    correctly, and that python accepts all combinations.
 
-    The non-decorator cases will be simpler, with the exception of
-    doing some explicit calls to shutdown the throttle (which is not
-    possible with the decorator style - for this, we can set the
-    start_shutdown_event).
+    The non-decorator cases will be simpler, except for the explicit
+    calls to shutdown the throttle (which is not possible with the
+    decorator style - for this, we can set the start_shutdown_event).
 
     The following keywords with various values and in all combinations
     are tested:
-        requests - various increments
+        reqs_per_sec - various increments
         throttle_enabled - true/false
 
     """
@@ -1151,7 +1136,7 @@ class TestThrottle:
     ####################################################################
     @pytest.mark.parametrize("request_style_arg", (0, 1, 2, 3, 4, 5, 6))
     def test_throttle_async_args_style(self, request_style_arg: int) -> None:
-        """Method to start throttle mode1 tests.
+        """Method to start throttle tests.
 
         Args:
             request_style_arg: chooses function args mix
@@ -1159,8 +1144,7 @@ class TestThrottle:
         send_interval = 0.0
         self.throttle_router(
             reqs_per_sec=1,
-            mode=MODE_ASYNC,
-            early_count=0,
+            throttle_mode=ThrottleMode.ASYNC,
             bucket_size=0,
             send_interval=send_interval,
             request_style=request_style_arg,
@@ -1176,18 +1160,17 @@ class TestThrottle:
         reqs_per_sec_arg: int,
         send_interval_mult_arg: float,
     ) -> None:
-        """Method to start throttle mode1 tests.
+        """Method to start throttle tests.
 
         Args:
-            reqs_per_sec_arg: number of requests per interval from fixture
+            reqs_per_sec_arg: number of requests per second from fixture
             send_interval_mult_arg: interval between each send of a
                                       request
         """
         send_interval = (1 / reqs_per_sec_arg) * send_interval_mult_arg
         self.throttle_router(
             reqs_per_sec=reqs_per_sec_arg,
-            mode=MODE_ASYNC,
-            early_count=0,
+            throttle_mode=ThrottleMode.ASYNC,
             bucket_size=0,
             send_interval=send_interval,
             request_style=2,
@@ -1204,14 +1187,13 @@ class TestThrottle:
         """Method to start throttle multi tests.
 
         Args:
-            reqs_per_sec_arg: number of requests per interval from fixture
+            reqs_per_sec_arg: number of requests per second from fixture
 
         """
         send_interval = 0.0
         self.throttle_router(
             reqs_per_sec=reqs_per_sec_arg,
-            mode=MODE_ASYNC,
-            early_count=0,
+            throttle_mode=ThrottleMode.ASYNC,
             bucket_size=0,
             send_interval=send_interval,
             request_style=1,
@@ -1231,7 +1213,7 @@ class TestThrottle:
         send_interval = 0.2
         self.throttle_router(
             reqs_per_sec=2,
-            mode=MODE_SYNC,
+            throttle_mode=MODE_SYNC,
             early_count=0,
             bucket_size=0,
             send_interval=send_interval,
@@ -1251,14 +1233,14 @@ class TestThrottle:
         """Method to start throttle sync tests.
 
         Args:
-            reqs_per_sec_arg: number of requests per interval from fixture
+            reqs_per_sec_arg: number of requests per second from fixture
             send_interval_mult_arg: interval between each send of a
                                       request
         """
         send_interval = (1 / reqs_per_sec_arg) * send_interval_mult_arg
         self.throttle_router(
             reqs_per_sec=reqs_per_sec_arg,
-            mode=MODE_SYNC,
+            throttle_mode=MODE_SYNC,
             early_count=0,
             bucket_size=0,
             send_interval=send_interval,
@@ -1276,13 +1258,13 @@ class TestThrottle:
         """Method to start throttle multi tests.
 
         Args:
-            reqs_per_sec_arg: number of requests per interval from fixture
+            reqs_per_sec_arg: number of requests per second from fixture
 
         """
         send_interval = 0.0
         self.throttle_router(
             reqs_per_sec=reqs_per_sec_arg,
-            mode=MODE_SYNC,
+            throttle_mode=MODE_SYNC,
             early_count=0,
             bucket_size=0,
             send_interval=send_interval,
@@ -1303,7 +1285,7 @@ class TestThrottle:
         send_interval = 0.5
         self.throttle_router(
             reqs_per_sec=4,
-            mode=MODE_SYNC_LB,
+            throttle_mode=MODE_SYNC_LB,
             early_count=0,
             bucket_size=1,
             send_interval=send_interval,
@@ -1333,7 +1315,7 @@ class TestThrottle:
         send_interval = (1 / reqs_per_sec_arg) * send_interval_mult_arg
         self.throttle_router(
             reqs_per_sec=reqs_per_sec_arg,
-            mode=MODE_SYNC_LB,
+            throttle_mode=MODE_SYNC_LB,
             early_count=0,
             bucket_size=bucket_size_arg,
             send_interval=send_interval,
@@ -1358,7 +1340,7 @@ class TestThrottle:
         send_interval = 0.0
         self.throttle_router(
             reqs_per_sec=reqs_per_sec_arg,
-            mode=MODE_SYNC_LB,
+            throttle_mode=MODE_SYNC_LB,
             early_count=0,
             bucket_size=bucket_size_arg,
             send_interval=send_interval,
@@ -1370,7 +1352,7 @@ class TestThrottle:
     # build_send_intervals
     ####################################################################
     @staticmethod
-    def build_send_intervals(send_interval: float) -> tuple[int, list[float]]:
+    def build_send_intervals(send_interval: float, num_reqs_to_do: int) -> list[float]:
         """Build the list of send intervals.
 
         Args:
@@ -1381,46 +1363,6 @@ class TestThrottle:
 
         """
         random.seed(send_interval)
-        num_reqs_to_do = 16
-        # if throttle_mode == MODE_SYNC_EC:
-        #     num_reqs_to_do = ((((num_reqs_to_do + 1)
-        #                         // early_count)
-        #                        * early_count)
-        #                       + 1)
-
-        send_intervals = [0.0]
-        for idx in range(1, num_reqs_to_do):
-            if idx < (num_reqs_to_do // 2):
-                send_intervals.append(send_interval)
-            else:
-                if send_interval == 0.0:
-                    alt_send_interval = 0.0  # .5 * (random.random() * 2)
-                else:
-                    alt_send_interval = send_interval * (random.random() * 2)
-                # if idx == 4:
-                #     alt_send_interval = 0.015
-                send_intervals.append(alt_send_interval)
-
-        return num_reqs_to_do, send_intervals
-
-    @staticmethod
-    def build_send_intervals2(send_interval: float, num_reqs_to_do: int) -> list[float]:
-        """Build the list of send intervals.
-
-        Args:
-            send_interval: the interval between sends
-
-        Returns:
-            a list of send intervals
-
-        """
-        random.seed(send_interval)
-
-        # if throttle_mode == MODE_SYNC_EC:
-        #     num_reqs_to_do = ((((num_reqs_to_do + 1)
-        #                         // early_count)
-        #                        * early_count)
-        #                       + 1)
 
         # the first send interval is always 0.0
         # the remaining are the same value send_interval passed in
@@ -1438,8 +1380,7 @@ class TestThrottle:
     def throttle_router(
         self,
         reqs_per_sec: float,
-        mode: int,
-        early_count: int,
+        throttle_mode: ThrottleMode,
         bucket_size: IntFloat,
         send_interval: float,
         request_style: int,
@@ -1448,57 +1389,43 @@ class TestThrottle:
         """Method test_throttle_router.
 
         Args:
-            reqs_per_sec: number of requests per interval
-            mode: async or sync_EC or sync_LB
-            early_count: count used for sync with early count algo
+            reqs_per_sec: number of requests per second
+            throttle_mode: async or sync
             bucket_size: threshold used with sync leaky bucket algo
             send_interval: interval between each send of a request
             request_style: chooses function args mix
             num_threads: number of threads to issue requests
 
-        Raises:
-            InvalidModeNum: The Mode must be 1, 2, 3, or 4
-
         """
-        logger.debug(f"throttle_router entered")
+        logger.debug(
+            f"throttle_router entered: {reqs_per_sec=}, {str(throttle_mode)=}, {bucket_size=}, {send_interval=}, "
+            f"{request_style=}, {num_threads=} "
+        )
         ################################################################
         # get send interval list
         ################################################################
         num_reqs_to_do = 16
-        send_intervals = self.build_send_intervals2(send_interval, num_reqs_to_do)
+        send_intervals = self.build_send_intervals(send_interval, num_reqs_to_do)
         if num_threads > 1:
             num_reqs_to_do *= num_threads
 
         ##############################################################
         # Instantiate Throttle
         ##############################################################
-        if mode == MODE_ASYNC:
-            a_throttle = Throttle(
-                reqs_per_sec=requests, seconds=seconds, async_q_size=num_reqs_to_do
-            )
-        elif mode == MODE_SYNC:
-            a_throttle = ThrottleSync(reqs_per_sec=requests, seconds=seconds)
-        elif mode == MODE_SYNC_EC:
-            a_throttle = ThrottleSyncEc(
-                reqs_per_sec=requests, seconds=seconds, early_count=early_count
-            )
-        elif mode == MODE_SYNC_LB:
-            a_throttle = ThrottleSyncLb(
-                reqs_per_sec=requests, seconds=seconds, bucket_size=bucket_size
-            )
-        else:
-            raise InvalidModeNum("The Mode must be 1, 2, 3, or 4")
+        a_throttle = Throttle(
+            reqs_per_sec=reqs_per_sec,
+            bucket_size=bucket_size,
+            throttle_mode=throttle_mode,
+        )
 
         ################################################################
         # Instantiate Request Validator
         ################################################################
         request_validator = RequestValidator(
-            reqs_per_sec=requests,
-            seconds=seconds,
-            mode=mode,
-            early_count=early_count,
+            reqs_per_sec=reqs_per_sec,
+            throttle_mode=throttle_mode,
             bucket_size=bucket_size,
-            total_reqs_per_sec=num_reqs_to_do,
+            total_requests=num_reqs_to_do,
             send_interval=send_interval,
             send_intervals=send_intervals,
             t_throttle=a_throttle,
@@ -1507,12 +1434,12 @@ class TestThrottle:
 
         if num_threads == 0:
             logger.debug(f"throttle_router making requests")
-            self.make_reqs2(request_validator, request_style)
-            if mode == MODE_ASYNC:
+            self.make_reqs(request_validator, request_style)
+            if throttle_mode == ThrottleMode.ASYNC:
                 logger.debug(f"throttle_router doing throttle shutdown")
                 a_throttle.start_shutdown(shutdown_type=Throttle.TYPE_SHUTDOWN_SOFT)
             logger.debug(f"throttle_router validating series")
-            request_validator.validate_series2()  # validate for the series
+            request_validator.validate_series()  # validate for the series
         else:
             logger.debug(f"throttle_router creating threads")
             for t_num in range(num_threads):
@@ -1523,7 +1450,7 @@ class TestThrottle:
                     send_intervals=send_intervals.copy(),
                 )
                 thread_item = threading.Thread(
-                    target=self.make_multi_reqs2,
+                    target=self.make_multi_reqs,
                     args=(request_validator, req_thread_item),
                 )
                 req_thread_item.thread_item = thread_item
@@ -1537,479 +1464,14 @@ class TestThrottle:
             for thread_item in request_validator.thread_items:
                 thread_item.thread_item.join()
 
-            if mode == MODE_ASYNC:
+            if throttle_mode == ThrottleMode.ASYNC:
                 logger.debug(f"throttle_router doing throttle shutdown")
                 a_throttle.start_shutdown(shutdown_type=Throttle.TYPE_SHUTDOWN_SOFT)
 
             logger.debug(f"throttle_router validating series")
-            request_validator.validate_series2()
+            request_validator.validate_series()
 
         logger.debug(f"throttle_router exiting")
-
-    ####################################################################
-    # throttle_sync_router
-    ####################################################################
-    def throttle_sync_router(
-        self,
-        requests: int,
-        seconds: IntFloat,
-        mode: int,
-        early_count: int,
-        bucket_size: IntFloat,
-        send_interval: float,
-        request_style: int,
-        num_threads: int = 0,
-    ) -> None:
-        """Method test_throttle_router.
-
-        Args:
-            requests: number of requests per interval
-            seconds: interval for number of requests
-            mode: async or sync_EC or sync_LB
-            early_count: count used for sync with early count algo
-            bucket_size: threshold used with sync leaky bucket algo
-            send_interval: interval between each send of a request
-            request_style: chooses function args mix
-            num_threads: number of threads to issue requests
-
-        """
-        ################################################################
-        # get send interval list
-        ################################################################
-        num_reqs_to_do, send_intervals = self.build_send_intervals(send_interval)
-        if num_threads > 1:
-            num_reqs_to_do *= num_threads
-        ################################################################
-        # Instantiate Throttle
-        ################################################################
-        a_throttle = ThrottleSync(reqs_per_sec=requests, seconds=seconds)
-
-        ################################################################
-        # Instantiate Request Validator
-        ################################################################
-        request_validator = RequestValidator(
-            reqs_per_sec=requests,
-            seconds=seconds,
-            mode=mode,
-            early_count=early_count,
-            bucket_size=bucket_size,
-            total_reqs_per_sec=num_reqs_to_do,
-            send_interval=send_interval,
-            send_intervals=send_intervals,
-            t_throttle=a_throttle,
-            num_threads=num_threads,
-        )
-
-        if num_threads == 0:
-            self.make_reqs(request_validator, request_style)
-            request_validator.validate_series()  # validate for the series
-        else:
-            mr_threads = []
-            start_times_list: list[list[float]] = []
-            for t_num in range(num_threads):
-                start_times_list.append([])
-                mr_threads.append(
-                    threading.Thread(
-                        target=self.make_multi_reqs,
-                        args=(request_validator, start_times_list[t_num]),
-                    )
-                )
-            for mr_thread in mr_threads:
-                mr_thread.start()
-
-            for mr_thread in mr_threads:
-                mr_thread.join()
-
-            for start_times in start_times_list:
-                request_validator.start_times += start_times.copy()
-
-            request_validator.start_times.sort()
-            request_validator.validate_series()
-
-    ####################################################################
-    # throttle_sync_ec_router
-    ####################################################################
-    def throttle_sync_ec_router(
-        self,
-        requests: int,
-        seconds: IntFloat,
-        mode: int,
-        early_count: int,
-        bucket_size: IntFloat,
-        send_interval: float,
-        request_style: int,
-        num_threads: int = 0,
-    ) -> None:
-        """Method test_throttle_router.
-
-        Args:
-            requests: number of requests per interval
-            seconds: interval for number of requests
-            mode: async or sync_EC or sync_LB
-            early_count: count used for sync with early count algo
-            bucket_size: threshold used with sync leaky bucket algo
-            send_interval: interval between each send of a request
-            request_style: chooses function args mix
-            num_threads: number of threads to issue requests
-
-        """
-        ################################################################
-        # get send interval list
-        ################################################################
-        num_reqs_to_do, send_intervals = self.build_send_intervals(send_interval)
-        if num_threads > 1:
-            num_reqs_to_do *= num_threads
-        ################################################################
-        # Instantiate Throttle
-        ################################################################
-        a_throttle = ThrottleSyncEc(
-            reqs_per_sec=requests, seconds=seconds, early_count=early_count
-        )
-
-        ################################################################
-        # Instantiate Request Validator
-        ################################################################
-        request_validator = RequestValidator(
-            reqs_per_sec=requests,
-            seconds=seconds,
-            mode=mode,
-            early_count=early_count,
-            bucket_size=bucket_size,
-            total_reqs_per_sec=num_reqs_to_do,
-            send_interval=send_interval,
-            send_intervals=send_intervals,
-            t_throttle=a_throttle,
-            num_threads=num_threads,
-        )
-
-        if num_threads == 0:
-            self.make_reqs(request_validator, request_style)
-            request_validator.validate_series()  # validate for the series
-        else:
-            mr_threads = []
-            start_times_list: list[list[float]] = []
-            for t_num in range(num_threads):
-                start_times_list.append([])
-                mr_threads.append(
-                    threading.Thread(
-                        target=self.make_multi_reqs,
-                        args=(request_validator, start_times_list[t_num]),
-                    )
-                )
-            for mr_thread in mr_threads:
-                mr_thread.start()
-
-            for mr_thread in mr_threads:
-                mr_thread.join()
-
-            for start_times in start_times_list:
-                request_validator.start_times += start_times.copy()
-
-            request_validator.start_times.sort()
-            request_validator.validate_series()
-
-    ####################################################################
-    # throttle_sync_lb_router
-    ####################################################################
-    def throttle_sync_lb_router(
-        self,
-        requests: int,
-        seconds: IntFloat,
-        mode: int,
-        early_count: int,
-        bucket_size: IntFloat,
-        send_interval: float,
-        request_style: int,
-        num_threads: int = 0,
-    ) -> None:
-        """Method test_throttle_router.
-
-        Args:
-            requests: number of requests per interval
-            seconds: interval for number of requests
-            mode: async or sync_EC or sync_LB
-            early_count: count used for sync with early count algo
-            bucket_size: threshold used with sync leaky bucket algo
-            send_interval: interval between each send of a request
-            request_style: chooses function args mix
-            num_threads: number of threads to issue requests
-
-        """
-        logger.debug(f"throttle_sync_lb_router entered")
-        ################################################################
-        # get send interval list
-        ################################################################
-        num_reqs_to_do = 16
-        send_intervals = self.build_send_intervals2(send_interval, num_reqs_to_do)
-        if num_threads > 1:
-            num_reqs_to_do *= num_threads
-        ################################################################
-        # Instantiate Throttle
-        ################################################################
-        a_throttle = ThrottleSyncLb(
-            reqs_per_sec=requests, seconds=seconds, bucket_size=bucket_size
-        )
-
-        ################################################################
-        # Instantiate Request Validator
-        ################################################################
-        request_validator = RequestValidator(
-            reqs_per_sec=requests,
-            seconds=seconds,
-            mode=mode,
-            early_count=early_count,
-            bucket_size=bucket_size,
-            total_reqs_per_sec=num_reqs_to_do,
-            send_interval=send_interval,
-            send_intervals=send_intervals,
-            t_throttle=a_throttle,
-            num_threads=num_threads,
-        )
-
-        if num_threads == 0:
-            self.make_reqs2(request_validator, request_style)
-            request_validator.validate_series2()  # validate for the series
-        else:
-            for t_num in range(num_threads):
-                req_thread_item = RequestThreadItem(
-                    thread_item_idx=t_num,
-                    thread_create_time=perf_counter_ns(),
-                    num_reqs=len(send_intervals),
-                    send_intervals=send_intervals.copy(),
-                )
-                thread_item = threading.Thread(
-                    target=self.make_multi_reqs2,
-                    args=(request_validator, req_thread_item),
-                )
-                req_thread_item.thread_item = thread_item
-                request_validator.thread_items.append(req_thread_item)
-
-            logger.debug(f"throttle_sync_lb_router starting threads")
-            for thread_item in request_validator.thread_items:
-                thread_item.thread_item.start()
-
-            logger.debug(f"throttle_sync_lb_router joining threads")
-            for thread_item in request_validator.thread_items:
-                thread_item.thread_item.join()
-
-            logger.debug(f"throttle_sync_lb_router validating series")
-            request_validator.validate_series2()
-        logger.debug(f"throttle_sync_lb_router exiting")
-
-    ####################################################################
-    # throttle_async_router
-    ####################################################################
-    def throttle_async_router(
-        self,
-        requests: int,
-        seconds: IntFloat,
-        mode: int,
-        early_count: int,
-        bucket_size: IntFloat,
-        send_interval: float,
-        request_style: int,
-        num_threads: int = 0,
-    ) -> None:
-        """Method test_throttle_router.
-
-        Args:
-            requests: number of requests per interval
-            seconds: interval for number of requests
-            mode: async or sync_EC or sync_LB
-            early_count: count used for sync with early count algo
-            bucket_size: threshold used with sync leaky bucket algo
-            send_interval: interval between each send of a request
-            request_style: chooses function args mix
-            num_threads: number of threads to issue requests
-
-        """
-        ################################################################
-        # get send interval list
-        ################################################################
-        num_reqs_to_do, send_intervals = self.build_send_intervals(send_interval)
-        if num_threads > 1:
-            num_reqs_to_do *= num_threads
-        ################################################################
-        # Instantiate Throttle
-        ################################################################
-        a_throttle = Throttle(
-            reqs_per_sec=requests, seconds=seconds, async_q_size=num_reqs_to_do
-        )
-
-        ################################################################
-        # Instantiate Request Validator
-        ################################################################
-        request_validator = RequestValidator(
-            reqs_per_sec=requests,
-            seconds=seconds,
-            mode=mode,
-            early_count=early_count,
-            bucket_size=bucket_size,
-            total_reqs_per_sec=num_reqs_to_do,
-            send_interval=send_interval,
-            send_intervals=send_intervals,
-            t_throttle=a_throttle,
-            num_threads=num_threads,
-        )
-
-        if num_threads == 0:
-            self.make_reqs(request_validator, request_style)
-            a_throttle.start_shutdown(shutdown_type=Throttle.TYPE_SHUTDOWN_SOFT)
-            request_validator.validate_series()  # validate for the series
-        else:
-            mr_threads = []
-            start_times_list: list[list[float]] = []
-            for t_num in range(num_threads):
-                start_times_list.append([])
-                mr_threads.append(
-                    threading.Thread(
-                        target=self.make_multi_reqs,
-                        args=(request_validator, start_times_list[t_num]),
-                    )
-                )
-            for mr_thread in mr_threads:
-                mr_thread.start()
-
-            for mr_thread in mr_threads:
-                mr_thread.join()
-
-            a_throttle.start_shutdown(shutdown_type=Throttle.TYPE_SHUTDOWN_SOFT)
-
-            for start_times in start_times_list:
-                request_validator.start_times += start_times.copy()
-
-            request_validator.start_times.sort()
-            request_validator.validate_series()
-
-    ####################################################################
-    # make_multi_reqs
-    ####################################################################
-    @staticmethod
-    def make_multi_reqs(
-        request_validator: "RequestValidator", start_times: list[float]
-    ) -> None:
-        """Make the requests.
-
-        Args:
-            request_validator: the validator for the reqs
-            start_times: list of times needed for validation
-
-        """
-        # pauser = Pauser()
-        a_throttle = request_validator.t_throttle
-        # throttle_mode = request_validator.throttle_mode
-
-        for i, s_interval in enumerate(request_validator.send_intervals):
-            # 0
-            start_times.append(perf_counter_ns())
-            # pauser.pause(s_interval)  # first one is 0.0
-            # request_validator.before_req_times.append(perf_counter_ns())
-            _ = a_throttle.send_request(request_validator.request0)
-            # request_validator.after_req_times.append(perf_counter_ns())
-
-    ####################################################################
-    # make_reqs2
-    ####################################################################
-    @staticmethod
-    def make_reqs2(request_validator: "RequestValidator", request_style: int) -> None:
-        """Make the requests.
-
-        Args:
-            request_validator: the validator for the reqs
-            request_style: determine the args to pass
-
-        Raises:
-            BadRequestStyleArg: The request style arg must be 0 to 6
-
-        """
-
-        pauser = Pauser()
-        a_throttle = request_validator.t_throttle
-        mode = request_validator.mode
-
-        call_args: str
-
-        if request_style == 0:
-            call_args = "a_throttle.send_request(request_validator.request0b)"
-        elif request_style == 1:
-            call_args = "a_throttle.send_request(request_validator.request1b, idx)"
-        elif request_style == 2:
-            call_args = "a_throttle.send_request(request_validator.request2b, idx, request_validator.requests)"
-        elif request_style == 3:
-            call_args = "a_throttle.send_request(request_validator.request3b, idx=idx)"
-        elif request_style == 4:
-            call_args = "a_throttle.send_request(request_validator.request4b, idx=idx, seconds=request_validator.seconds)"
-        elif request_style == 5:
-            call_args = "a_throttle.send_request(request_validator.request5b, idx, interval=request_validator.send_interval,)"
-        elif request_style == 6:
-            call_args = (
-                "a_throttle.send_request(request_validator.request6b, "
-                "idx, "
-                "request_validator.requests, "
-                "seconds=request_validator.seconds, "
-                "interval=request_validator.send_interval,)"
-            )
-        else:
-            raise BadRequestStyleArg("The request style arg must be 0 to 6")
-
-        for idx, s_interval in enumerate(request_validator.send_intervals):
-            request_item = RequestItem(
-                req_id=idx,
-                create_time=perf_counter_ns(),
-                throttle_mode=mode,
-                send_interval=s_interval,
-            )
-
-            if s_interval > 0.0:
-                pauser.pause(s_interval)
-            request_item.send_time_ns = perf_counter_ns()
-            request_validator.request_item.append(request_item)
-            rc = eval(call_args)
-            request_item.return_time = perf_counter_ns()
-            exp_rc = idx if mode != MODE_ASYNC else Throttle.RC_OK
-            assert rc == exp_rc
-
-    ####################################################################
-    # make_multi_reqs2
-    ####################################################################
-    @staticmethod
-    def make_multi_reqs2(
-        request_validator: "RequestValidator", request_thread_item: RequestThreadItem
-    ) -> None:
-        """Make the requests.
-
-        Args:
-            request_validator: the validator for the reqs
-            request_thread_item: the request thread item
-
-        """
-        # logger.debug(
-        #     f"making_multi_reqs entered for " f"{request_thread_item.thread_item_idx=}"
-        # )
-        pauser = Pauser()
-        a_throttle = request_validator.t_throttle
-
-        for idx, s_interval in enumerate(request_thread_item.send_intervals):
-            request_item = RequestItem(
-                req_id=idx,
-                create_time=perf_counter_ns(),
-                throttle_mode=request_validator.mode,
-                send_interval=s_interval,
-            )
-
-            if s_interval > 0.0:
-                pauser.pause(s_interval)
-            request_item.send_time_ns = perf_counter_ns()
-            # logger.debug(
-            #     f"making_multi_reqs {request_thread_item.thread_item_idx=} "
-            #     f"sending request {idx=} to throttle"
-            # )
-            _ = a_throttle.send_request(
-                request_validator.request0c, request_item=request_item
-            )
-            # logger.debug(f"making_multi_reqs sending request to throttle")
-            request_item.return_time = perf_counter_ns()
-        # logger.debug(f"making_multi_reqs exiting")
 
     ####################################################################
     # make_reqs
@@ -2029,152 +1491,98 @@ class TestThrottle:
 
         pauser = Pauser()
         a_throttle = request_validator.t_throttle
-        mode = request_validator.mode
+        throttle_mode = request_validator.throttle_mode
 
         call_args: str
 
         if request_style == 0:
-            call_args = "a_throttle.send_request(request_validator.request0)"
+            call_args = "a_throttle.send_request(request_validator.request0b)"
         elif request_style == 1:
-            call_args = "a_throttle.send_request(request_validator.request1, i)"
+            call_args = "a_throttle.send_request(request_validator.request1b, idx)"
         elif request_style == 2:
-            call_args = "a_throttle.send_request(request_validator.request2, i, request_validator.requests)"
+            call_args = "a_throttle.send_request(request_validator.request2b, idx, request_validator.requests)"
         elif request_style == 3:
-            call_args = "a_throttle.send_request(request_validator.request3, idx=i)"
+            call_args = "a_throttle.send_request(request_validator.request3b, idx=idx)"
         elif request_style == 4:
-            call_args = "a_throttle.send_request(request_validator.request4, idx=i, seconds=request_validator.seconds)"
+            call_args = "a_throttle.send_request(request_validator.request4b, idx=idx, interval=request_validator.send_interval)"
         elif request_style == 5:
-            call_args = "a_throttle.send_request(request_validator.request5, i, interval=request_validator.send_interval,)"
+            call_args = "a_throttle.send_request(request_validator.request5b, idx, interval=request_validator.send_interval,)"
         elif request_style == 6:
             call_args = (
-                "a_throttle.send_request(request_validator.request6, "
-                "i, "
+                "a_throttle.send_request(request_validator.request6b, "
+                "idx, "
                 "request_validator.requests, "
-                "seconds=request_validator.seconds, "
+                "interval=request_validator.send_interval, "
                 "interval=request_validator.send_interval,)"
             )
         else:
             raise BadRequestStyleArg("The request style arg must be 0 to 6")
 
-        for i, s_interval in enumerate(request_validator.send_intervals):
-            # 0
-            request_validator.start_times.append(perf_counter_ns())
-            pauser.pause(s_interval)  # first one is 0.0
-            request_validator.before_req_times.append(perf_counter_ns())
+        for idx, s_interval in enumerate(request_validator.send_intervals):
+            request_item = RequestItem(
+                req_id=idx,
+                create_time=perf_counter_ns(),
+                throttle_mode=throttle_mode,
+                send_interval=s_interval,
+            )
+
+            if s_interval > 0.0:
+                pauser.pause(s_interval)
+            request_item.send_time_ns = perf_counter_ns()
+            request_validator.request_item.append(request_item)
             rc = eval(call_args)
-            request_validator.after_req_times.append(perf_counter_ns())
-            exp_rc = i if mode != MODE_ASYNC else Throttle.RC_OK
+            request_item.return_time = perf_counter_ns()
+            exp_rc = idx if throttle_mode != ThrottleMode.ASYNC else Throttle.RC_OK
             assert rc == exp_rc
 
-        # if request_style == 0:
-        #     for i, s_interval in enumerate(request_validator.send_intervals):
-        #         # 0
-        #         request_validator.start_times.append(perf_counter_ns())
-        #         pauser.pause(s_interval)  # first one is 0.0
-        #         request_validator.before_req_times.append(perf_counter_ns())
-        #         rc = a_throttle.send_request(request_validator.request0)
-        #         # rc = eval(
-        #         #     call_list[request_style_arg][0] + call_list[request_style_arg][1]
-        #         # )
-        #         request_validator.after_req_times.append(perf_counter_ns())
-        #         exp_rc = i if throttle_mode != MODE_ASYNC else Throttle.RC_OK
-        #         assert rc == exp_rc
-        #
-        # elif request_style == 1:
-        #     for i, s_interval in enumerate(request_validator.send_intervals):
-        #         # 1
-        #         request_validator.start_times.append(perf_counter_ns())
-        #         pauser.pause(s_interval)  # first one is 0.0
-        #         request_validator.before_req_times.append(perf_counter_ns())
-        #         rc = a_throttle.send_request(request_validator.request1, i)
-        #         request_validator.after_req_times.append(perf_counter_ns())
-        #         exp_rc = i if throttle_mode != MODE_ASYNC else Throttle.RC_OK
-        #         assert rc == exp_rc
-        #
-        # elif request_style == 2:
-        #     for i, s_interval in enumerate(request_validator.send_intervals):
-        #         # 2
-        #         request_validator.start_times.append(perf_counter_ns())
-        #         # time_traces, stops_time = pauser.pause(s_interval)
-        #         pauser.pause(s_interval)  # first
-        #         # one is 0.0
-        #         # request_validator.time_traces.append(time_traces)
-        #         # request_validator.stop_times.append(stops_time)
-        #         request_validator.before_req_times.append(perf_counter_ns())
-        #         rc = a_throttle.send_request(
-        #             request_validator.request2, i, request_validator.requests
-        #         )
-        #         request_validator.after_req_times.append(perf_counter_ns())
-        #         exp_rc = i if throttle_mode != MODE_ASYNC else Throttle.RC_OK
-        #         assert rc == exp_rc
-        #
-        # elif request_style == 3:
-        #     for i, s_interval in enumerate(request_validator.send_intervals):
-        #         # 3
-        #         request_validator.start_times.append(perf_counter_ns())
-        #         pauser.pause(s_interval)  # first one is 0.0
-        #         request_validator.before_req_times.append(perf_counter_ns())
-        #         rc = a_throttle.send_request(request_validator.request3, idx=i)
-        #         request_validator.after_req_times.append(perf_counter_ns())
-        #         exp_rc = i if throttle_mode != MODE_ASYNC else Throttle.RC_OK
-        #         assert rc == exp_rc
-        #
-        # elif request_style == 4:
-        #     for i, s_interval in enumerate(request_validator.send_intervals):
-        #         # 4
-        #         request_validator.start_times.append(perf_counter_ns())
-        #         pauser.pause(s_interval)  # first one is 0.0
-        #         request_validator.before_req_times.append(perf_counter_ns())
-        #         rc = a_throttle.send_request(
-        #             request_validator.request4, idx=i, seconds=request_validator.seconds
-        #         )
-        #         request_validator.after_req_times.append(perf_counter_ns())
-        #         exp_rc = i if throttle_mode != MODE_ASYNC else Throttle.RC_OK
-        #         assert rc == exp_rc
-        #
-        # elif request_style == 5:
-        #     for i, s_interval in enumerate(request_validator.send_intervals):
-        #         # 5
-        #         request_validator.start_times.append(perf_counter_ns())
-        #         pauser.pause(s_interval)  # first one is 0.0
-        #         request_validator.before_req_times.append(perf_counter_ns())
-        #         rc = a_throttle.send_request(
-        #             request_validator.request5,
-        #             i,
-        #             interval=request_validator.send_interval,
-        #         )
-        #         request_validator.after_req_times.append(perf_counter_ns())
-        #         exp_rc = i if throttle_mode != MODE_ASYNC else Throttle.RC_OK
-        #         assert rc == exp_rc
-        #
-        # elif request_style == 6:
-        #     for i, s_interval in enumerate(request_validator.send_intervals):
-        #         # 6
-        #         request_validator.start_times.append(perf_counter_ns())
-        #         if i == 5:
-        #             pauser.pause(s_interval + 0.97)
-        #         else:
-        #             pauser.pause(s_interval)  # first one is 0.0
-        #         request_validator.before_req_times.append(perf_counter_ns())
-        #         rc = a_throttle.send_request(
-        #             request_validator.request6,
-        #             i,
-        #             request_validator.requests,
-        #             seconds=request_validator.seconds,
-        #             interval=request_validator.send_interval,
-        #         )
-        #         request_validator.after_req_times.append(perf_counter_ns())
-        #         exp_rc = i if throttle_mode != MODE_ASYNC else Throttle.RC_OK
-        #         assert rc == exp_rc
-        # else:
-        #     raise BadRequestStyleArg("The request style arg must be 0 to 6")
+    ####################################################################
+    # make_multi_reqs
+    ####################################################################
+    @staticmethod
+    def make_multi_reqs(
+        request_validator: "RequestValidator", request_thread_item: RequestThreadItem
+    ) -> None:
+        """Make the requests.
+
+        Args:
+            request_validator: the validator for the reqs
+            request_thread_item: the request thread item
+
+        """
+        # logger.debug(
+        #     f"making_multi_reqs entered for " f"{request_thread_item.thread_item_idx=}"
+        # )
+        pauser = Pauser()
+        a_throttle = request_validator.t_throttle
+
+        for idx, s_interval in enumerate(request_thread_item.send_intervals):
+            request_item = RequestItem(
+                req_id=idx,
+                create_time=perf_counter_ns(),
+                throttle_mode=request_validator.throttle_mode,
+                send_interval=s_interval,
+            )
+
+            if s_interval > 0.0:
+                pauser.pause(s_interval)
+            request_item.send_time_ns = perf_counter_ns()
+            # logger.debug(
+            #     f"making_multi_reqs {request_thread_item.thread_item_idx=} "
+            #     f"sending request {idx=} to throttle"
+            # )
+            _ = a_throttle.send_request(
+                request_validator.request0c, request_item=request_item
+            )
+            # logger.debug(f"making_multi_reqs sending request to throttle")
+            request_item.return_time = perf_counter_ns()
+        # logger.debug(f"making_multi_reqs exiting")
 
     ####################################################################
     # test_pie_throttle_async_args_style
     ####################################################################
     @pytest.mark.parametrize("request_style_arg", (0, 1, 2, 3, 4, 5, 6))
     def test_pie_throttle_async_args_style(self, request_style_arg: int) -> None:
-        """Method to start throttle mode1 tests.
+        """Method to start throttle tests.
 
         Args:
             request_style_arg: chooses which function args to use
@@ -2185,7 +1593,6 @@ class TestThrottle:
         ################################################################
         pauser = Pauser()
         reqs_per_sec_arg = 4
-        seconds_arg = 1
         send_interval = 0.1
 
         ################################################################
@@ -2220,8 +1627,8 @@ class TestThrottle:
         # f2
         ################################################################
         @throttle(reqs_per_sec=reqs_per_sec_arg, throttle_mode=ThrottleMode.ASYNC)
-        def f2(idx: int, requests: int) -> Any:
-            request_validator.callback2(idx, requests)
+        def f2(idx: int, reqs_per_sec: int) -> Any:
+            request_validator.callback2(idx, reqs_per_sec)
 
         call_list.append(("f2", "(i, reqs_per_sec_arg)", "0"))
 
@@ -2256,9 +1663,9 @@ class TestThrottle:
         # f6
         ################################################################
         @throttle(reqs_per_sec=reqs_per_sec_arg, throttle_mode=ThrottleMode.ASYNC)
-        def f6(idx: int, requests: int, *, seconds: float, interval: float) -> Any:
+        def f6(idx: int, reqs_per_sec: int, *, seconds: float, interval: float) -> Any:
             request_validator.callback6(
-                idx, requests, seconds=seconds, interval=interval
+                idx, reqs_per_sec, seconds=seconds, interval=interval
             )
 
         call_list.append(
@@ -2274,11 +1681,9 @@ class TestThrottle:
         ################################################################
         request_validator = RequestValidator(
             reqs_per_sec=reqs_per_sec_arg,
-            seconds=seconds_arg,
-            mode=MODE_ASYNC,
-            early_count=0,
+            throttle_mode=MODE_ASYNC,
             bucket_size=0,
-            total_reqs_per_sec=num_reqs_to_do,
+            total_requests=num_reqs_to_do,
             send_interval=send_interval,
             send_intervals=send_intervals,
             t_throttle=eval(call_list[request_style_arg][0]).throttle,
@@ -2311,10 +1716,10 @@ class TestThrottle:
         seconds_arg: IntFloat,
         send_interval_mult_arg: float,
     ) -> None:
-        """Method to start throttle mode1 tests.
+        """Method to start throttle tests.
 
         Args:
-            reqs_per_sec_arg: number of requests per interval from fixture
+            reqs_per_sec_arg: number of requests per second from fixture
             seconds_arg: interval for number of requests from fixture
             send_interval_mult_arg: interval between each send of a
                                       request
@@ -2343,7 +1748,7 @@ class TestThrottle:
         request_validator = RequestValidator(
             reqs_per_sec=reqs_per_sec_arg,
             seconds=seconds_arg,
-            mode=MODE_ASYNC,
+            throttle_mode=MODE_ASYNC,
             early_count=0,
             bucket_size=0,
             total_reqs_per_sec=num_reqs_to_do,
@@ -2422,8 +1827,8 @@ class TestThrottle:
         # f2
         ################################################################
         @throttle_sync(reqs_per_sec=reqs_per_sec_arg, seconds=seconds_arg)
-        def f2(idx: int, requests: int) -> int:
-            request_validator.callback2(idx, requests)
+        def f2(idx: int, reqs_per_sec: int) -> int:
+            request_validator.callback2(idx, reqs_per_sec)
             return idx + 42 + 2
 
         call_list.append(("f2", "(i, reqs_per_sec_arg)", "i + 42 + 2"))
@@ -2464,9 +1869,9 @@ class TestThrottle:
         # f6
         ################################################################
         @throttle_sync(reqs_per_sec=reqs_per_sec_arg, seconds=seconds_arg)
-        def f6(idx: int, requests: int, *, seconds: float, interval: float) -> int:
+        def f6(idx: int, reqs_per_sec: int, *, seconds: float, interval: float) -> int:
             request_validator.callback6(
-                idx, requests, seconds=seconds, interval=interval
+                idx, reqs_per_sec, seconds=seconds, interval=interval
             )
             return idx + 42 + 6
 
@@ -2485,7 +1890,7 @@ class TestThrottle:
         request_validator = RequestValidator(
             reqs_per_sec=reqs_per_sec_arg,
             seconds=seconds_arg,
-            mode=MODE_SYNC,
+            throttle_mode=MODE_SYNC,
             early_count=0,
             bucket_size=0,
             total_reqs_per_sec=num_reqs_to_do,
@@ -2521,7 +1926,7 @@ class TestThrottle:
         """Method to start throttle sync tests.
 
         Args:
-            reqs_per_sec_arg: number of requests per interval from fixture
+            reqs_per_sec_arg: number of requests per second from fixture
             seconds_arg: interval for number of requests from fixture
             send_interval_mult_arg: interval between each send of a
                                       request
@@ -2551,7 +1956,7 @@ class TestThrottle:
         request_validator = RequestValidator(
             reqs_per_sec=reqs_per_sec_arg,
             seconds=seconds_arg,
-            mode=MODE_SYNC,
+            throttle_mode=MODE_SYNC,
             early_count=0,
             bucket_size=0,
             total_reqs_per_sec=num_reqs_to_do,
@@ -2643,8 +2048,8 @@ class TestThrottle:
             seconds=seconds_arg,
             early_count=early_count_arg,
         )
-        def f2(idx: int, requests: int) -> int:
-            request_validator.callback2(idx, requests)
+        def f2(idx: int, reqs_per_sec: int) -> int:
+            request_validator.callback2(idx, reqs_per_sec)
             return idx + 42 + 2
 
         call_list.append(("f2", "(i, reqs_per_sec_arg)", "i + 42 + 2"))
@@ -2701,9 +2106,9 @@ class TestThrottle:
             seconds=seconds_arg,
             early_count=early_count_arg,
         )
-        def f6(idx: int, requests: int, *, seconds: float, interval: float) -> int:
+        def f6(idx: int, reqs_per_sec: int, *, seconds: float, interval: float) -> int:
             request_validator.callback6(
-                idx, requests, seconds=seconds, interval=interval
+                idx, reqs_per_sec, seconds=seconds, interval=interval
             )
             return idx + 42 + 6
 
@@ -2723,7 +2128,7 @@ class TestThrottle:
         request_validator = RequestValidator(
             reqs_per_sec=reqs_per_sec_arg,
             seconds=seconds_arg,
-            mode=MODE_SYNC_EC,
+            throttle_mode=MODE_SYNC_EC,
             early_count=early_count_arg,
             bucket_size=0,
             total_reqs_per_sec=num_reqs_to_do,
@@ -2741,78 +2146,6 @@ class TestThrottle:
             rc = eval(call_list[request_style_arg][0] + call_list[request_style_arg][1])
             request_validator.after_req_times.append(perf_counter_ns())
             assert rc == eval(call_list[request_style_arg][2])
-        request_validator.validate_series()  # validate for the series
-
-    ####################################################################
-    # test_throttle_sync_ec
-    ####################################################################
-    @pytest.mark.parametrize("reqs_per_sec_arg", (1, 2, 3))
-    @pytest.mark.parametrize("seconds_arg", (0.3, 1, 2))
-    @pytest.mark.parametrize("early_count_arg", (1, 2, 3))
-    @pytest.mark.parametrize("send_interval_mult_arg", (0.0, 0.9, 1.0, 1.1))
-    def test_pie_throttle_sync_ec(
-        self,
-        reqs_per_sec_arg: int,
-        seconds_arg: IntFloat,
-        early_count_arg: int,
-        send_interval_mult_arg: float,
-    ) -> None:
-        """Method to start throttle sync_ec tests.
-
-        Args:
-            reqs_per_sec_arg: number of requests per interval from fixture
-            seconds_arg: interval for number of requests from fixture
-            early_count_arg: count used for sync with early count algo
-            send_interval_mult_arg: interval between each send of a
-                                      request
-        """
-        ################################################################
-        # Instantiate Request Validator
-        ################################################################
-        pauser = Pauser()
-        send_interval = (seconds_arg / reqs_per_sec_arg) * send_interval_mult_arg
-
-        ################################################################
-        # get send interval list
-        ################################################################
-        num_reqs_to_do, send_intervals = self.build_send_intervals(send_interval)
-
-        ################################################################
-        # Decorate functions with throttle
-        ################################################################
-        @throttle_sync_ec(
-            reqs_per_sec=reqs_per_sec_arg,
-            seconds=seconds_arg,
-            early_count=early_count_arg,
-        )
-        def f5(idx: int, *, interval: float) -> int:
-            request_validator.callback5(idx, interval=interval)
-            return idx + 42 + 5
-
-        ################################################################
-        # Instantiate the validator
-        ################################################################
-        request_validator = RequestValidator(
-            reqs_per_sec=reqs_per_sec_arg,
-            seconds=seconds_arg,
-            mode=MODE_SYNC_EC,
-            early_count=early_count_arg,
-            bucket_size=0,
-            total_reqs_per_sec=num_reqs_to_do,
-            send_interval=send_interval,
-            send_intervals=send_intervals,
-            t_throttle=f5.throttle,
-        )
-        ################################################################
-        # Invoke the functions
-        ################################################################
-        for i, s_interval in enumerate(send_intervals):
-            request_validator.start_times.append(perf_counter_ns())
-            pauser.pause(s_interval)  # first one is 0.0
-            request_validator.before_req_times.append(perf_counter_ns())
-            rc = f5(idx=i, interval=send_interval_mult_arg)
-            request_validator.after_req_times.append(perf_counter_ns())
-            assert rc == i + 42 + 5
         request_validator.validate_series()  # validate for the series
 
     ####################################################################
@@ -2880,8 +2213,8 @@ class TestThrottle:
             reqs_per_sec=reqs_per_sec_arg,
             bucket_size=bucket_size_arg,
         )
-        def f2(idx: int, requests: int) -> int:
-            request_validator.callback2(idx, requests)
+        def f2(idx: int, reqs_per_sec: int) -> int:
+            request_validator.callback2(idx, reqs_per_sec)
             return idx + 42 + 2
 
         call_list.append(("f2", "(i, reqs_per_sec_arg)", "i + 42 + 2"))
@@ -2934,9 +2267,9 @@ class TestThrottle:
             reqs_per_sec=reqs_per_sec_arg,
             bucket_size=bucket_size_arg,
         )
-        def f6(idx: int, requests: int, *, seconds: float, interval: float) -> int:
+        def f6(idx: int, reqs_per_sec: int, *, seconds: float, interval: float) -> int:
             request_validator.callback6(
-                idx, requests, seconds=seconds, interval=interval
+                idx, reqs_per_sec, seconds=seconds, interval=interval
             )
             return idx + 42 + 6
 
@@ -2956,7 +2289,7 @@ class TestThrottle:
         request_validator = RequestValidator(
             reqs_per_sec=reqs_per_sec_arg,
             seconds=seconds_arg,
-            mode=MODE_SYNC_LB,
+            throttle_mode=MODE_SYNC_LB,
             early_count=0,
             bucket_size=bucket_size_arg,
             total_reqs_per_sec=num_reqs_to_do,
@@ -2993,7 +2326,7 @@ class TestThrottle:
         """Method to start throttle sync_lb tests.
 
         Args:
-            reqs_per_sec_arg: number of requests per interval from fixture
+            reqs_per_sec_arg: number of requests per second from fixture
             seconds_arg: interval for number of requests from fixture
             bucket_size_arg: threshold used with sync leaky bucket algo
             send_interval_mult_arg: interval between each send of a
@@ -3017,9 +2350,9 @@ class TestThrottle:
             reqs_per_sec=reqs_per_sec_arg,
             bucket_size=bucket_size_arg,
         )
-        def f6(idx: int, requests: int, *, seconds: float, interval: float) -> int:
+        def f6(idx: int, reqs_per_sec: int, *, seconds: float, interval: float) -> int:
             request_validator.callback6(
-                idx, requests, seconds=seconds, interval=interval
+                idx, reqs_per_sec, seconds=seconds, interval=interval
             )
             return idx + 42 + 6
 
@@ -3029,7 +2362,7 @@ class TestThrottle:
         request_validator = RequestValidator(
             reqs_per_sec=reqs_per_sec_arg,
             seconds=seconds_arg,
-            mode=MODE_SYNC_LB,
+            throttle_mode=MODE_SYNC_LB,
             early_count=0,
             bucket_size=bucket_size_arg,
             total_reqs_per_sec=num_reqs_to_do,
@@ -3171,7 +2504,7 @@ class TestThrottleMisc:
         """Method to test get interval in seconds.
 
         Args:
-            reqs_per_sec_arg: number of requests specified for the throttle
+            reqs_per_sec_arg: number of requests per second specified for the throttle
             seconds_arg: number of seconds specified for the throttle
 
         """
@@ -3192,7 +2525,7 @@ class TestThrottleMisc:
         """Method to test get interval in nanoseconds.
 
         Args:
-            reqs_per_sec_arg: number of requests specified for the throttle
+            reqs_per_sec_arg: number of requests per second specified for the throttle
             seconds_arg: number of seconds specified for the throttle
 
         """
@@ -3215,7 +2548,7 @@ class TestThrottleMisc:
         """Method to test get completion time in seconds.
 
         Args:
-            reqs_per_sec_arg: number of requests specified for the throttle
+            reqs_per_sec_arg: number of requests per second specified for the throttle
             seconds_arg: number of seconds specified for the throttle
 
         """
@@ -3250,7 +2583,7 @@ class TestThrottleMisc:
         """Method to test get completion time in nanoseconds.
 
         Args:
-            reqs_per_sec_arg: number of requests specified for the throttle
+            reqs_per_sec_arg: number of requests per second specified for the throttle
             seconds_arg: number of seconds specified for the throttle
 
         """
@@ -3487,19 +2820,21 @@ def f2_target(req_time: ReqTime, log_ver: LogVer) -> None:
 # get_throttle
 ########################################################################
 def get_async_throttle(
-    requests: int, seconds: float, async_q_size: int, name: Optional[str] = None
+    reqs_per_sec: int, async_q_size: int, name: Optional[str] = None
 ) -> tuple[Throttle, float]:
     """Obtain an async throttle and return it.
 
     Args:
-        requests: number of requests per *seconds&
-        seconds: number of seconds the the number of *requests*
+        reqs_per_sec: number of requests per second
         name: throttle name used in log messages
-        async_q_size: max number of requests that will be queued
+        async_q_size: max number of reqs_per_sec that will be queued
 
     """
     a_throttle = Throttle(
-        reqs_per_sec=requests, seconds=seconds, name=name, async_q_size=async_q_size
+        reqs_per_sec=reqs_per_sec,
+        throttle_mode=ThrottleMode.ASYNC,
+        name=name,
+        async_q_size=async_q_size,
     )
 
     assert a_throttle.async_q
@@ -3681,7 +3016,7 @@ class TestThrottleShutdown:
         """Method to test shutdown scenarios.
 
         Args:
-            reqs_per_sec_arg: how many requests per seconds
+            reqs_per_sec_arg: how many requests per second
             short_long_timeout_arg: whether to do short or long timeout
             caplog: pytest fixture to capture log output
 
@@ -3825,7 +3160,7 @@ class TestThrottleShutdown:
         """Method to test shutdown scenarios.
 
         Args:
-            reqs_per_sec_arg: how many requests per seconds
+            reqs_per_sec_arg: how many requests per second
             sleep_delay_arg: how many requests as a ratio to total
                                requests to schedule before starting
                                shutdown
@@ -3976,7 +3311,7 @@ class TestThrottleShutdown:
         """Method to test multi soft shutdown scenarios.
 
         Args:
-            reqs_per_sec_arg: how many requests per seconds
+            reqs_per_sec_arg: how many requests per second
             multi_timeout_arg: timeout time factors
             caplog: pytest fixture to capture log output
 
@@ -4147,7 +3482,7 @@ class TestThrottleShutdown:
         """Method to test shutdown scenarios.
 
         Args:
-            reqs_per_sec_arg: how many requests per seconds
+            reqs_per_sec_arg: how many requests per second
             short_long_timeout_arg: whether to do short or long timeout
             hard_soft_combo_arg: whether to do hard of soft
             caplog: pytest fixture to capture log output
@@ -4300,7 +3635,7 @@ class TestThrottleShutdown:
         """Method to test shutdown scenarios.
 
         Args:
-            reqs_per_sec_arg: how many requests per seconds
+            reqs_per_sec_arg: how many requests per second
             timeout1_arg: whether to issue timeout
             caplog: pytest fixture to capture log output
 
@@ -4786,269 +4121,6 @@ NS_2_SECS: Final[float] = 0.000000001
 
 
 ########################################################################
-# ThrottleVerifier used to track async throttle
-########################################################################
-@dataclass
-class ThrottleVerifier:
-    """ThrottleVerifier class to track async throttle."""
-
-    ####################################################################
-    # __init__
-    ####################################################################
-    def __init__(self, requests: int, seconds: float, bucket_size: float = 0.0) -> None:
-        """Initialize the ThrottleVerifier object.
-
-        Args:
-            requests: number of requests per second
-            seconds: number of seconds for number of requests
-            bucket_size: the leaky bucket threshold
-        """
-
-        self.requests = requests
-        self.seconds = seconds
-        self.bucket_size = bucket_size
-        self.bucket_threshold_size_ns = 0.0
-        self.amount_in_bucket_ns = 0.0
-        self.previous_throttle_send_time: float = 0.0
-        self.previous_send_time: float = 0.0
-        self.current_send_time: float = 0.0
-        self.previous_arrival_time: float = 0.0
-        self.current_arrival_time: float = 0.0
-
-        self.request_interval_secs = self.seconds / self.requests
-
-        self.request_interval_ns = self.request_interval_secs * SECS_2_NS
-
-        self.delay_tolerance_ns = max(self.request_interval_ns * 0.1, 0.15 * SECS_2_NS)
-        self.num_excessive_request_delays: int = 0
-
-        self.cumulative_expected_delay_ns: float = 0.0
-
-        self.cumulative_throttle_wait_time_ns: float = 0.0
-
-        self.cumulative_actual_delay_ns: float = 0.0
-
-        self.bucket_threshold_size_ns = self.request_interval_ns * self.bucket_size
-
-    ####################################################################
-    # verify_request
-    ####################################################################
-    def verify_request(self, request_item: RequestItem):
-        """Handle a request at the given arrival time.
-
-        Args:
-            request_item: contains the arrival and sent times
-
-        """
-        # Calculate the interval between request send and exit receive
-        # as observed by the requestor.
-        # Note that previous_throttle_send_time will be zero on the
-        # first request which will result in a huge interval, and this
-        # is handled below using the max function
-        interval = request_item.actual_func_arrival_time_ns - self.previous_send_time
-
-        # calculate the delay this request had - will be zero if bucket
-        # had enough room
-        request_item.actual_delay_ns = (
-            request_item.actual_func_arrival_time_ns - request_item.send_time_ns
-        )
-        self.cumulative_actual_delay_ns += request_item.actual_delay_ns
-
-        request_item.expected_delay_ns = 0.0
-        if request_item.throttle_mode == MODE_ASYNC:
-            request_item.expected_delay_ns = max(
-                0,
-                (self.previous_throttle_send_time + self.request_interval_ns)
-                - request_item.send_time_ns,
-            )
-            request_item.expected_func_arrival_time_ns = (
-                request_item.send_time_ns + request_item.expected_delay_ns
-            )
-            self.previous_throttle_send_time = (
-                request_item.send_time_ns + request_item.expected_delay_ns
-            )
-
-        elif request_item.throttle_mode == MODE_SYNC_LB:
-            # Remove the amount from the bucket that will have leaked out
-            # since the last request was processed. Note that we will
-            # have overfilled the bucket if the previous request needed to
-            # be delayed, but the elapsed time between arrivals will reflect
-            # that delay to ensure the bucket is not filled beyond the
-            # threshold line. We use the max function to ensure we do not
-            # set the bucket amount negative for the case where the elapsed
-            # time is greater than what was in the bucket.
-            self.amount_in_bucket_ns = max(0.0, self.amount_in_bucket_ns - interval)
-
-            available_amount_ns = (
-                self.bucket_threshold_size_ns - self.amount_in_bucket_ns
-            )
-
-            self.amount_in_bucket_ns += self.request_interval_ns
-
-            request_item.expected_delay_ns = max(
-                0, self.request_interval_ns - available_amount_ns
-            )
-
-        assert request_item.expected_delay_ns <= request_item.actual_delay_ns
-
-        self.cumulative_expected_delay_ns += request_item.expected_delay_ns
-
-        self.cumulative_throttle_wait_time_ns += request_item.throttle_wait_time_ns
-
-        if (
-            request_item.expected_delay_ns + self.delay_tolerance_ns
-            < request_item.actual_delay_ns
-        ):
-            self.num_excessive_request_delays += 1
-
-        self.previous_arrival_time = request_item.throttle_arrival_time
-
-    # def verify_request(self, request_item: RequestItem):
-    #     """Handle a request at the given arrival time.
-    #
-    #     Args:
-    #         request_item: contains the arrival and sent times
-    #
-    #     """
-    #     # Calculate the interval between requests as observed by the
-    #     # throttle. Note that previous_arrivel_time will be zero on the
-    #     # first request which will result in a huge interval, and this
-    #     # is handled below using the max function
-    #     interval = request_item.throttle_arrival_time - self.previous_arrival_time
-    #
-    #     # calculate the delay this request had - will be zero if bucket
-    #     # had enough room
-    #     actual_delay_ns = (
-    #         request_item.actual_func_arrival_time_ns - request_item.throttle_arrival_time
-    #     )
-    #     self.cumulative_actual_delay_ns += actual_delay_ns
-    #
-    #     expected_delay_ns = 0.0
-    #     if request_item.throttle_mode == MODE_ASYNC:
-    #         expected_delay_ns = max(0, self.request_interval_ns - interval)
-    #     elif request_item.throttle_mode == MODE_SYNC_LB:
-    #         # Remove the amount from the bucket that will have leaked out
-    #         # since the last request was processed. Note that we will
-    #         # have overfilled the bucket if the previous request needed to
-    #         # be delayed, but the elapsed time between arrivals will reflect
-    #         # that delay to ensure the bucket is not filled beyond the
-    #         # threshold line. We use the max function to ensure we do not
-    #         # set the bucket amount negative for the case where the elapsed
-    #         # time is greater than what was in the bucket.
-    #         self.amount_in_bucket_ns = max(0.0, self.amount_in_bucket_ns - interval)
-    #
-    #         available_amount_ns = (
-    #             self.bucket_threshold_size_ns - self.amount_in_bucket_ns
-    #         )
-    #
-    #         self.amount_in_bucket_ns += self.request_interval_ns
-    #
-    #         expected_delay_ns = max(0, self.request_interval_ns - available_amount_ns)
-    #
-    #     assert expected_delay_ns <= actual_delay_ns
-    #
-    #     self.cumulative_expected_delay_ns += expected_delay_ns
-    #
-    #     self.cumulative_throttle_wait_time_ns += request_item.throttle_wait_time_ns
-    #
-    #     if expected_delay_ns + self.delay_tolerance_ns < actual_delay_ns:
-    #         self.num_excessive_request_delays += 1
-    #
-    #     self.previous_arrival_time = request_item.throttle_arrival_time
-
-
-########################################################################
-# LeakyBucketVerifier used to track leaky bucket throttle
-########################################################################
-@dataclass
-class LeakyBucketVerifier:
-    """LeakyBucketVerifier class to track leaky bucket throttle."""
-
-    ####################################################################
-    # __init__
-    ####################################################################
-    def __init__(self, requests: int, seconds: float, bucket_size: float) -> None:
-        """Initialize the LeakyBucketVerifier object.
-
-        Args:
-            requests: number of requests per second
-            seconds: number of seconds for number of requests
-            bucket_size: the leaky bucket threshold
-        """
-
-        self.requests = requests
-        self.seconds = seconds
-        self.bucket_size = bucket_size
-        self.bucket_threshold_size_ns = 0.0
-        self.amount_in_bucket_ns = 0.0
-        self.previous_arrival_time: float = 0.0
-        self.previous_send_time: float = 0.0
-        self.current_arrival_time: float = 0.0
-
-        self.request_interval_secs = self.seconds / self.requests
-
-        self.request_interval_ns = self.request_interval_secs * SECS_2_NS
-
-        self.delay_tolerance_ns = max(self.request_interval_ns * 0.1, 0.15 * SECS_2_NS)
-        self.num_excessive_request_delays: int = 0
-
-        self.cumulative_expected_delay_ns: float = 0.0
-
-        self.cumulative_throttle_wait_time_ns: float = 0.0
-
-        self.cumulative_actual_delay_ns: float = 0.0
-
-        self.bucket_threshold_size_ns = self.request_interval_ns * self.bucket_size
-
-    ####################################################################
-    # verify_request
-    ####################################################################
-    def verify_request(self, request_item: RequestItem):
-        """Handle a request at the given arrival time.
-
-        Args:
-            request_item: contains the arrival and sent times
-
-        """
-        # calculate the interval between requests as observed by the
-        # throttle
-        interval = request_item.throttle_arrival_time - self.previous_arrival_time
-
-        # Remove the amount from the bucket that will have leaked out
-        # since the last request was processed. Note that we will
-        # have overfill the bucket if the previous request needed to be
-        # delayed, but the elapsed time between arrivals will reflect
-        # that delay to ensure the bucket is not filled beyond the
-        # threshold line. We use the max function to ensure we do not
-        # set the bucket amount negativee for the case where the elapsed
-        # time is greater than what was in the bucket.
-        self.amount_in_bucket_ns = max(0.0, self.amount_in_bucket_ns - interval)
-
-        # calculate the delay this request had - will be zero if bucket
-        # had enough room
-        actual_delay_ns = (
-            request_item.actual_func_arrival_time_ns
-            - request_item.throttle_arrival_time
-        )
-        self.cumulative_actual_delay_ns += actual_delay_ns
-
-        available_amount_ns = self.bucket_threshold_size_ns - self.amount_in_bucket_ns
-
-        expected_delay_ns = max(0, self.request_interval_ns - available_amount_ns)
-        self.cumulative_expected_delay_ns += expected_delay_ns
-
-        self.cumulative_throttle_wait_time_ns += request_item.throttle_wait_time_ns
-
-        assert expected_delay_ns <= actual_delay_ns
-
-        if expected_delay_ns + self.delay_tolerance_ns < actual_delay_ns:
-            self.num_excessive_request_delays += 1
-
-        self.amount_in_bucket_ns += self.request_interval_ns
-        self.previous_arrival_time = request_item.throttle_arrival_time
-
-
-########################################################################
 # RequestValidator class
 ########################################################################
 class RequestValidator:
@@ -5059,10 +4131,8 @@ class RequestValidator:
     ####################################################################
     def __init__(
         self,
-        requests: int,
-        seconds: float,
-        mode: int,
-        early_count: int,
+        reqs_per_sec: int | float,
+        throttle_mode: ThrottleMode,
         bucket_size: float,
         total_requests: int,
         send_interval: float,
@@ -5073,10 +4143,8 @@ class RequestValidator:
         """Initialize the RequestValidator object.
 
         Args:
-            requests: number of requests per second
-            seconds: number of seconds for number of requests
-            mode: specifies whether async, sync, sync_ec, or sync_lb
-            early_count: the early count for the throttle
+            reqs_per_sec: number of requests per second
+            throttle_mode: specifies whether async or sync
             bucket_size: the leaky bucket threshold
             total_requests: specifies how many requests to make for the
                               test
@@ -5087,9 +4155,8 @@ class RequestValidator:
 
         """
         self.t_throttle = t_throttle
-        self.requests = requests
-        self.seconds = seconds
-        self.mode = mode
+        self.reqs_per_sec = reqs_per_sec
+        self.throttle_mode = throttle_mode
         self.num_threads = num_threads
         self.early_count: int = early_count
         self.bucket_size = bucket_size
@@ -5197,13 +4264,8 @@ class RequestValidator:
         # calculate parms
 
         self.total_requests: int = total_requests
-        # if throttle_mode == MODE_SYNC_EC:
-        #     self.total_requests = ((((self.total_requests + 1)
-        #                            // early_count)
-        #                            * early_count)
-        #                            + 1)
 
-        self.target_interval = seconds / requests
+        self.target_interval = 1 / reqs_per_sec
 
         self.request_interval_ns = self.target_interval * SECS_2_NS
 
@@ -5340,7 +4402,7 @@ class RequestValidator:
         """Print the vars for the test case."""
         print(f"\n{self.reqs_per_sec=}")
         print(f"{self.seconds=}")
-        print(f"{self.mode=}")
+        print(f"{self.throttle_mode=}")
         print(f"{self.early_count=}")
         print(f"{self.bucket_size=}")
         print(f"{self.send_interval=}")
@@ -5495,640 +4557,9 @@ class RequestValidator:
             self.exit_bucket_amt.append(current_bucket_amt)
 
     ####################################################################
-    # build time lists
-    ####################################################################
-    def build_times(self) -> None:
-        """Build lists of times and intervals."""
-        ################################################################
-        # create list of target times and intervals
-        ################################################################
-        self.target_intervals = [0.0] + [
-            self.target_interval for _ in range(len(self.req_times) - 1)
-        ]
-        self.target_times = list(it.accumulate(self.target_intervals))
-        base_time: float = -1.0
-        ################################################################
-        # create list of start times and intervals
-        ################################################################
-        if self.start_times:
-            assert len(self.start_times) == self.total_requests
-            base_time = self.start_times[0]
-            self.norm_start_times = [
-                (item - base_time) * Pauser.NS_2_SECS for item in self.start_times
-            ]
-            self.norm_start_intervals = list(
-                map(
-                    lambda t1, t2: t1 - t2,
-                    self.norm_start_times,
-                    [0.0] + self.norm_start_times[:-1],
-                )
-            )
-
-            self.mean_start_interval = self.norm_start_times[-1] / (
-                self.total_requests - 1
-            )
-
-        ################################################################
-        # create list of before request times and intervals
-        ################################################################
-        if self.before_req_times:
-            assert len(self.before_req_times) == self.total_requests
-            self.norm_before_req_times = [
-                (item - base_time) * Pauser.NS_2_SECS for item in self.before_req_times
-            ]
-            self.norm_before_req_intervals = list(
-                map(
-                    lambda t1, t2: t1 - t2,
-                    self.norm_before_req_times,
-                    [0.0] + self.norm_before_req_times[:-1],
-                )
-            )
-
-            self.mean_before_req_interval = self.norm_before_req_times[-1] / (
-                self.total_requests - 1
-            )
-
-        ################################################################
-        # create list of arrival times and intervals
-        ################################################################
-        if self.arrival_times:
-            assert len(self.arrival_times) == self.total_requests
-            # base_time2 = self.arrival_times[0]
-            # self.norm_arrival_times = [
-            # (item - base_time2) * Pauser.NS_2_SECS
-            #                            for item in self.arrival_times]
-            if base_time == -1.0:
-                base_time = self.arrival_times[0]
-            self.norm_arrival_times = [
-                (item - base_time) * Pauser.NS_2_SECS for item in self.arrival_times
-            ]
-            self.norm_arrival_intervals = list(
-                map(
-                    lambda t1, t2: t1 - t2,
-                    self.norm_arrival_times,
-                    [0.0] + self.norm_arrival_times[:-1],
-                )
-            )
-
-            self.mean_arrival_interval = self.norm_arrival_times[-1] / (
-                self.total_requests - 1
-            )
-
-        ################################################################
-        # create list of check async q times and intervals
-        ################################################################
-        # self.norm_check_async_q_times = [
-        #     (item - base_time) * Pauser.NS_2_SECS
-        #     for item in self.check_async_q_times]
-        # self.norm_check_async_q_intervals = list(
-        #     map(lambda t1, t2: t1 - t2,
-        #         self.norm_check_async_q_times,
-        #         [0.0] + self.norm_check_async_q_times[:-1]))
-
-        ################################################################
-        # create list of check async q times and intervals
-        ################################################################
-        # self.norm_check_async_q_times2 = [
-        #     (item - base_time) * Pauser.NS_2_SECS
-        #     for item in self.check_async_q_times2]
-        # self.norm_check_async_q_intervals2 = list(
-        #     map(lambda t1, t2: t1 - t2,
-        #         self.norm_check_async_q_times2,
-        #         [0.0] + self.norm_check_async_q_times2[:-1]))
-        # self.mean_req_interval = (self.norm_req_times[-1]
-        #                           / (len(self.norm_req_times) - 1))
-
-        ################################################################
-        # create list of request times and intervals
-        ################################################################
-        self.norm_req_times = [
-            (item[1] - base_time) * Pauser.NS_2_SECS for item in self.req_times
-        ]
-        self.norm_req_intervals = list(
-            map(
-                lambda t1, t2: t1 - t2,
-                self.norm_req_times,
-                [0.0] + self.norm_req_times[:-1],
-            )
-        )
-        self.mean_req_interval = self.norm_req_times[-1] / (
-            len(self.norm_req_times) - 1
-        )
-
-        ################################################################
-        # create list of after request times and intervals
-        ################################################################
-        if self.after_req_times:
-            assert len(self.after_req_times) == self.total_requests
-            self.norm_after_req_times = [
-                (item - base_time) * Pauser.NS_2_SECS for item in self.after_req_times
-            ]
-            self.norm_after_req_intervals = list(
-                map(
-                    lambda t1, t2: t1 - t2,
-                    self.norm_after_req_times,
-                    [0.0] + self.norm_after_req_times[:-1],
-                )
-            )
-
-            self.mean_after_req_interval = self.norm_after_req_times[-1] / (
-                self.total_requests - 1
-            )
-
-        ################################################################
-        # Build the expected intervals list
-        ################################################################
-        if self.num_threads > 1:
-            self.send_intervals *= self.num_threads
-        if self.mode == MODE_ASYNC:
-            self.build_async_exp_list()
-        elif self.mode == MODE_SYNC:
-            self.build_sync_exp_list()
-        elif self.mode == MODE_SYNC_EC:
-            self.build_sync_ec_exp_list()
-        elif self.mode == MODE_SYNC_LB:
-            self.build_sync_lb_exp_list()
-
-        self.expected_times = list(it.accumulate(self.expected_intervals))
-        self.send_times = list(it.accumulate(self.send_intervals))
-
-        ################################################################
-        # create list of diff and diff pct on req_intervals/exp_req_int
-        ################################################################
-        self.diff_req_intervals = list(
-            map(
-                lambda t1, t2: t1 - t2, self.norm_req_intervals, self.expected_intervals
-            )
-        )
-
-        self.diff_req_ratio = [
-            item / self.target_interval for item in self.diff_req_intervals
-        ]
-
-        ################################################################
-        # create list of before next target times and intervals
-        ################################################################
-        if self.before_next_target_times:
-            assert len(self.before_next_target_times) == self.total_requests
-            # base_time = self.before_next_target_times[0]
-            self.norm_before_next_target_times = [
-                (item - base_time) * Pauser.NS_2_SECS
-                for item in self.before_next_target_times
-            ]
-            self.norm_before_next_target_intervals = list(
-                map(
-                    lambda t1, t2: t1 - t2,
-                    self.norm_before_next_target_times,
-                    [0.0] + self.norm_before_next_target_times[:-1],
-                )
-            )
-
-        ################################################################
-        # create list of next target times and intervals
-        ################################################################
-        if self.next_target_times:
-            assert len(self.next_target_times) == self.total_requests
-            # base_time = self.next_target_times[0]
-            self.norm_next_target_times = [
-                (item - base_time) * Pauser.NS_2_SECS for item in self.next_target_times
-            ]
-            self.norm_next_target_intervals = list(
-                map(
-                    lambda t1, t2: t1 - t2,
-                    self.norm_next_target_times,
-                    [0.0] + self.norm_next_target_times[:-1],
-                )
-            )
-
-            self.mean_next_target_interval = self.norm_next_target_times[-1] / (
-                self.total_requests - 1
-            )
-
-        ################################################################
-        # create list of time traces from pauser
-        ################################################################
-        # for time_trace in self.time_traces:
-        #     norm_time_traces_times = [(item - base_time)
-        #                                    * Pauser.NS_2_SECS
-        #                                    for item in time_trace]
-        #     norm_time_traces_intervals = list(
-        #         map(lambda t1, t2: t1 - t2,
-        #             norm_time_traces_times,
-        #             [0.0] + norm_time_traces_times[:-1]))
-        #     self.norm_time_traces_times.append(norm_time_traces_times)
-        #     self.norm_time_traces_intervals.append(norm_time_traces_intervals)
-        #
-        # self.norm_stop_times_times = [
-        # (item - base_time) * Pauser.NS_2_SECS
-        #                               for item in self.stop_times]
-        # self.norm_stop_times_intervals = list(
-        #     map(lambda t1, t2: t1 - t2,
-        #         self.norm_stop_times_times,
-        #         [0.0] + self.norm_stop_times_times[:-1]))
-
-        ################################################################
-        # create list of path times and intervals
-        ################################################################
-        if self.num_threads < 2:
-            for idx in range(self.total_requests):
-                self.path_times.append(
-                    [
-                        self.norm_start_times[idx],
-                        self.norm_before_req_times[idx],
-                        self.norm_arrival_times[idx],
-                        self.norm_req_times[idx],
-                        self.norm_after_req_times[idx],
-                    ]
-                )
-
-            for item in self.path_times:
-                self.path_intervals.append(
-                    [
-                        item[1] - item[0],
-                        item[2] - item[1],
-                        item[3] - item[2],
-                        item[4] - item[3],
-                    ]
-                )
-
-        ################################################################
-        # create list of async path times and intervals
-        ################################################################
-        # for idx in range(self.total_requests):
-        #     self.path_async_times.append([self.norm_check_async_q_times[idx],
-        #                                   self.norm_check_async_q_times2[idx],
-        #                                   (self.norm_next_target_times[idx]
-        #                                    - self._target_interval),
-        #                                   self.norm_req_times[idx],
-        #                                   self.norm_next_target_times[idx]
-        #                                   ])
-        #
-        # for item in self.path_async_times:
-        #     self.path_async_intervals.append(
-        #         [item[1] - item[0],
-        #          item[2] - item[1],
-        #          item[3] - item[2],
-        #          item[4] - item[3]]
-        #     )
-
-    ####################################################################
-    # print_intervals
-    ####################################################################
-    def print_intervals(self) -> None:
-        """Build the expected intervals arrays."""
-        print(f"{self.norm_req_times[-1]=}")
-        print(f"{self.mean_req_interval=}")
-        print(f"{self.mean_before_req_interval=}")
-        print(f"{self.mean_arrival_interval=}")
-        print(f"{self.norm_arrival_times[-1]=}")
-        print(f"{self.mean_after_req_interval=}")
-        print(f"{self.mean_start_interval=}")
-        print(f"{self.num_async_overs=}")
-
-        ################################################################
-        # build printable times
-        ################################################################
-        idx_list = list(range(self.total_requests))
-
-        p_idx_list = list(map(lambda num: f"{num: 7}", idx_list))
-        # p_obtained_nowaits = list(map(lambda tf: f'{tf: 7}',
-        #                               self.obtained_nowaits))
-        p_send_times = list(map(lambda num: f"{num: 7.3f}", self.send_times))
-        p_send_interval_sums = list(
-            map(lambda num: f"{num: 7.3f}", self.send_interval_sums)
-        )
-        p_exp_interval_sums = list(
-            map(lambda num: f"{num: 7.3f}", self.exp_interval_sums)
-        )
-        p_target_times = list(map(lambda num: f"{num: 7.3f}", self.target_times))
-
-        if self.wait_times:
-            p_wait_times = list(map(lambda num: f"{num: 7.3f}", self.wait_times))
-        else:
-            p_wait_times = []
-
-        p_expected_times = list(map(lambda num: f"{num: 7.3f}", self.expected_times))
-
-        # p_check_q_times = list(map(lambda num: f'{num: 7.3f}',
-        #                        self.norm_check_async_q_times))
-
-        p_before_req_times = list(
-            map(lambda num: f"{num: 7.3f}", self.norm_before_req_times)
-        )
-        p_arrival_times = list(map(lambda num: f"{num: 7.3f}", self.norm_arrival_times))
-        p_norm_req_times = list(map(lambda num: f"{num: 7.3f}", self.norm_req_times))
-        p_after_req_times = list(
-            map(lambda num: f"{num: 7.3f}", self.norm_after_req_times)
-        )
-        p_start_times = list(map(lambda num: f"{num: 7.3f}", self.norm_start_times))
-
-        # p_time_traces_times = []
-        # for time_trace in self.norm_time_traces_times:
-        #     p_time_traces_time = list(map(lambda num: f'{num: 7.3f}',
-        #                               time_trace))
-        #     p_time_traces_times.append(p_time_traces_time)
-        # p_stop_times_times = list(map(lambda num: f'{num: 7.3f}',
-        #                               self.norm_stop_times_times))
-
-        ################################################################
-        # build printable intervals
-        ################################################################
-        p_send_intervals = list(map(lambda num: f"{num: 7.3f}", self.send_intervals))
-        p_target_intervals = list(
-            map(lambda num: f"{num: 7.3f}", self.target_intervals)
-        )
-
-        p_expected_intervals = list(
-            map(lambda num: f"{num: 7.3f}", self.expected_intervals)
-        )
-
-        # p_check_q_intervals = list(map(lambda num: f'{num: 7.3f}',
-        #                            self.norm_check_async_q_intervals))
-
-        p_before_req_intervals = list(
-            map(lambda num: f"{num: 7.3f}", self.norm_before_req_intervals)
-        )
-        p_arrival_intervals = list(
-            map(lambda num: f"{num: 7.3f}", self.norm_arrival_intervals)
-        )
-        p_req_intervals = list(map(lambda num: f"{num: 7.3f}", self.norm_req_intervals))
-        p_after_req_intervals = list(
-            map(lambda num: f"{num: 7.3f}", self.norm_after_req_intervals)
-        )
-        p_send = list(map(lambda num: f"{num: 7.3f}", self.norm_start_intervals))
-
-        p_diff_intervals = list(
-            map(lambda num: f"{num: 7.3f}", self.diff_req_intervals)
-        )
-        p_diff_ratio = list(map(lambda num: f"{num: 7.3f}", self.diff_req_ratio))
-
-        if self.previous_delay:
-            p_previous_delay = list(
-                map(lambda num: f"{num: 7.3f}", self.previous_delay)
-            )
-            p_current_delay = list(map(lambda num: f"{num: 7.3f}", self.current_delay))
-            p_current_delay = list(map(lambda num: f"{num: 7.3f}", self.current_delay))
-            p_current_delay = list(map(lambda num: f"{num: 7.3f}", self.current_delay))
-            p_enter_bucket_amt = list(
-                map(lambda num: f"{num: 7.3f}", self.enter_bucket_amt)
-            )
-            p_exit_bucket_amt = list(
-                map(lambda num: f"{num: 7.3f}", self.exit_bucket_amt)
-            )
-            p_avail_bucket_amt = list(
-                map(lambda num: f"{num: 7.3f}", self.avail_bucket_amt)
-            )
-        else:
-            p_previous_delay = []
-            p_current_delay = []
-            p_enter_bucket_amt = []
-            p_exit_bucket_amt = []
-            p_avail_bucket_amt = []
-
-        if self.norm_before_next_target_times:
-            p_b4_next_t_times = list(
-                map(lambda num: f"{num: 7.3f}", self.norm_before_next_target_times)
-            )
-            p_b4_next_t_intervals = list(
-                map(lambda num: f"{num: 7.3f}", self.norm_before_next_target_intervals)
-            )
-        else:
-            p_b4_next_t_times = []
-            p_b4_next_t_intervals = []
-
-        if self.norm_next_target_times:
-            p_next_t_times = list(
-                map(lambda num: f"{num: 7.3f}", self.norm_next_target_times)
-            )
-            p_next_t_intervals = list(
-                map(lambda num: f"{num: 7.3f}", self.norm_next_target_intervals)
-            )
-        else:
-            p_next_t_times = []
-            p_next_t_intervals = []
-
-        if self.t_entry_bucket_amt:
-            p_t_entry_bucket_amt = list(
-                map(lambda num: f"{num: 7.3f}", self.t_entry_bucket_amt)
-            )
-        else:
-            p_t_entry_bucket_amt = []
-
-        if self.t_exit_bucket_amt:
-            p_t_exit_bucket_amt = list(
-                map(lambda num: f"{num: 7.3f}", self.t_exit_bucket_amt)
-            )
-        else:
-            p_t_exit_bucket_amt = []
-
-        # p_time_traces_intervals = []
-        # for time_trace in self.norm_time_traces_intervals:
-        #     p_time_traces_interval = list(
-        #     map(lambda num: f'{num: 7.3f}',
-        #         time_trace))
-        #     p_time_traces_intervals.append(p_time_traces_interval)
-        #
-        # p_stop_times_intervals = list(map(lambda num: f'{num: 7.3f}',
-        #                               self.norm_stop_times_intervals))
-
-        print(f"\n{p_idx_list            =}")  # noqa E221 E251
-        # print(f'{p_obtained_nowaits    =}')
-        print(f"{p_send_times          =}")  # noqa E221 E251
-        print(f"{p_target_times        =}")  # noqa E221 E251
-        print(f"{p_expected_times      =}")  # noqa E221 E251
-
-        print(f"\n{p_start_times         =}")  # noqa E221 E251
-        print(f"{p_before_req_times    =}")  # noqa E221 E251
-        print(f"{p_arrival_times       =}")  # noqa E221 E251
-        # print(f'{p_check_q_times       =}')
-        print(f"{p_norm_req_times      =}")  # noqa E221 E251
-        print(f"{p_after_req_times     =}")  # noqa E221 E251
-
-        print(f"\n{p_send_intervals      =}")  # noqa E221 E251
-        print(f"{p_send_interval_sums  =}")  # noqa E221 E251
-        print(f"{p_exp_interval_sums   =}")  # noqa E221 E251
-        print(f"{p_target_intervals    =}")  # noqa E221 E251
-        print(f"{p_expected_intervals  =}")  # noqa E221 E251
-
-        # print(f"\n{p_start_intervals     =}")  # noqa E221 E251
-        print(f"{p_before_req_intervals=}")
-        print(f"{p_arrival_intervals   =}")  # noqa E221 E251
-        # print(f'{p_check_q_intervals   =}')
-        print(f"{p_req_intervals       =}")  # noqa E221 E251
-        print(f"{p_after_req_intervals =}")  # noqa E221 E251
-
-        print(f"\n{p_diff_intervals      =}")  # noqa E221 E251
-        print(f"{p_diff_ratio          =}")  # noqa E221 E251
-
-        print(f"\n{p_previous_delay      =}")  # noqa E221 E251
-
-        print(f"\n{p_arrival_times       =}")  # noqa E221 E251
-        print(f"{p_b4_next_t_times     =}")  # noqa E221 E251
-        print(f"{p_next_t_times        =}")  # noqa E221 E251
-
-        print(f"\n{p_b4_next_t_intervals =}")  # noqa E221 E251
-        print(f"{p_next_t_intervals    =}")  # noqa E221 E251
-
-        print(f"\n{p_enter_bucket_amt    =}")  # noqa E221 E251
-        print(f"{p_t_entry_bucket_amt  =}")  # noqa E221 E251
-
-        print(f"\n{p_current_delay       =}")  # noqa E221 E251
-        print(f"{p_wait_times          =}")  # noqa E221 E251
-
-        print(f"\n{p_exit_bucket_amt     =}")  # noqa E221 E251
-        print(f"{p_t_exit_bucket_amt   =}")  # noqa E221 E251
-
-        print(f"\n{p_avail_bucket_amt    =}")  # noqa E221 E251
-
-        # if self.throttle_mode == MODE_ASYNC:
-        #     flowers(['path times:',
-        #              'start before_req req after_req'])
-        #     for idx, item in enumerate(self.path_times):
-        #         line = (f'{item[0]: .3f} '
-        #                 f'{item[1]: .3f} '
-        #                 f'{item[3]: .3f} '
-        #                 f'{item[4]: .3f} ')
-        #         print(f'{idx:>3}: {line}')
-        #
-        #     flowers(['path intervals',
-        #             'before_req req after_req wait'])
-        #     for idx, item in enumerate(self.path_intervals):
-        #         line = (f'{item[0]: .3f} '
-        #                 f'{item[2]: .3f} '
-        #                 f'{item[3]: .3f} ')
-        #         print(f'{idx:>3}: {line}')
-        # else:
-
-        # for p_time_trace in p_time_traces_times:
-        #     print(f'{p_time_trace[0]=}  {p_time_trace[-1]=}')
-        # for p_time_interval in p_time_traces_intervals:
-        #     print(f'{p_time_interval[0]=}  {p_time_interval[-1]=}')
-        # print(f'{p_time_traces_times[3][0] =}')
-        # print(f'{p_stop_times_times     =}')
-        # print(f'{p_stop_times_intervals =}')
-
-        flowers(
-            [
-                "path times:",
-                "idx  start   b4_req arrival   req    af_req    check "
-                "  pre-req pre-req2 "
-                "  req "
-                "  nxt-trg",
-            ]
-        )
-        for idx, item in enumerate(self.path_times):
-            line = (
-                f"{item[0]: 7.3f} "
-                f"{item[1]: 7.3f} "
-                f"{item[2]: 7.3f} "
-                f"{item[3]: 7.3f} "
-                f"{item[4]: 7.3f} "
-            )
-            # line2 = (f'{self.path_async_times[idx][0]: 7.3f} '
-            #          f'{self.path_async_times[idx][1]: 7.3f} '
-            #          f'{self.path_async_times[idx][2]: 7.3f} '
-            #          f'{self.path_async_times[idx][3]: 7.3f} '
-            #          f'{self.path_async_times[idx][4]: 7.3f} ')
-            # print(f'{idx:>3}: {line}   {line2}')
-            print(f"{idx:>3}: {line}")
-
-        flowers(
-            [
-                "path intervals",
-                "idx  b4_req arrival   req    af_req    pre-req   "
-                "pre-req2 req "
-                "  nxt-trg",
-            ]
-        )
-        for idx, item in enumerate(self.path_intervals):
-            line = (
-                f"{item[0]: 7.3f} "
-                f"{item[1]: 7.3f} "
-                f"{item[2]: 7.3f} "
-                f"{item[3]: 7.3f} "
-            )
-
-            # line2 = (f'{self.path_async_intervals[idx][0]: 7.3f} '
-            #          f'{self.path_async_intervals[idx][1]: 7.3f} '
-            #          f'{self.path_async_intervals[idx][2]: 7.3f} '
-            #          f'{self.path_async_intervals[idx][3]: 7.3f} ')
-            # print(f'{idx:>3}: {line}   {line2}')
-            print(f"{idx:>3}: {line}")
-
-        flowers("stats")
-        diff_mean = stats.mean(self.diff_req_intervals[1:])
-        print(f"{diff_mean=:.3f}")
-
-        diff_median = stats.median(self.diff_req_intervals[1:])
-        print(f"{diff_median=:.3f}")
-
-        diff_pvariance = stats.pvariance(self.diff_req_intervals[1:])
-        print(f"{diff_pvariance=:.5f}")
-
-        diff_pstdev = stats.pstdev(self.diff_req_intervals[1:])
-        print(f"{diff_pstdev=:.3f}")
-
-        diff_variance = stats.variance(self.diff_req_intervals[1:])
-        print(f"{diff_variance=:.5f}")
-
-        diff_stdev = stats.stdev(self.diff_req_intervals[1:])
-        print(f"{diff_stdev=:.3f}")
-
-        # plt.style.use('_mpl-gallery')
-
-        # make data
-        # np.random.seed(1)
-        # x = 4 + np.random.normal(0, 1.5, 200)
-
-        # plot:
-        # fig, ax = plt.subplots()
-        #
-        # ax.hist(self.diff_req_intervals,
-        #         bins=16,
-        #         linewidth=0.5,
-        #         edgecolor="white")
-
-        # ax.set(xlim=(0, 8), xticks=np.arange(1, 8),
-        #        ylim=(0, 56), yticks=np.linspace(0, 56, 9))
-
-        # plt.show()
-
-    ####################################################################
     # validate_series
     ####################################################################
     def validate_series(self) -> None:
-        """Validate the requests.
-
-        Raises:
-            InvalidModeNum: Mode must be 1, 2, 3, or 4
-
-        """
-        assert 0 < self.total_requests
-        assert len(self.req_times) == self.total_requests
-
-        for idx, req_item in enumerate(self.req_times):
-            assert idx == req_item[0]
-
-        ################################################################
-        # create list of target, actual, expected times and intervals
-        ################################################################
-        self.build_times()
-
-        if (self.mode == MODE_ASYNC) or (self.mode == MODE_SYNC):
-            self.validate_async_sync()
-        elif self.mode == MODE_SYNC_EC:
-            self.validate_sync_ec()
-        elif self.mode == MODE_SYNC_LB:
-            self.validate_sync_lb()
-        else:
-            raise InvalidModeNum("Mode must be 1, 2, 3, or 4")
-
-        self.reset()
-
-    ####################################################################
-    # validate_series2
-    ####################################################################
-    def validate_series2(self) -> None:
         """Validate the requests.
 
         Raises:
@@ -6143,18 +4574,48 @@ class RequestValidator:
             assert idx == req_item.arrival_idx
 
         ################################################################
-        # create list of target, actual, expected times and intervals
+        # calculate the request intervals and verify accuracy
         ################################################################
-        # self.build_times()
+        self.process_request_items()
+        print(
+            "\ninterval times: arrival idx| send | throttle arrival | expected arrival | "
+            "actual arrival | expected delay | actual delay | diff ratio"
+        )
 
-        if (self.mode == MODE_ASYNC) or (self.mode == MODE_SYNC):
-            self.validate_async_sync()
-        elif self.mode == MODE_SYNC_EC:
-            self.validate_sync_ec()
-        elif self.mode == MODE_SYNC_LB:
-            self.validate_sync_lb2()
-        else:
-            raise InvalidModeNum("Mode must be 1, 2, 3, or 4")
+        first_send_time = self.request_items[0].send_time_ns
+        for req_item in self.request_items:
+            extra_time = 0.0
+            if req_item.expected_delay_ns == 0.0:
+                extra_time = self.request_interval_ns
+            expected_actual_diff_ratio = (
+                req_item.actual_delay_ns - req_item.expected_delay_ns
+            ) / (req_item.expected_delay_ns + extra_time)
+            print(
+                f"req_id: {req_item.req_id:2} "
+                f"| {req_item.arrival_idx:2} "
+                f"| {(req_item.send_time_ns - first_send_time) * NS_2_SECS:.4f} "
+                f"| {(req_item.throttle_arrival_time - first_send_time) * NS_2_SECS:.4f}"
+                f"| {(req_item.expected_func_arrival_time_ns - first_send_time) * NS_2_SECS:.4f}"
+                f"| {(req_item.actual_func_arrival_time_ns - first_send_time) * NS_2_SECS:.4f}"
+                f"| {req_item.expected_delay_ns * NS_2_SECS:.4f} "
+                f"| {req_item.actual_delay_ns * NS_2_SECS:.4f} "
+                f"| {expected_actual_diff_ratio * NS_2_SECS:.4f} "
+            )
+
+        # print(f"{throttle_verifier.num_excessive_request_delays=}")
+        print(f"{self.cumulative_expected_delay_ns=}")
+        print(f"{self.cumulative_actual_delay_ns=}")
+        # print(f"{throttle_verifier.cumulative_throttle_wait_time_ns=}")
+        extra_time = 0.0
+        if self.cumulative_expected_delay_ns == 0.0:
+            extra_time = 0.0001
+        ratio_delay_time = (
+            self.cumulative_actual_delay_ns - self.cumulative_expected_delay_ns
+        ) / (self.cumulative_expected_delay_ns + extra_time)
+        print(f"ratio diff expected/actual: {ratio_delay_time:.4f}")
+
+        # assert throttle_verifier.num_excessive_request_delays < 4
+        assert ratio_delay_time <= 0.15
 
         self.reset()
 
@@ -6206,196 +4667,13 @@ class RequestValidator:
             ].throttle_wait_time_ns
 
     ####################################################################
-    # validate_async_sync
-    ####################################################################
-    def validate_async_sync(self) -> None:
-        """Validate the results for sync leaky bucket."""
-
-        self.process_request_items()
-        print(
-            "\ninterval times: arrival idx| send | throttle arrival | expected arrival | "
-            "actual arrival | expected delay | actual delay | diff ratio"
-        )
-
-        first_send_time = self.request_items[0].send_time_ns
-        for req_item in self.request_items:
-            extra_time = 0.0
-            if req_item.expected_delay_ns == 0.0:
-                extra_time = self.request_interval_ns
-            expected_actual_diff_ratio = (
-                req_item.actual_delay_ns - req_item.expected_delay_ns
-            ) / (req_item.expected_delay_ns + extra_time)
-            print(
-                f"req_id: {req_item.req_id:2} "
-                f"| {req_item.arrival_idx:2} "
-                f"| {(req_item.send_time_ns - first_send_time) * NS_2_SECS:.4f} "
-                f"| {(req_item.throttle_arrival_time - first_send_time) * NS_2_SECS:.4f}"
-                f"| {(req_item.expected_func_arrival_time_ns - first_send_time) * NS_2_SECS:.4f}"
-                f"| {(req_item.actual_func_arrival_time_ns - first_send_time) * NS_2_SECS:.4f}"
-                f"| {req_item.expected_delay_ns * NS_2_SECS:.4f} "
-                f"| {req_item.actual_delay_ns * NS_2_SECS:.4f} "
-                f"| {expected_actual_diff_ratio * NS_2_SECS:.4f} "
-            )
-
-        # print(f"{throttle_verifier.num_excessive_request_delays=}")
-        print(f"{self.cumulative_expected_delay_ns=}")
-        print(f"{self.cumulative_actual_delay_ns=}")
-        # print(f"{throttle_verifier.cumulative_throttle_wait_time_ns=}")
-        extra_time = 0.0
-        if self.cumulative_expected_delay_ns == 0.0:
-            extra_time = 0.0001
-        ratio_delay_time = (
-            self.cumulative_actual_delay_ns - self.cumulative_expected_delay_ns
-        ) / (self.cumulative_expected_delay_ns + extra_time)
-        print(f"ratio diff expected/actual: {ratio_delay_time:.4f}")
-
-        # assert throttle_verifier.num_excessive_request_delays < 4
-        assert ratio_delay_time <= 0.15
-
-    ####################################################################
-    # validate_sync_ec
-    ####################################################################
-    def validate_sync_ec(self) -> None:
-        """Validate results for sync early count."""
-        self.print_intervals()
-        num_early = 0
-        num_early_1pct = 0
-        num_early_5pct = 0
-        num_early_10pct = 0
-        num_early_15pct = 0
-
-        num_late = 0
-        num_late_1pct = 0
-        num_late_5pct = 0
-        num_late_10pct = 0
-        num_late_15pct = 0
-
-        for ratio in self.diff_req_ratio[1:]:
-            if ratio < 0:  # if negative
-                num_early += 1
-                if ratio <= -0.01:
-                    num_early_1pct += 1
-                if ratio <= -0.05:
-                    num_early_5pct += 1
-                if ratio <= -0.10:
-                    num_early_10pct += 1
-                if ratio <= -0.15:
-                    num_early_15pct += 1
-            else:
-                num_late += 1
-                if 0.01 <= ratio:
-                    num_late_1pct += 1
-                if 0.05 <= ratio:
-                    num_late_5pct += 1
-                if 0.10 <= ratio:
-                    num_late_10pct += 1
-                if 0.15 <= ratio:
-                    num_late_15pct += 1
-
-        print(f"{num_early=}")
-        print(f"{num_early_1pct=}")
-        print(f"{num_early_5pct=}")
-        print(f"{num_early_10pct=}")
-        print(f"{num_early_15pct=}")
-
-        print(f"{num_late=}")
-        print(f"{num_late_1pct=}")
-        print(f"{num_late_5pct=}")
-        print(f"{num_late_10pct=}")
-        print(f"{num_late_15pct=}")
-
-        assert num_early_10pct == 0
-        assert num_early_5pct == 0
-        # assert num_long_early_1pct == 0
-
-        assert num_late_15pct < 3
-        assert num_late_10pct < 4
-        assert num_late_5pct < 5
-        # assert num_long_late_1pct == 0
-
-        assert self.expected_times[-1] <= self.norm_req_times[-1]
-
-        worst_case_mean_interval = (
-            self.target_interval * (self.total_requests - self.early_count - 1)
-        ) / (self.total_requests - 1)
-        assert worst_case_mean_interval <= self.mean_req_interval
-
-    ####################################################################
-    # validate_sync_lb
-    ####################################################################
-    def validate_sync_lb(self) -> None:
-        """Validate the results for sync leaky bucket."""
-        self.print_intervals()
-        num_early = 0
-        num_early_1pct = 0
-        num_early_5pct = 0
-        num_early_10pct = 0
-        num_early_15pct = 0
-
-        num_late = 0
-        num_late_1pct = 0
-        num_late_5pct = 0
-        num_late_10pct = 0
-        num_late_15pct = 0
-
-        for ratio in self.diff_req_ratio[1:]:
-            if ratio < 0:  # if negative
-                num_early += 1
-                if ratio <= -0.01:
-                    num_early_1pct += 1
-                if ratio <= -0.05:
-                    num_early_5pct += 1
-                if ratio <= -0.10:
-                    num_early_10pct += 1
-                if ratio <= -0.15:
-                    num_early_15pct += 1
-            else:
-                num_late += 1
-                if 0.01 <= ratio:
-                    num_late_1pct += 1
-                if 0.05 <= ratio:
-                    num_late_5pct += 1
-                if 0.10 <= ratio:
-                    num_late_10pct += 1
-                if 0.15 <= ratio:
-                    num_late_15pct += 1
-
-        print(f"{num_early=}")
-        print(f"{num_early_1pct=}")
-        print(f"{num_early_5pct=}")
-        print(f"{num_early_10pct=}")
-        print(f"{num_early_15pct=}")
-
-        print(f"{num_late=}")
-        print(f"{num_late_1pct=}")
-        print(f"{num_late_5pct=}")
-        print(f"{num_late_10pct=}")
-        print(f"{num_late_15pct=}")
-
-        assert num_early_10pct == 0
-        assert num_early_5pct == 0
-        # assert num_long_early_1pct == 0
-
-        assert num_late_15pct < 3
-        assert num_late_10pct < 4
-        assert num_late_5pct < 5
-        # assert num_long_late_1pct == 0
-
-        assert self.expected_times[-1] <= self.norm_req_times[-1]
-
-        worst_case_mean_interval = (
-            self.target_interval * (self.total_requests - self.bucket_size)
-        ) / self.total_requests
-        assert worst_case_mean_interval <= self.mean_req_interval
-
-    ####################################################################
     # validate_sync_lb2
     ####################################################################
     def validate_sync_lb2(self) -> None:
         """Validate the results for sync leaky bucket."""
 
         throttle_verifier = ThrottleVerifier(
-            reqs_per_sec=self.requests,
+            reqs_per_sec=self.reqs_per_sec,
             seconds=self.seconds,
             bucket_size=self.bucket_size,
         )
@@ -6507,12 +4785,12 @@ class RequestValidator:
     ####################################################################
     # def request2b(self, idx: int, requests: int,
     # obtained_nowait: bool) -> int:
-    def request2b(self, idx: int, requests: int) -> int:
+    def request2b(self, idx: int, reqs_per_sec: int) -> int:
         """Request2 target.
 
         Args:
             idx: the index of the call
-            requests: number of requests for the throttle
+            reqs_per_sec: number of requests per second for the throttle
 
         Returns:
             the index reflected back
@@ -6527,7 +4805,7 @@ class RequestValidator:
         self.request_items.append(request_item)
 
         assert idx == request_item.req_id
-        assert requests == self.requests
+        assert reqs_per_sec == self.reqs_per_sec
         return request_item.req_id
 
     ####################################################################
@@ -6611,13 +4889,13 @@ class RequestValidator:
     # request6b
     ####################################################################
     def request6b(
-        self, idx: int, requests: int, *, seconds: int, interval: float
+        self, idx: int, reqs_per_sec: int, *, seconds: int, interval: float
     ) -> int:
         """Request5 target.
 
          Args:
             idx: the index of the call
-            requests: number of requests for the throttle
+            reqs_per_sec: number of requests per second for the throttle
             seconds: number of seconds for the throttle
             interval: the interval used between requests
 
@@ -6634,7 +4912,7 @@ class RequestValidator:
         self.request_items.append(request_item)
 
         assert idx == request_item.req_id
-        assert requests == self.requests
+        assert reqs_per_sec == self.reqs_per_sec
         assert seconds == self.seconds
         assert interval == self.send_interval
         return request_item.req_id
@@ -6682,12 +4960,12 @@ class RequestValidator:
     ####################################################################
     # def request2(self, idx: int, requests: int,
     # obtained_nowait: bool) -> int:
-    def request2(self, idx: int, requests: int) -> int:
+    def request2(self, idx: int, reqs_per_sec: int) -> int:
         """Request2 target.
 
         Args:
             idx: the index of the call
-            requests: number of requests for the throttle
+            reqs_per_sec: number of requests per second for the throttle
 
         Returns:
             the index reflected back
@@ -6700,7 +4978,7 @@ class RequestValidator:
         # self.check_async_q_times2.append(self.t_throttle._check_async_q_time2)
         # self.obtained_nowaits.append(obtained_nowait)
         assert idx == self.idx + 1
-        assert requests == self.requests
+        assert reqs_per_sec == self.reqs_per_sec
         self.idx = idx
         return idx
 
@@ -6775,13 +5053,13 @@ class RequestValidator:
     # request6
     ####################################################################
     def request6(
-        self, idx: int, requests: int, *, seconds: int, interval: float
+        self, idx: int, reqs_per_sec: int, *, seconds: int, interval: float
     ) -> int:
         """Request5 target.
 
          Args:
             idx: the index of the call
-            requests: number of requests for the throttle
+            reqs_per_sec: number of requests per second for the throttle
             seconds: number of seconds for the throttle
             interval: the interval used between requests
 
@@ -6796,7 +5074,7 @@ class RequestValidator:
         # self.t_exit_bucket_amt.append(self.t_throttle._exit_bucket_amt)
         # self.check_async_q_times.append(self.t_throttle._check_async_q_time)
         assert idx == self.idx + 1
-        assert requests == self.requests
+        assert reqs_per_sec == self.reqs_per_sec
         assert seconds == self.seconds
         assert interval == self.send_interval
         self.idx = idx
@@ -6835,19 +5113,19 @@ class RequestValidator:
     ####################################################################
     # callback2
     ####################################################################
-    def callback2(self, idx: int, requests: int) -> None:
+    def callback2(self, idx: int, reqs_per_sec: int) -> None:
         """Queue the callback for request0.
 
         Args:
             idx: index of the request call
-            requests: number of requests for the throttle
+            reqs_per_sec: number of requests per second for the throttle
         """
         self.req_times.append((idx, perf_counter_ns()))
         self.arrival_times.append(self.t_throttle._arrival_time)
         self.next_target_times.append(self.t_throttle._next_target_time)
         # self.check_async_q_times.append(self.t_throttle._check_async_q_time)
         assert idx == self.idx + 1
-        assert requests == self.requests
+        assert reqs_per_sec == self.reqs_per_sec
         self.idx = idx
 
     ####################################################################
@@ -6869,19 +5147,19 @@ class RequestValidator:
     ####################################################################
     # callback4
     ####################################################################
-    def callback4(self, *, idx: int, seconds: float) -> None:
+    def callback4(self, *, idx: int, interval: float) -> None:
         """Queue the callback for request0.
 
         Args:
             idx: index of the request call
-            seconds: number of seconds for the throttle
+            interval: interval for the throttle
         """
         self.req_times.append((idx, perf_counter_ns()))
         self.arrival_times.append(self.t_throttle._arrival_time)
         self.next_target_times.append(self.t_throttle._next_target_time)
         # self.check_async_q_times.append(self.t_throttle._check_async_q_time)
         assert idx == self.idx + 1
-        assert seconds == self.seconds
+        assert interval == self.target_interval
         self.idx = idx
 
     ####################################################################
@@ -6906,13 +5184,13 @@ class RequestValidator:
     # callback6
     ####################################################################
     def callback6(
-        self, idx: int, requests: int, *, seconds: float, interval: float
+        self, idx: int, reqs_per_sec: int, *, seconds: float, interval: float
     ) -> None:
         """Queue the callback for request0.
 
         Args:
             idx: index of the request call
-            requests: number of requests for the throttle
+            reqs_per_sec: number of requests per second for the throttle
             seconds: number of seconds for the throttle
             interval: interval between requests
         """
@@ -6921,7 +5199,7 @@ class RequestValidator:
         self.next_target_times.append(self.t_throttle._next_target_time)
         # self.check_async_q_times.append(self.t_throttle._check_async_q_time)
         assert idx == self.idx + 1
-        assert requests == self.requests
+        assert reqs_per_sec == self.reqs_per_sec
         assert seconds == self.seconds
         assert 0.0 <= interval
         self.idx = idx
