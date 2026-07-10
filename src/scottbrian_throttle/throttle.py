@@ -631,13 +631,13 @@ class Throttle:
         return self._target_interval_ns
 
     ####################################################################
-    # get_completion_time
+    # get_completion_time_secs
     ####################################################################
-    def get_completion_time_secs(self, requests: int, from_start: bool) -> float:
+    def get_completion_time_secs(self, num_requests: int, from_start: bool) -> float:
         """Calculate completion time secs for given number requests.
 
         Args:
-            requests: number of requests to do
+            num_requests: number of requests to do
             from_start: specifies whether the calculation should be done
                           for a series that is starting fresh where the
                           first request has no delay
@@ -648,18 +648,18 @@ class Throttle:
 
         """
         if from_start:
-            return (requests - 1) * self._target_interval
+            return (num_requests - 1) * self._target_interval
         else:
-            return requests * self._target_interval
+            return num_requests * self._target_interval
 
     ####################################################################
-    # get_completion_time
+    # get_completion_time_ns
     ####################################################################
-    def get_completion_time_ns(self, requests: int, from_start: bool) -> float:
+    def get_completion_time_ns(self, num_requests: int, from_start: bool) -> float:
         """Calculate completion time ns for given number requests.
 
         Args:
-            requests: number of requests to do
+            num_requests: number of requests to do
             from_start: specifies whether the calculation should be done
                           for a series that is starting fresh where the
                           first request has no delay
@@ -670,9 +670,9 @@ class Throttle:
 
         """
         if from_start:
-            return (requests - 1) * self._target_interval_ns
+            return (num_requests - 1) * self._target_interval_ns
         else:
-            return requests * self._target_interval_ns
+            return num_requests * self._target_interval_ns
 
     ####################################################################
     # get_expected_num_completed_reqs
@@ -1203,8 +1203,8 @@ def add_throttle_attr(func: F) -> FuncWithThrottleAttr[F]:
 def throttle(
     wrapped: F,
     *,
-    reqs_per_sec: int,
-    bucket_size: int | float = 1,
+    reqs_per_sec: IntFloat,
+    bucket_size: IntFloat = 1,
     throttle_mode: ThrottleMode = ThrottleMode.SYNC,
     async_q_size: Optional[int] = None,
     name: Optional[str] = None,
@@ -1215,8 +1215,8 @@ def throttle(
 @overload
 def throttle(
     *,
-    reqs_per_sec: int,
-    bucket_size: int | float = 1,
+    reqs_per_sec: IntFloat,
+    bucket_size: IntFloat = 1,
     throttle_mode: ThrottleMode = ThrottleMode.SYNC,
     async_q_size: Optional[int] = None,
     name: Optional[str] = None,
@@ -1227,8 +1227,8 @@ def throttle(
 def throttle(
     wrapped: Optional[F] = None,
     *,
-    reqs_per_sec: int,
-    bucket_size: int | float = 1,
+    reqs_per_sec: IntFloat,
+    bucket_size: IntFloat = 1,
     throttle_mode: ThrottleMode = ThrottleMode.SYNC,
     async_q_size: Optional[int] = None,
     name: Optional[str] = None,
