@@ -1747,12 +1747,6 @@ class TestThrottle:
         # Invoke the functions
         ################################################################
         for request_id, s_interval in enumerate(send_intervals):
-            # request_validator.start_times.append(perf_counter_ns())
-            # pauser.pause(s_interval)  # first one is 0.0
-            # request_validator.before_req_times.append(perf_counter_ns())
-            # rc = eval(call_list[request_style_arg][0] + call_list[request_style_arg][1])
-            # request_validator.after_req_times.append(perf_counter_ns())
-            # assert rc == 0
 
             ml_request_item = RequestItem(
                 req_id=request_id,
@@ -1861,12 +1855,20 @@ class TestThrottle:
         ################################################################
         # Invoke f0
         ################################################################
-        for i, s_interval in enumerate(send_intervals):
-            request_validator.start_times.append(perf_counter_ns())
-            pauser.pause(s_interval)  # first one is 0.0
-            request_validator.before_req_times.append(perf_counter_ns())
+        for req_id, s_interval in enumerate(send_intervals):
+            ml_request_item = RequestItem(
+                req_id=req_id,
+                create_time=perf_counter_ns(),
+                throttle_mode=throttle_mode_arg,
+                send_interval=s_interval,
+            )
+
+            if s_interval > 0.0:
+                pauser.pause(s_interval)
+            ml_request_item.send_time_ns = perf_counter_ns()
+            request_validator.request_deque.appendleft(ml_request_item)
             rc = f0()
-            request_validator.after_req_times.append(perf_counter_ns())
+            ml_request_item.return_time = perf_counter_ns()
             assert rc == 0
 
         if throttle_mode_arg == ThrottleMode.ASYNC:
@@ -3573,8 +3575,6 @@ class RequestValidator:
         self.bucket_size = bucket_size
         self.send_interval = send_interval
         self.send_intervals = send_intervals
-        self.send_times: list[float] = []
-        self.num_async_overs: int = 0
 
         self.thread_items: list[RequestThreadItem] = []
 
@@ -3585,84 +3585,7 @@ class RequestValidator:
         # list of request items from each thread
         self.request_items: list[RequestItem] = []
 
-        self.norm_stop_times_times: list[float] = []
-        self.norm_stop_times_intervals: list[float] = []
-
-        # self.check_async_q_times: list[float] = []
-        # self.check_async_q_times2: list[float] = []
-        # self.norm_check_async_q_times: list[float] = []
-        # self.norm_check_async_q_intervals: list[float] = []
-
-        # self.norm_check_async_q_times2: list[float] = []
-        # self.norm_check_async_q_intervals2: list[float] = []
-
-        self.send_interval_sums: list[float] = []
-        self.exp_interval_sums: list[float] = []
-
-        self.throttles: list[Throttle] = []
-        self.before_next_target_times: list[float] = []
-
-        self.t_entry_bucket_amt: list[float] = []
-        self.t_exit_bucket_amt: list[float] = []
-        self.next_target_times: list[float] = []
         self.idx = -1
-
-        self.target_times: list[float] = []
-        self.target_intervals: list[float] = []
-
-        self.expected_times: list[float] = []
-        self.expected_intervals: list[float] = []
-
-        self.previous_delay: list[float] = []
-        self.current_delay: list[float] = []
-
-        self.enter_bucket_amt: list[float] = []
-        self.exit_bucket_amt: list[float] = []
-        self.avail_bucket_amt: list[float] = []
-
-        self.diff_req_intervals: list[float] = []
-        self.diff_req_ratio: list[float] = []
-
-        self.before_req_times: list[float] = []
-        self.arrival_times: list[float] = []
-
-        self.wait_times: list[float] = []
-
-        self.req_times: list[tuple[int, float]] = []
-        self.after_req_times: list[float] = []
-        self.start_times: list[float] = []
-
-        self.norm_before_req_times: list[float] = []
-        self.norm_arrival_times: list[float] = []
-        self.norm_req_times: list[float] = []
-        self.norm_after_req_times: list[float] = []
-        self.norm_start_times: list[float] = []
-
-        self.norm_before_req_intervals: list[float] = []
-        self.norm_arrival_intervals: list[float] = []
-        self.norm_req_intervals: list[float] = []
-        self.norm_after_req_intervals: list[float] = []
-        self.norm_start_intervals: list[float] = []
-
-        self.norm_before_next_target_intervals: list[float] = []
-        self.norm_next_target_intervals: list[float] = []
-
-        self.mean_before_req_interval = 0.0
-        self.mean_arrival_interval = 0.0
-        self.mean_req_interval = 0.0
-        self.mean_after_req_interval = 0.0
-        self.mean_start_interval = 0.0
-
-        self.norm_before_next_target_times: list[float] = []
-        self.norm_next_target_times: list[float] = []
-
-        self.mean_next_target_interval = 0.0
-
-        self.path_times: list[list[float]] = []
-        self.path_intervals: list[list[float]] = []
-
-        self.path_async_times: list[list[float]] = []
-        self.path_async_intervals: list[list[float]] = []
 
         # calculate parms
 
@@ -3672,27 +3595,6 @@ class RequestValidator:
 
         self.request_interval_ns = self.target_interval * SECS_2_NS
 
-        self.max_interval = max(self.target_interval, self.send_interval)
-
-        self.min_interval = min(self.target_interval, self.send_interval)
-
-        self.exp_total_time = self.max_interval * (self.total_requests - 1)
-
-        self.target_interval_1pct = self.target_interval * 0.01
-        self.target_interval_5pct = self.target_interval * 0.05
-        self.target_interval_10pct = self.target_interval * 0.10
-        self.target_interval_15pct = self.target_interval * 0.15
-
-        self.max_interval_1pct = self.max_interval * 0.01
-        self.max_interval_5pct = self.max_interval * 0.05
-        self.max_interval_10pct = self.max_interval * 0.10
-        self.max_interval_15pct = self.max_interval * 0.15
-
-        self.min_interval_1pct = self.min_interval * 0.01
-        self.min_interval_5pct = self.min_interval * 0.05
-        self.min_interval_10pct = self.min_interval * 0.10
-        self.min_interval_15pct = self.min_interval * 0.15
-
         self.cumulative_expected_delay_ns: float = 0.0
         self.cumulative_actual_delay_ns: float = 0.0
 
@@ -3700,124 +3602,12 @@ class RequestValidator:
 
         self.reset()
 
-        self.print_vars()
-
     ####################################################################
     # reset
     ####################################################################
     def reset(self) -> None:
         """Reset the variables to starting values."""
         self.idx = -1
-
-        self.send_interval_sums = []
-        self.exp_interval_sums = []
-
-        # self.check_async_q_times = []
-        # self.check_async_q_times2 = []
-        # self.norm_check_async_q_times = []
-        # self.norm_check_async_q_intervals = []
-        #
-        # self.norm_check_async_q_times2 = []
-        # self.norm_check_async_q_intervals2 = []
-
-        # self.obtained_nowaits = []
-        # self.time_traces = []
-        # self.stop_times = []
-
-        self.before_req_times = []
-        self.arrival_times = []
-
-        self.wait_times = []
-
-        self.req_times = []
-        self.after_req_times = []
-
-        self.send_times = []
-        self.target_times = []
-        self.target_intervals = []
-
-        self.expected_times = []
-        self.expected_intervals = []
-
-        self.previous_delay = []
-        self.current_delay = []
-
-        self.enter_bucket_amt = []
-        self.exit_bucket_amt = []
-        self.avail_bucket_amt = []
-
-        self.diff_req_intervals = []
-        self.diff_req_ratio = []
-
-        self.before_req_times = []
-        self.arrival_times = []
-        self.wait_times = []
-        self.req_times = []
-        self.after_req_times = []
-        self.start_times = []
-
-        self.norm_before_req_times = []
-        self.norm_arrival_times = []
-        self.norm_req_times = []
-        self.norm_after_req_times = []
-        self.norm_start_times = []
-
-        self.norm_before_req_intervals = []
-        self.norm_arrival_intervals = []
-        self.norm_req_intervals = []
-        self.norm_after_req_intervals = []
-        self.norm_start_intervals = []
-
-        self.norm_before_next_target_intervals = []
-        self.norm_next_target_intervals = []
-
-        self.mean_before_req_interval = 0.0
-        self.mean_arrival_interval = 0.0
-        self.mean_req_interval = 0.0
-        self.mean_after_req_interval = 0.0
-
-        self.before_next_target_times = []
-        self.norm_before_next_target_times = []
-        self.next_target_times = []
-        self.norm_next_target_times = []
-
-        self.t_entry_bucket_amt = []
-        self.t_exit_bucket_amt = []
-
-        self.mean_next_target_interval = 0.0
-
-        self.path_times = []
-        self.path_intervals = []
-
-        self.path_async_times = []
-        self.path_async_intervals = []
-
-        # self.norm_time_traces_times = []
-        # self.norm_time_traces_intervals = []
-
-        self.norm_stop_times_times = []
-        self.norm_stop_times_intervals = []
-
-    ####################################################################
-    # print_vars
-    ####################################################################
-    def print_vars(self) -> None:
-        """Print the vars for the test case."""
-        print(f"\n{self.reqs_per_sec=}")
-        print(f"{str(self.throttle_mode)=}")
-        print(f"{self.bucket_size=}")
-        print(f"{self.send_interval=}")
-        print(f"{self.total_requests=}")
-        print(f"{self.target_interval=}")
-        print(f"{self.send_interval=}")
-        print(f"{self.min_interval=}")
-        print(f"{self.max_interval=}")
-        print(f"{self.exp_total_time=}")
-
-        print(f"{self.t_throttle.lb_adjustment=}")
-        print(f"{self.t_throttle.lb_adjustment_ns=}")
-        print(f"{self.t_throttle._next_target_time=}")
-        print(f"{self.t_throttle._target_interval=}")
 
     ####################################################################
     # validate_series
@@ -3900,13 +3690,30 @@ class RequestValidator:
             self.request_items[0].actual_func_arrival_time_ns
             - self.request_items[0].send_time_ns
         )
+        amount_in_bucket_ns = self.target_interval  # init with 1st
+        max_bucket_amount_ns = self.bucket_size * self.target_interval
         for idx in range(1, len(self.request_items)):
-            # if request_item.throttle_mode == MODE_ASYNC:
-            self.request_items[idx].expected_delay_ns = max(
-                0,
-                self.request_items[idx - 1].throttle_next_target_time
-                - self.request_items[idx].send_time_ns,
+            interval = (
+                self.request_items[idx].throttle_arrival_time
+                - self.request_items[idx - 1].throttle_arrival_time
             )
+
+            amount_in_bucket_ns = max(0, amount_in_bucket_ns - interval)
+
+            if max_bucket_amount_ns - amount_in_bucket_ns < self.target_interval:
+                exp_delay = max_bucket_amount_ns - amount_in_bucket_ns
+                amount_in_bucket_ns = max_bucket_amount_ns
+            else:
+                exp_delay = 0
+                amount_in_bucket_ns += self.target_interval
+
+            self.request_items[idx].expected_delay_ns = exp_delay
+
+            # self.request_items[idx].expected_delay_ns = max(
+            #     0,
+            #     self.request_items[idx - 1].throttle_next_target_time
+            #     - self.request_items[idx].send_time_ns,
+            # )
             self.request_items[idx].expected_func_arrival_time_ns = (
                 self.request_items[idx].send_time_ns
                 + self.request_items[idx].expected_delay_ns
