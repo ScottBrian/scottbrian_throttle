@@ -17,7 +17,7 @@ requests that can be sent per second with the *reqs_per_sec* argument.
 This is used to calculate the request interval as 1/*reqs_per_sec*.
 Method *get_interval_secs* can be used to obtain the request interval.
 
-:Example: instantiate a throttle for 2 requests per second:
+:Example 1: instantiate a synchronous throttle at 2 requests per second:
 
 >>> from scottbrian_throttle.throttle import Throttle
 >>> throttle = Throttle(reqs_per_sec=2)
@@ -33,9 +33,11 @@ The throttle then calls the target routine which runs and returns
 control to the throttle. The throttle returns control to the caller of
 *send_request*, passing back any return values from the target routine.
 
-:Example: send a request through the throttle:
+:Example 2: send requests through synchronous throttle:
 
+>>> from scottbrian_throttle.throttle import Throttle
 >>> import time
+>>> throttle = Throttle(reqs_per_sec=2)
 >>> def target_rtn1(request_number, time_of_start):
 ...     ret_value = (f'request {request_number} sent at elapsed time: '
 ...                  f'{time.time() - time_of_start:0.1f}')
@@ -68,8 +70,10 @@ return value is needed. Also, the caller may need to shut down the
 throttle at the end of its processing to ensure any in-progress requests
 are complete.
 
-:Example: instantiate an asynchronous throttle and send some requests:
+:Example 3: send requests through asynchronous throttle:
 
+>>> from scottbrian_throttle.throttle import Throttle
+>>> import time
 >>> async_throttle = Throttle(reqs_per_sec=2, throttle_mode=ThrottleMode.ASYNC)
 >>> def target_rtn2(request_number, time_of_start):
 ...     print(f'request {request_number} sent at elapsed time: '
@@ -79,7 +83,7 @@ are complete.
 ...     async_throttle.send_request(target_rtn2, i, start_time)
 >>> # do other processing since not waiting for return from throttle
 >>> # after other processing, do a shutdown of the throttle
->>> async_throttle.shutdown()
+>>> async_throttle.start_shutdown()
 request 0 sent at elapsed time: 0.0
 request 1 sent at elapsed time: 0.5
 request 2 sent at elapsed time: 1.0
@@ -111,8 +115,10 @@ behavior. Note also that an asynchronous leaky bucket throttle can be
 configured by specifying a *bucket_size* greater than 1 and
 *throttle_mode=ThrottleMode.Async*.
 
-:Example: instantiate a leaky bucket throttle and send some requests:
+:Example 4: instantiate a leaky bucket throttle and send some requests:
 
+>>> from scottbrian_throttle.throttle import Throttle
+>>> import time
 >>> lb_throttle = Throttle(reqs_per_sec=2, name="t1", bucket_count=3)
 >>> def target_rtn3(request_number, time_of_start):
 ...     print(f'request {request_number} sent at elapsed time: '
@@ -134,9 +140,10 @@ request 9 sent at elapsed time: 3.5
 
 All throttle configurations are also provided as decorators:
 
-:Example: Wrapping a function with the **@throttle** decorator
+:Example 5: Wrapping a function with the **@throttle** decorator
 
 >>> from scottbrian_throttle.throttle import throttle
+>>> import time
 >>> @throttle(reqs_per_sec=2)
 ... def func1(request_number, time_of_start):
 ...     print(f'request {request_number} sent at elapsed time: '
@@ -156,9 +163,11 @@ request 8 sent at elapsed time: 4.0
 request 9 sent at elapsed time: 4.5
 
 
-:Example: Wrapping a function with the **@throttle** decorator for async
+:Example 6: Wrapping a function with the **@throttle** decorator for async
 
->>> @throttle(reqs_per_sec=2, asynch=True)
+>>> from scottbrian_throttle.throttle import throttle
+>>> import time
+>>> @throttle(reqs_per_sec=0.5, throttle_mode=ThrottleMode.ASYNC)
 >>> def func2(request_number, time_of_start):
 ...     print(f'request {request_number} sent at elapsed time: '
 ...           f'{time.time() - time_of_start:0.1f}')
@@ -167,23 +176,25 @@ request 9 sent at elapsed time: 4.5
 ...     func2(i, start_time)
 >>> # do other processing since not waiting for return from throttle
 >>> # after other processing, do a shutdown of the throttle
->>> func2.shutdown()
+>>> func2.start_shutdown()
 request 0 sent at elapsed time: 0.0
-request 1 sent at elapsed time: 0.5
-request 2 sent at elapsed time: 1.0
-request 3 sent at elapsed time: 1.5
-request 4 sent at elapsed time: 2.0
-request 5 sent at elapsed time: 2.5
-request 6 sent at elapsed time: 3.0
-request 7 sent at elapsed time: 3.5
-request 8 sent at elapsed time: 4.0
-request 9 sent at elapsed time: 4.5
+request 1 sent at elapsed time: 2.0
+request 2 sent at elapsed time: 4.0
+request 3 sent at elapsed time: 6.5
+request 4 sent at elapsed time: 8.0
+request 5 sent at elapsed time: 10.0
+request 6 sent at elapsed time: 12.0
+request 7 sent at elapsed time: 14.0
+request 8 sent at elapsed time: 16.0
+request 9 sent at elapsed time: 18.0
 
 
-:Example: Wrapping a function with the **@throttle** decorator for async
-          and with the leaky bucket
+:Example 7: Wrapping a function with the **@throttle** decorator for async
+            with leaky bucket
 
->>> @throttle(reqs_per_sec=2, bucket_count=3, asynch=True)
+>>> from scottbrian_throttle.throttle import throttle
+>>> import time
+>>> @throttle(reqs_per_sec=.75, bucket_count=5, asynch=True)
 >>> def func3(request_number, time_of_start):
 ...     print(f'request {request_number} sent at elapsed time: '
 ...           f'{time.time() - time_of_start:0.1f}')
@@ -192,17 +203,17 @@ request 9 sent at elapsed time: 4.5
 ...     func3(i, start_time)
 >>> # do other processing since not waiting for return from throttle
 >>> # after other processing, do a shutdown of the throttle
->>> func2.shutdown()
+>>> func3.start_shutdown()
 request 0 sent at elapsed time: 0.0
 request 1 sent at elapsed time: 0.0
 request 2 sent at elapsed time: 0.0
-request 3 sent at elapsed time: 0.5
-request 4 sent at elapsed time: 1.0
-request 5 sent at elapsed time: 1.5
-request 6 sent at elapsed time: 2.0
-request 7 sent at elapsed time: 2.5
-request 8 sent at elapsed time: 3.0
-request 9 sent at elapsed time: 3.5
+request 3 sent at elapsed time: 0.0
+request 4 sent at elapsed time: 0.0
+request 5 sent at elapsed time: 1.3
+request 6 sent at elapsed time: 2.7
+request 7 sent at elapsed time: 4.0
+request 8 sent at elapsed time: 5.3
+request 9 sent at elapsed time: 6.7
 
 """
 
@@ -552,10 +563,10 @@ class Throttle:
         Returns:
             The representation as how the class is instantiated
 
-        :Example: instantiate a throttle for 1 requests every 2 seconds
+        :Example 8: instantiate a throttle for 1 requests every 2 seconds
 
         >>> from scottbrian_throttle.throttle import Throttle
-        >>> request_throttle = ThrottleSync(reqs_per_sec=0.5)
+        >>> request_throttle = Throttle(reqs_per_sec=0.5)
         >>> repr(request_throttle)
         'ThrottleSync(reqs_per_sec=0.5 bucket_size=1, throttle_mode=ThrottleMode.SYNC, async_q_size=None, name=3056773933840)'
 
@@ -589,13 +600,13 @@ class Throttle:
         Note that the returned queue size is the approximate size as
         described in the documentation for the python threading queue.
 
-        :Example: instantiate an asynchronous throttle for 1 request per second
+        :Example 9: instantiate an asynchronous throttle for 1 request per second
 
         >>> from scottbrian_throttle.throttle import Throttle
         >>> import time
         >>> def my_request():
         ...     pass
-        >>> request_throttle = Throttle(reqs_per_sec=1,throttle_mode=ThrottleMode.ASYNC)
+        >>> request_throttle = Throttle(reqs_per_sec=1, throttle_mode=ThrottleMode.ASYNC)
         >>> for i in range(3):  # quickly queue up 3 items
         ...     _ = request_throttle.send_request(my_request)
         >>> time.sleep(0.5)  # allow first request to be dequeued
@@ -1280,10 +1291,10 @@ def throttle(
         A callable function that delays the request as needed in
         accordance with the specified limits.
 
-    :Example: wrap a function with a sync throttle for 1 request
+    :Example 10: wrap a function with a sync throttle for 1 request
                   per second
 
-    >>> from scottbrian_throttle.throttle import Throttle
+    >>> from scottbrian_throttle.throttle import throttle
     >>> @throttle(reqs_per_sec=1)
     ... def f1() -> None:
     ...     print('example 1 request function')

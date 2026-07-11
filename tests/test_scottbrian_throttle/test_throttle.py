@@ -3820,144 +3820,6 @@ class RequestValidator:
         print(f"{self.t_throttle._target_interval=}")
 
     ####################################################################
-    # add_func_throttles
-    ####################################################################
-    def add_func_throttles(
-        self, *args: FuncWithThrottleAttr[Callable[..., Any]]
-    ) -> None:
-        """Add the throttles for decorated functions to the validator.
-
-        Args:
-            args: the functions that have the throttles attached as
-                    attributes
-
-        """
-        self.throttles = []
-        for func in args:
-            self.throttles.append(func.throttle)
-
-    ####################################################################
-    # build_async_exp_list
-    ####################################################################
-    def build_async_exp_list(self) -> None:
-        """Build lists of async and sync expected intervals."""
-        self.expected_intervals = [0.0]
-        self.num_async_overs = 0
-        send_interval_sum = 0.0
-        exp_interval_sum = 0.0
-        self.send_interval_sums = [0.0]
-        self.exp_interval_sums = [0.0]
-        for idx, send_interval in enumerate(self.send_intervals[1:], 1):
-            # send_interval_sum = self.norm_arrival_times[idx]
-            # send_interval_sum += send_interval
-            send_interval_sum = self.norm_start_times[idx] + send_interval
-            self.send_interval_sums.append(send_interval_sum)
-
-            # exp_interval_sum += self._target_interval
-            exp_interval_sum = self.norm_req_times[idx - 1] + self.target_interval
-            self.exp_interval_sums.append(exp_interval_sum)
-
-            if send_interval_sum <= exp_interval_sum:
-                self.expected_intervals.append(self.target_interval)
-            else:
-                self.expected_intervals.append(
-                    self.target_interval + (send_interval_sum - exp_interval_sum)
-                )
-                send_interval_sum = 0.0
-                exp_interval_sum = 0.0
-                self.num_async_overs += 1
-
-    ####################################################################
-    # build_sync_exp_list
-    ####################################################################
-    def build_sync_exp_list(self) -> None:
-        """Build lists of async and sync expected intervals."""
-        self.expected_intervals = [0.0]
-        for send_interval in self.send_intervals[1:]:
-            self.expected_intervals.append(max(self.target_interval, send_interval))
-
-    ####################################################################
-    # build_sync_ec_exp_list
-    ####################################################################
-    def build_sync_ec_exp_list(self) -> None:
-        """Build list of sync ec expected intervals."""
-        self.expected_intervals = [0.0]
-        current_interval_sum = 0.0
-        # the very first request is counted as early, and each
-        # first request of each new target interval is counted as
-        # early
-        current_early_count = 0
-        current_target_interval = 0.0
-        for send_interval in self.send_intervals[1:]:
-            current_target_interval += self.target_interval
-            current_interval_sum += send_interval
-            interval_remaining = current_target_interval - current_interval_sum
-            # if this send is at or beyond the target interval
-            if current_target_interval <= current_interval_sum:
-                current_early_count = 0  # start a new series
-                current_interval_sum = 0.0
-                current_target_interval = 0.0
-                self.expected_intervals.append(send_interval)
-            else:  # this send is early
-                if self.early_count <= current_early_count:
-                    # we have exhausted our early count - must pause
-                    current_early_count = 0  # start a new series
-                    current_interval_sum = 0.0
-                    current_target_interval = 0.0
-                    self.expected_intervals.append(send_interval + interval_remaining)
-                else:
-                    current_early_count += 1
-                    self.expected_intervals.append(send_interval)
-
-    ####################################################################
-    # build_sync_lb_exp_list
-    ####################################################################
-    def build_sync_lb_exp_list(self) -> None:
-        """Build list of sync lb expected intervals."""
-        self.expected_intervals = [0.0]
-        self.previous_delay = [0.0]
-        self.current_delay = [0.0]
-
-        bucket_capacity = self.bucket_size * self.target_interval
-        current_bucket_amt = self.target_interval  # first send
-        self.enter_bucket_amt = [0.0]
-        self.exit_bucket_amt = [current_bucket_amt]
-        self.avail_bucket_amt = [bucket_capacity - current_bucket_amt]
-        if self.norm_arrival_intervals:
-            intervals_to_use = self.norm_arrival_intervals
-        else:
-            intervals_to_use = self.send_intervals
-        current_delay = 0.0
-        for send_interval in intervals_to_use[1:]:
-            previous_delay = current_delay
-            current_delay = 0.0
-            # remove the amount that leaked since the last send
-            current_bucket_amt = max(
-                0.0, current_bucket_amt - (send_interval - previous_delay)
-            )
-            self.enter_bucket_amt.append(current_bucket_amt)
-            available_bucket_amt = bucket_capacity - current_bucket_amt
-            self.avail_bucket_amt.append(available_bucket_amt)
-            # add target interval amount
-
-            self.previous_delay.append(previous_delay)
-
-            if self.target_interval <= available_bucket_amt:
-                current_bucket_amt += self.target_interval
-                self.expected_intervals.append(
-                    send_interval - previous_delay + current_delay
-                )
-            else:
-                current_delay = self.target_interval - available_bucket_amt
-                self.expected_intervals.append(
-                    send_interval - previous_delay + current_delay
-                )
-                current_bucket_amt += self.target_interval - current_delay
-
-            self.current_delay.append(current_delay)
-            self.exit_bucket_amt.append(current_bucket_amt)
-
-    ####################################################################
     # validate_series
     ####################################################################
     def validate_series(self) -> None:
@@ -4471,25 +4333,31 @@ class TestThrottleDocstrings:
     ####################################################################
     # test_throttle_example_1
     ####################################################################
-    def test_throttle_example_1(self) -> None:
-        """Method test_throttle_example_1."""
-        flowers("Example for README:")
+    def test_throttle_example_1(self, capsys: Any) -> None:
+        """Method test_throttle_example_1.
 
-        import time
-        from scottbrian_throttle.throttle import throttle_sync
+        Args:
+            capsys: pytest fixture to capture print output
 
-        @throttle_sync(reqs_per_sec=3)
-        def make_request(idx: int, previous_arrival_time: float) -> float:
-            arrival_time = time.time()
-            if idx == 0:
-                previous_arrival_time = arrival_time
-            interval = arrival_time - previous_arrival_time
-            print(f"request {idx} interval from previous: {interval:0.2f} " f"seconds")
-            return arrival_time
+        """
 
-        previous_time = 0.0
-        for i in range(10):
-            previous_time = make_request(i, previous_time)
+        flowers(
+            ":Example 1: instantiate a synchronous throttle at 2 requests per second:"
+        )
+
+        from scottbrian_throttle.throttle import Throttle
+
+        throttle = Throttle(reqs_per_sec=2)
+        print(f"{throttle.get_interval_secs()}")
+
+        expected_result = "**************************************************************************\n"
+        expected_result += " :Example 1: instantiate a synchronous throttle at 2 requests per second: \n"
+        expected_result += "**************************************************************************\n"
+        expected_result += "0.5\n"
+
+        captured = capsys.readouterr().out
+
+        assert captured == expected_result
 
     ####################################################################
     # test_throttle_example_2
@@ -4501,20 +4369,39 @@ class TestThrottleDocstrings:
             capsys: pytest fixture to capture print output
 
         """
-        from scottbrian_throttle.throttle import throttle_sync
+
+        flowers(":Example 2: send requests through synchronous throttle:")
+
+        from scottbrian_throttle.throttle import Throttle
         import time
 
-        @throttle_sync(reqs_per_sec=1)
-        def make_request() -> None:
-            time.sleep(0.1)  # simulate request that takes 1/10 second
+        throttle = Throttle(reqs_per_sec=2)
+
+        def target_rtn1(request_number, time_of_start):
+            ret_value = (
+                f"request {request_number} sent at elapsed time: "
+                f"{time.time() - time_of_start:0.1f}"
+            )
+            return ret_value
 
         start_time = time.time()
         for i in range(10):
-            make_request()
-        elapsed_time = time.time() - start_time
-        print(f"total time for 10 requests: {elapsed_time:0.1f} seconds")
+            ret_val = throttle.send_request(target_rtn1, i, start_time)
+            print(ret_val)
 
-        expected_result = "total time for 10 requests: 9.1 seconds\n"
+        expected_result = "*********************************************************\n"
+        expected_result += " :Example 2: send requests through synchronous throttle: \n"
+        expected_result += "*********************************************************\n"
+        expected_result += "request 0 sent at elapsed time: 0.0\n"
+        expected_result += "request 1 sent at elapsed time: 0.5\n"
+        expected_result += "request 2 sent at elapsed time: 1.0\n"
+        expected_result += "request 3 sent at elapsed time: 1.5\n"
+        expected_result += "request 4 sent at elapsed time: 2.0\n"
+        expected_result += "request 5 sent at elapsed time: 2.5\n"
+        expected_result += "request 6 sent at elapsed time: 3.0\n"
+        expected_result += "request 7 sent at elapsed time: 3.5\n"
+        expected_result += "request 8 sent at elapsed time: 4.0\n"
+        expected_result += "request 9 sent at elapsed time: 4.5\n"
 
         captured = capsys.readouterr().out
 
@@ -4530,85 +4417,410 @@ class TestThrottleDocstrings:
             capsys: pytest fixture to capture print output
 
         """
-        from scottbrian_throttle.throttle import ThrottleSync
+
+        flowers(":Example 3: send requests through asynchronous throttle:")
+
+        from scottbrian_throttle.throttle import Throttle
         import time
 
-        a_throttle = ThrottleSync(reqs_per_sec=1)
+        async_throttle = Throttle(reqs_per_sec=2, throttle_mode=ThrottleMode.ASYNC)
 
-        def make_request() -> None:
-            time.sleep(0.1)  # simulate request that takes 1/10 second
+        def target_rtn2(request_number, time_of_start):
+            print(
+                f"request {request_number} sent at elapsed time: "
+                f"{time.time() - time_of_start:0.1f}"
+            )
 
         start_time = time.time()
         for i in range(10):
-            a_throttle.send_request(make_request)
-        elapsed_time = time.time() - start_time
-        print(f"total time for 10 requests: {elapsed_time:0.1f} seconds")
+            async_throttle.send_request(target_rtn2, i, start_time)
+        # do other processing since not waiting for return from throttle
+        # after other processing, do a shutdown of the throttle
+        async_throttle.start_shutdown()
 
-        expected_result = "total time for 10 requests: 9.1 seconds\n"
+        expected_result = "**********************************************************\n"
+        expected_result += (
+            " :Example 3: send requests through asynchronous throttle: \n"
+        )
+        expected_result += (
+            "**********************************************************\n"
+        )
+        expected_result += "request 0 sent at elapsed time: 0.0\n"
+        expected_result += "request 1 sent at elapsed time: 0.5\n"
+        expected_result += "request 2 sent at elapsed time: 1.0\n"
+        expected_result += "request 3 sent at elapsed time: 1.5\n"
+        expected_result += "request 4 sent at elapsed time: 2.0\n"
+        expected_result += "request 5 sent at elapsed time: 2.5\n"
+        expected_result += "request 6 sent at elapsed time: 3.0\n"
+        expected_result += "request 7 sent at elapsed time: 3.5\n"
+        expected_result += "request 8 sent at elapsed time: 4.0\n"
+        expected_result += "request 9 sent at elapsed time: 4.5\n"
 
         captured = capsys.readouterr().out
 
         assert captured == expected_result
 
-    # def test_throttle_with_example_4(self) -> None:
-    #     """Method test_throttle_with_example_4."""
-    #     print()
-    #     print('#' * 50)
-    #     print('Example of statically wrapping function with
-    #            throttle:')
-    #     print()
-    #
-    #     _tbe = False
-    #
-    #     @throttle(throttle_enabled=_tbe, file=sys.stdout)
-    #     def func4a() -> None:
-    #         print('this is sample text for _tbe = False static
-    #                example')
-    #
-    #     func4a()  # func4a is not wrapped by time box
-    #
-    #     _tbe = True
-    #
-    #     @throttle(throttle_enabled=_tbe, file=sys.stdout)
-    #     def func4b() -> None:
-    #         print('this is sample text for _tbe = True static
-    #                                                      example')
-    #
-    #     func4b()  # func4b is wrapped by time box
-    #
-    # def test_throttle_with_example_5(self) -> None:
-    #     """Method test_throttle_with_example_5."""
-    #     print()
-    #     print('#' * 50)
-    #     print('Example of dynamically wrapping function with
-    #            throttle:')
-    #     print()
-    #
-    #     _tbe = True
-    #     def tbe() -> bool: return _tbe
-    #
-    #     @throttle(throttle_enabled=tbe, file=sys.stdout)
-    #     def func5() -> None:
-    #         print('this is sample text for the tbe dynamic example')
-    #
-    #     func5()  # func5 is wrapped by time box
-    #
-    #     _tbe = False
-    #     func5()  # func5 is not wrapped by throttle
-    #
-    # def test_throttle_with_example_6(self) -> None:
-    #     """Method test_throttle_with_example_6."""
-    #     print()
-    #     print('#' * 50)
-    #     print('Example of using different datetime format:')
-    #     print()
-    #
-    #     a_datetime_format: DT_Format = cast(DT_Format,
-    #                                         '%m/%d/%y %H:%M:%S')
-    #
-    #     @throttle(dt_format=a_datetime_format)
-    #     def func6() -> None:
-    #         print('this is sample text for the datetime forma
-    #                example')
-    #
-    #     func6()
+    ####################################################################
+    # test_throttle_example_4
+    ####################################################################
+    def test_throttle_example_4(self, capsys: Any) -> None:
+        """Method test_throttle_example_4.
+
+        Args:
+            capsys: pytest fixture to capture print output
+
+        """
+
+        flowers(
+            ":Example 4: instantiate a leaky bucket throttle and send some requests:"
+        )
+
+        from scottbrian_throttle.throttle import Throttle
+        import time
+
+        lb_throttle = Throttle(reqs_per_sec=2, name="t1", bucket_count=3)
+
+        def target_rtn3(request_number, time_of_start):
+            print(
+                f"request {request_number} sent at elapsed time: "
+                f"{time.time() - time_of_start:0.1f}"
+            )
+
+        start_time = time.time()
+        for i in range(10):
+            lb_throttle.send_request(target_rtn3, i, start_time)
+
+        expected_result = "*************************************************************************\n"
+        expected_result += " :Example 4: instantiate a leaky bucket throttle and send some requests: \n"
+        expected_result += "*************************************************************************\n"
+        expected_result += "request 0 sent at elapsed time: 0.0\n"
+        expected_result += "request 1 sent at elapsed time: 0.0\n"
+        expected_result += "request 2 sent at elapsed time: 0.0\n"
+        expected_result += "request 3 sent at elapsed time: 0.5\n"
+        expected_result += "request 4 sent at elapsed time: 1.0\n"
+        expected_result += "request 5 sent at elapsed time: 1.5\n"
+        expected_result += "request 6 sent at elapsed time: 2.0\n"
+        expected_result += "request 7 sent at elapsed time: 2.5\n"
+        expected_result += "request 8 sent at elapsed time: 3.0\n"
+        expected_result += "request 9 sent at elapsed time: 3.5\n"
+
+        captured = capsys.readouterr().out
+
+        assert captured == expected_result
+
+    ####################################################################
+    # test_throttle_example_5
+    ####################################################################
+    def test_throttle_example_5(self, capsys: Any) -> None:
+        """Method test_throttle_example_5.
+
+        Args:
+            capsys: pytest fixture to capture print output
+
+        """
+
+        flowers(":Example 5: Wrapping a function with the **@throttle** decorator")
+
+        from scottbrian_throttle.throttle import throttle
+        import time
+
+        @throttle(reqs_per_sec=2)
+        def func1(request_number, time_of_start):
+            print(
+                f"request {request_number} sent at elapsed time: "
+                f"{time.time() - time_of_start:0.1f}"
+            )
+
+        start_time = time.time()
+        for i in range(10):
+            func1(i, start_time)
+
+        expected_result = (
+            "******************************************************************\n"
+        )
+        expected_result += (
+            " :Example 5: Wrapping a function with the **@throttle** decorator \n"
+        )
+        expected_result += (
+            "******************************************************************\n"
+        )
+        expected_result += "request 0 sent at elapsed time: 0.0\n"
+        expected_result += "request 1 sent at elapsed time: 0.5\n"
+        expected_result += "request 2 sent at elapsed time: 1.0\n"
+        expected_result += "request 3 sent at elapsed time: 1.5\n"
+        expected_result += "request 4 sent at elapsed time: 2.0\n"
+        expected_result += "request 5 sent at elapsed time: 2.5\n"
+        expected_result += "request 6 sent at elapsed time: 3.0\n"
+        expected_result += "request 7 sent at elapsed time: 3.5\n"
+        expected_result += "request 8 sent at elapsed time: 4.0\n"
+        expected_result += "request 9 sent at elapsed time: 4.5\n"
+
+        captured = capsys.readouterr().out
+
+        assert captured == expected_result
+
+    ####################################################################
+    # test_throttle_example_6
+    ####################################################################
+    def test_throttle_example_6(self, capsys: Any) -> None:
+        """Method test_throttle_example_6.
+
+        Args:
+            capsys: pytest fixture to capture print output
+
+        """
+
+        flowers(
+            ":Example 6: Wrapping a function with the **@throttle** decorator for async"
+        )
+
+        from scottbrian_throttle.throttle import throttle
+        import time
+
+        @throttle(reqs_per_sec=0.5, throttle_mode=ThrottleMode.ASYNC)
+        def func2(request_number, time_of_start):
+            print(
+                f"request {request_number} sent at elapsed time: "
+                f"{time.time() - time_of_start:0.1f}"
+            )
+
+        start_time = time.time()
+        for i in range(10):
+            func2(i, start_time)
+        # do other processing since not waiting for return from throttle
+        # after other processing, do a shutdown of the throttle
+        func2.start_shutdown()
+
+        expected_result = "****************************************************************************\n"
+        expected_result += " :Example 6: Wrapping a function with the **@throttle** decorator for async \n"
+        expected_result += "****************************************************************************\n"
+        expected_result += "request 0 sent at elapsed time: 0.0\n"
+        expected_result += "request 1 sent at elapsed time: 2.5\n"
+        expected_result += "request 2 sent at elapsed time: 4.0\n"
+        expected_result += "request 3 sent at elapsed time: 6.5\n"
+        expected_result += "request 4 sent at elapsed time: 8.0\n"
+        expected_result += "request 5 sent at elapsed time: 10.0\n"
+        expected_result += "request 6 sent at elapsed time: 12.0\n"
+        expected_result += "request 7 sent at elapsed time: 14.0\n"
+        expected_result += "request 8 sent at elapsed time: 16.0\n"
+        expected_result += "request 9 sent at elapsed time: 18.0\n"
+
+        captured = capsys.readouterr().out
+
+        assert captured == expected_result
+
+    ####################################################################
+    # test_throttle_example_7
+    ####################################################################
+    def test_throttle_example_7(self, capsys: Any) -> None:
+        """Method test_throttle_example_7.
+
+        Args:
+            capsys: pytest fixture to capture print output
+
+        """
+
+        flowers(
+            ":Example 7: Wrapping a function with the **@throttle** decorator for async "
+            "with leaky bucket"
+        )
+
+        from scottbrian_throttle.throttle import throttle
+        import time
+
+        @throttle(reqs_per_sec=0.75, bucket_count=5, asynch=True)
+        def func3(request_number, time_of_start):
+            print(
+                f"request {request_number} sent at elapsed time: "
+                f"{time.time() - time_of_start:0.1f}"
+            )
+
+        start_time = time.time()
+        for i in range(10):
+            func3(i, start_time)
+        # do other processing since not waiting for return from throttle
+        # after other processing, do a shutdown of the throttle
+        func3.start_shutdown()
+
+        expected_result = "****************************************************************************\n"
+        expected_result += " :Example 7: Wrapping a function with the **@throttle** decorator for async \n"
+        expected_result += " with leaky bucket \n"
+        expected_result += "****************************************************************************\n"
+        expected_result += "request 0 sent at elapsed time: 0.0\n"
+        expected_result += "request 1 sent at elapsed time: 0.0\n"
+        expected_result += "request 2 sent at elapsed time: 0.0\n"
+        expected_result += "request 3 sent at elapsed time: 0.0\n"
+        expected_result += "request 4 sent at elapsed time: 0.0\n"
+        expected_result += "request 5 sent at elapsed time: 1.3\n"
+        expected_result += "request 6 sent at elapsed time: 2.7\n"
+        expected_result += "request 7 sent at elapsed time: 4.0\n"
+        expected_result += "request 8 sent at elapsed time: 5.3\n"
+        expected_result += "request 9 sent at elapsed time: 6.7\n"
+
+        captured = capsys.readouterr().out
+
+        assert captured == expected_result
+
+    ####################################################################
+    # test_throttle_example_8
+    ####################################################################
+    def test_throttle_example_8(self, capsys: Any) -> None:
+        """Method test_throttle_example_8.
+
+        Args:
+            capsys: pytest fixture to capture print output
+
+        """
+
+        flowers(":Example 8: instantiate a throttle for 1 requests every 2 seconds ")
+
+        from scottbrian_throttle.throttle import Throttle
+
+        request_throttle = Throttle(reqs_per_sec=0.5)
+        repr(request_throttle)
+
+        expected_result = (
+            "*******************************************************************\n"
+        )
+        expected_result += (
+            " :Example 8: instantiate a throttle for 1 requests every 2 seconds \n"
+        )
+        expected_result += (
+            "*******************************************************************\n"
+        )
+        expected_result += (
+            f"ThrottleSync(reqs_per_sec=0.5 bucket_size=1, throttle_mode=ThrottleMode.SYNC, "
+            f"async_q_size=None, name={id(request_throttle)})\n"
+        )
+
+        captured = capsys.readouterr().out
+
+        assert captured == expected_result
+
+    ####################################################################
+    # test_throttle_example_9
+    ####################################################################
+    def test_throttle_example_9(self, capsys: Any) -> None:
+        """Method test_throttle_example_9.
+
+        Args:
+            capsys: pytest fixture to capture print output
+
+        """
+
+        flowers(
+            ":Example 9: instantiate an asynchronous throttle for 1 request per second"
+        )
+
+        from scottbrian_throttle.throttle import Throttle
+        import time
+
+        def my_request():
+            pass
+
+        request_throttle = Throttle(reqs_per_sec=1, throttle_mode=ThrottleMode.ASYNC)
+        for i in range(3):  # quickly queue up 3 items
+            _ = request_throttle.send_request(my_request)
+        time.sleep(0.5)  # allow first request to be dequeued
+        print(len(request_throttle))
+
+        request_throttle.start_shutdown()
+
+        expected_result = "***************************************************************************\n"
+        expected_result += " :Example 9: instantiate an asynchronous throttle for 1 request per second \n"
+        expected_result += "***************************************************************************\n"
+        expected_result += "2\n"
+
+        captured = capsys.readouterr().out
+
+        assert captured == expected_result
+
+    ####################################################################
+    # test_throttle_readme_example_1
+    ####################################################################
+    def test_throttle_readme_example_1(self, capsys: Any) -> None:
+        """Method test_throttle_readme_example_1.
+
+        Args:
+            capsys: pytest fixture to capture print output
+
+        """
+
+        flowers(":README example 1:")
+
+        from scottbrian_throttle.throttle import throttle
+        import time
+
+        @throttle(reqs_per_sec=2)
+        def make_request(request_number, time_of_start):
+            print(
+                f"request {request_number} sent at elapsed time: "
+                f"{time.time() - time_of_start:0.1f}"
+            )
+
+        start_time = time.time()
+        for i in range(10):
+            make_request(i, start_time)
+
+        expected_result = "********************\n"
+        expected_result += " :README example 1: \n"
+        expected_result += "********************\n"
+        expected_result += "request 0 sent at elapsed time: 0.0\n"
+        expected_result += "request 1 sent at elapsed time: 0.5\n"
+        expected_result += "request 2 sent at elapsed time: 1.0\n"
+        expected_result += "request 3 sent at elapsed time: 1.5\n"
+        expected_result += "request 4 sent at elapsed time: 2.0\n"
+        expected_result += "request 5 sent at elapsed time: 2.5\n"
+        expected_result += "request 6 sent at elapsed time: 3.0\n"
+        expected_result += "request 7 sent at elapsed time: 3.5\n"
+        expected_result += "request 8 sent at elapsed time: 4.0\n"
+        expected_result += "request 9 sent at elapsed time: 4.5\n"
+
+        captured = capsys.readouterr().out
+
+        assert captured == expected_result
+
+    ####################################################################
+    # test_throttle_readme_example_2
+    ####################################################################
+    def test_throttle_readme_example_2(self, capsys: Any) -> None:
+        """Method test_throttle_readme_example_2.
+
+        Args:
+            capsys: pytest fixture to capture print output
+
+        """
+
+        flowers(":README example 2:")
+
+        from scottbrian_throttle.throttle import Throttle
+        import time
+
+        def make_request(request_number, time_of_start):
+            print(
+                f"request {request_number} sent at elapsed time: "
+                f"{time.time() - time_of_start:0.1f}"
+            )
+
+        a_throttle = Throttle(reqs_per_sec=2)
+        start_time = time.time()
+        for i in range(10):
+            a_throttle.send_request(make_request, i, start_time)
+
+        expected_result = "********************\n"
+        expected_result += " :README example 2: \n"
+        expected_result += "********************\n"
+        expected_result += "request 0 sent at elapsed time: 0.0\n"
+        expected_result += "request 1 sent at elapsed time: 0.5\n"
+        expected_result += "request 2 sent at elapsed time: 1.0\n"
+        expected_result += "request 3 sent at elapsed time: 1.5\n"
+        expected_result += "request 4 sent at elapsed time: 2.0\n"
+        expected_result += "request 5 sent at elapsed time: 2.5\n"
+        expected_result += "request 6 sent at elapsed time: 3.0\n"
+        expected_result += "request 7 sent at elapsed time: 3.5\n"
+        expected_result += "request 8 sent at elapsed time: 4.0\n"
+        expected_result += "request 9 sent at elapsed time: 4.5\n"
+
+        captured = capsys.readouterr().out
+
+        assert captured == expected_result

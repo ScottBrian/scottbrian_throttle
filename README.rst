@@ -57,15 +57,15 @@ a class:
 Examples
 ========
 
-Here we are using the **@throttle_sync** decorator to wrap a function that needs to be limited to no more
+Here we are using the **@throttle** decorator to wrap a function that needs to be limited to no more
 than 2 executions per second. In the following code, make_request will be called 10 times in rapid succession. The
-**@throttle_sync** keeps track of the time for each invocation and will insert a wait as needed to stay within the
+**@throttle** keeps track of the time for each invocation and will insert a wait as needed to stay within the
 limit. The first execution of make_request will be done immediately while the remaining executions will each be delayed
 by 1/2 second as seen in the output messages.
 
 >>> from scottbrian_throttle.throttle import throttle_sync
 >>> import time
->>> @throttle_sync(requests=2, seconds=1)
+>>> @throttle_sync(reqs_per_sec=2)
 ... def make_request(request_number, time_of_start):
 ...     print(f'request {request_number} sent at elapsed time: '
 ...           f'{time.time() - time_of_start:0.1f}')
@@ -84,15 +84,15 @@ request 8 sent at elapsed time: 4.0
 request 9 sent at elapsed time: 4.5
 
 
-Here's the same example using the **ThrottleSync** class. Note that the loop now calls send_request, passing
+Here's the same example using the **Throttle** class. Note that the loop now calls send_request, passing
 in the make_request function and its arguments:
 
->>> from scottbrian_throttle.throttle import ThrottleSync
+>>> from scottbrian_throttle.throttle import Throttle
 >>> import time
 >>> def make_request(request_number, time_of_start):
 ...     print(f'request {request_number} sent at elapsed time: '
 ...           f'{time.time() - time_of_start:0.1f}')
->>> a_throttle = ThrottleSync(requests=2, seconds=1)
+>>> a_throttle = Throttle(reqs_per_sec=2)
 >>> start_time = time.time()
 >>> for i in range(10):
 ...     a_throttle.send_request(make_request, i, start_time)
