@@ -356,8 +356,8 @@ class Throttle:
     NS_2_SECS: Final[float] = 0.000000001
 
     __slots__ = (
-        "_arrival_time",
-        "_next_target_time",
+        "_arrival_time_ns",
+        "_next_target_time_ns",
         "_target_interval",
         "_target_interval_ns",
         "_throttle_shutdown_started",
@@ -522,7 +522,7 @@ class Throttle:
         self._target_interval = 1 / reqs_per_sec
         self._target_interval_ns: float = self._target_interval * Throttle.SECS_2_NS
         self.sync_lock = threading.Lock()
-        self._arrival_time = 0.0
+        self._arrival_time_ns = 0.0
         self._wait_time_ns: float = 0.0
         self.logger = logging.getLogger(__name__)
         self.pauser = Pauser()
@@ -535,8 +535,8 @@ class Throttle:
         )
         self.lb_adjustment_ns: float = self.lb_adjustment * Throttle.SECS_2_NS
 
-        # adjust _next_target_time for normal or lb algo
-        self._next_target_time = time.perf_counter_ns() - self.lb_adjustment_ns
+        # adjust _next_target_time_ns for normal or lb algo
+        self._next_target_time_ns = time.perf_counter_ns() - self.lb_adjustment_ns
 
         if self.throttle_mode == ThrottleMode.ASYNC:
             ############################################################
@@ -803,25 +803,25 @@ class Throttle:
             #    a) a target interval is calculated as 1/reqs_per_sec.
             #       For example, with a specification of 4 reqs_per_sec,
             #       the target interval will be 0.25 seconds.
-            #    b) _next_target_time is set to a current time reference
+            #    b) _next_target_time_ns is set to a current time reference
             #       via time.perf_counter_ns
             # 2) as each request arrives, it is checked against the
-            #    _next_target_time and:
-            #    a) if it arrives at or after _next_target_time, it is
+            #    _next_target_time_ns and:
+            #    a) if it arrives at or after _next_target_time_ns, it is
             #       allowed to proceed without delay
-            #    b) if it arrives before the _next_target_time the
-            #       request is delayed until _next_target_time is
+            #    b) if it arrives before the _next_target_time_ns the
+            #       request is delayed until _next_target_time_ns is
             #       reached
-            # 3) _next_target_time is increased by the target_interval
+            # 3) _next_target_time_ns is increased by the target_interval
             #
             ############################################################
             with self.sync_lock:
                 # # set the time that this request is being made
-                # self._arrival_time = time.perf_counter_ns()
+                # self._arrival_time_ns = time.perf_counter_ns()
                 #
-                # if self._arrival_time < self._next_target_time:
+                # if self._arrival_time_ns < self._next_target_time_ns:
                 #     wait_time = (
-                #         self._next_target_time - self._arrival_time
+                #         self._next_target_time_ns - self._arrival_time_ns
                 #     ) * Throttle.NS_2_SECS
                 #     self.pauser.pause(wait_time)
 
@@ -841,7 +841,7 @@ class Throttle:
                 # undesirable effect that all requests will now be
                 # throttled more than they need to be.
                 ########################################################
-                # self._next_target_time = time.perf_counter_ns()
+                # self._next_target_time_ns = time.perf_counter_ns()
                 #   + self._target_interval_ns
                 ########################################################
                 # The leaky bucket algorith uses a virtual bucket into
@@ -915,24 +915,38 @@ class Throttle:
                 # was made to update the target time before calling the
                 # requested function.
                 ########################################################
-                self._arrival_time = time.perf_counter_ns()
+                self._arrival_time_ns = time.perf_counter_ns()
                 self._wait_time_ns = 0.0
-                if self._next_target_time + self.lb_adjustment_ns < self._arrival_time:
+                self.logger.debug(
+                    f"entry 1: {self._arrival_time_ns=}, {self._wait_time_ns=}, {self._next_target_time_ns=}, {self.lb_adjustment_ns=}"
+                )
+                if (
+                    self._next_target_time_ns + self.lb_adjustment_ns
+                    < self._arrival_time_ns
+                ):
                     # we are well beyond the target time - we need to start
                     # a new bucket with the first send entry added
-                    self._next_target_time = (
-                        self._arrival_time
+
+                    self._next_target_time_ns = (
+                        self._arrival_time_ns
                         - self.lb_adjustment_ns
                         + self._target_interval_ns
                     )
+                    self.logger.debug(f"entry 2: {self._next_target_time_ns=}")
                 else:  # still in the range of the bucket
-                    if self._arrival_time < self._next_target_time:
+                    if self._arrival_time_ns < self._next_target_time_ns:
                         # we need to delay to allow the bucket to leak out
                         # enough to fit the next entry we are sending
-                        self._wait_time_ns = self._next_target_time - self._arrival_time
+                        self._wait_time_ns = (
+                            self._next_target_time_ns - self._arrival_time_ns
+                        )
+                        self.logger.debug(f"entry 3: {self._wait_time_ns=}")
                         self.pauser.pause_ns(self._wait_time_ns)
                     # add one entry to the bucket
-                    self._next_target_time += self._target_interval_ns
+                    self._next_target_time_ns += self._target_interval_ns
+                    self.logger.debug(
+                        f"entry 4: {self._wait_time_ns=}, {self._next_target_time_ns=}"
+                    )
 
                 ########################################################
                 # Call the request function and return with the request
@@ -971,7 +985,7 @@ class Throttle:
             try:
                 request_item = self.async_q.get(block=True, timeout=1)
 
-                # self._next_target_time = (
+                # self._next_target_time_ns = (
                 #     time.perf_counter_ns() + self._target_interval_ns
                 # )
 
@@ -986,33 +1000,33 @@ class Throttle:
             ############################################################
             try:
                 if self.throttle_state != Throttle._HARD_SHUTDOWN_STARTED:
-                    # self._arrival_time = request_item.arrival_time
-                    self._arrival_time = time.perf_counter_ns()
+                    # self._arrival_time_ns = request_item.arrival_time
+                    self._arrival_time_ns = time.perf_counter_ns()
                     self._wait_time_ns = 0.0
                     if (
-                        self._next_target_time + self.lb_adjustment_ns
-                        < self._arrival_time
+                        self._next_target_time_ns + self.lb_adjustment_ns
+                        < self._arrival_time_ns
                     ):
                         # we are well beyond the target time - we need
                         # to start
                         # a new bucket with the first send entry added
-                        self._next_target_time = (
-                            self._arrival_time
+                        self._next_target_time_ns = (
+                            self._arrival_time_ns
                             - self.lb_adjustment_ns
                             + self._target_interval_ns
                         )
                     else:  # still in the range of the bucket
-                        if self._arrival_time < self._next_target_time:
+                        if self._arrival_time_ns < self._next_target_time_ns:
                             # we need to delay to allow the bucket to
                             # leak out
                             # enough to fit the next entry we are
                             # sending
                             self._wait_time_ns = (
-                                self._next_target_time - self._arrival_time
+                                self._next_target_time_ns - self._arrival_time_ns
                             )
                             self.pauser.pause_ns(self._wait_time_ns)
                         # add one entry to the bucket
-                        self._next_target_time += self._target_interval_ns
+                        self._next_target_time_ns += self._target_interval_ns
                     request_item.request_func(*request_item.args, **request_item.kwargs)
                     # obtained_nowait=obtained_nowait)
             except Exception as e:
@@ -1033,7 +1047,7 @@ class Throttle:
         # in case we need to bail for shutdown, so we wait in 1
         # second or fewer increments and bail if we detect shutdown.
         ############################################################
-        # self._wait_time_ns = self._next_target_time -
+        # self._wait_time_ns = self._next_target_time_ns -
         # time.perf_counter_ns()
         # while True:
         #     # handle shutdown
@@ -1046,7 +1060,7 @@ class Throttle:
         #
         #     # Use min to ensure we don't sleep too long and appear
         #     # slow to respond to a shutdown request
-        #     sleep_ns = self._next_target_time - time.perf_counter_ns()
+        #     sleep_ns = self._next_target_time_ns - time.perf_counter_ns()
         #     if sleep_ns > 0:  # if still time to go
         #         self.pauser.pause_ns(min(Throttle.MAX_PAUSE_NS,
         #                             sleep_ns))
