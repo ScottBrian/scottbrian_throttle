@@ -307,7 +307,7 @@ class TestThrottleBasic:
     ####################################################################
     # len checks with throttle_mode=ThrottleMode.ASYNC
     ####################################################################
-    @pytest.mark.parametrize("num_reqs_to_send_arg", (1, 2, 3))
+    @pytest.mark.parametrize("num_reqs_to_send_arg", (2, 3, 6))
     @etrace(omit_caller=True)
     def test_throttle_len_async(
         self,
@@ -326,18 +326,26 @@ class TestThrottleBasic:
             reqs_per_sec=0.3, throttle_mode=ThrottleMode.ASYNC
         )  # 3 sec interval
 
-        def dummy_func(an_event: threading.Event) -> None:
+        def dummy_func(an_event: threading.Event, idx: int) -> None:
+            logger.debug(f"dummy_func entered: {idx=}")
             an_event.set()
 
         event = threading.Event()
 
         for i in range(num_reqs_to_send_arg):
-            a_throttle.send_request(dummy_func, event)
+            a_throttle.send_request(dummy_func, event, i)
 
+        logger.debug(f"mainline waiting on event")
         event.wait()
+        logger.debug(f"mainline after wait on event")
         # assert is for 1 less than queued because the first request
         # will be scheduled immediately
-        assert len(a_throttle) == num_reqs_to_send_arg - 1
+        try:
+            assert len(a_throttle) == num_reqs_to_send_arg - 2
+        except Exception as e:
+            a_throttle.start_shutdown()
+            raise
+
         # start_shutdown returns when request_q cleanup completes
         a_throttle.start_shutdown()
         assert len(a_throttle) == 0
@@ -837,14 +845,17 @@ class TestThrottleBasic:
             count: int = 0
 
         ml_count = MainlineCount()
+        ml_event1 = threading.Event()
+        ml_event2 = threading.Event()
 
         def f1(f1_idx: int, f1_count: MainlineCount) -> None:
             f1_count.count += 1
             logger.debug(f"{f1_idx=}, {f1_count.count=}")
 
         def f2() -> None:
-            time.sleep(1)
+            ml_event1.wait()
             a_throttle.start_shutdown(timeout=0.001)
+            ml_event2.set()
 
         a_throttle = Throttle(
             reqs_per_sec=0.3, throttle_mode=ThrottleMode.ASYNC, async_q_size=1
@@ -853,14 +864,17 @@ class TestThrottleBasic:
         f2_thread = threading.Thread(target=f2)
         f2_thread.start()
 
-        for idx in range(3):
+        for idx in range(6):
+            if idx == 3:  # we queued 3 so far (i.e., idx 0, 1, 2)
+                ml_event1.set()
+                ml_event2.wait()
             a_throttle.send_request(f1, idx, f1_count=ml_count)
 
         a_throttle.start_shutdown()
 
         logger.debug(f"mainline: {ml_count.count=}")
 
-        assert ml_count.count < 3
+        assert ml_count.count == 3
 
 
 ########################################################################
@@ -3593,7 +3607,7 @@ class RequestValidator:
 
         self.target_interval = 1 / reqs_per_sec
 
-        self.request_interval_ns = self.target_interval * SECS_2_NS
+        self.target_interval_ns = self.target_interval * SECS_2_NS
 
         self.cumulative_expected_delay_ns: float = 0.0
         self.cumulative_actual_delay_ns: float = 0.0
@@ -3630,29 +3644,30 @@ class RequestValidator:
         # calculate the request intervals and verify accuracy
         ################################################################
         self.process_request_items()
+        print("Interval Times:\n")
         print(
-            "\ninterval times: arrival idx| send | throttle arrival | expected arrival | "
-            "actual arrival | expected delay | actual delay | diff ratio"
+            "\nreq_ID | arrival idx |    send | t arrival | exp arrival | "
+            "act arrival | exp delay | act delay | diff ratio |"
         )
 
         first_send_time = self.request_items[0].send_time_ns
         for req_item in self.request_items:
             extra_time = 0.0
             if req_item.expected_delay_ns == 0.0:
-                extra_time = self.request_interval_ns
+                extra_time = self.target_interval_ns
             expected_actual_diff_ratio = (
                 req_item.actual_delay_ns - req_item.expected_delay_ns
             ) / (req_item.expected_delay_ns + extra_time)
             print(
-                f"req_id: {req_item.req_id:2} "
-                f"| {req_item.arrival_idx:2} "
-                f"| {(req_item.send_time_ns - first_send_time) * NS_2_SECS:.4f} "
-                f"| {(req_item.throttle_arrival_time - first_send_time) * NS_2_SECS:.4f}"
-                f"| {(req_item.expected_func_arrival_time_ns - first_send_time) * NS_2_SECS:.4f}"
-                f"| {(req_item.actual_func_arrival_time_ns - first_send_time) * NS_2_SECS:.4f}"
-                f"| {req_item.expected_delay_ns * NS_2_SECS:.4f} "
-                f"| {req_item.actual_delay_ns * NS_2_SECS:.4f} "
-                f"| {expected_actual_diff_ratio * NS_2_SECS:.4f} "
+                f"    {req_item.req_id:2} "
+                f"|          {req_item.arrival_idx:2} "
+                f"| {(req_item.send_time_ns - first_send_time) * NS_2_SECS:7.4f} "
+                f"|   {(req_item.throttle_arrival_time - first_send_time) * NS_2_SECS:7.4f} "
+                f"|     {(req_item.expected_func_arrival_time_ns - first_send_time) * NS_2_SECS:7.4f} "
+                f"|     {(req_item.actual_func_arrival_time_ns - first_send_time) * NS_2_SECS:7.4f} "
+                f"|   {req_item.expected_delay_ns * NS_2_SECS:7.4f} "
+                f"|   {req_item.actual_delay_ns * NS_2_SECS:7.4f} "
+                f"|    {expected_actual_diff_ratio * NS_2_SECS:7.4f} |"
             )
 
         # print(f"{throttle_verifier.num_excessive_request_delays=}")
@@ -3690,8 +3705,8 @@ class RequestValidator:
             self.request_items[0].actual_func_arrival_time_ns
             - self.request_items[0].send_time_ns
         )
-        amount_in_bucket_ns = self.target_interval  # init with 1st
-        max_bucket_amount_ns = self.bucket_size * self.target_interval
+        amount_in_bucket_ns = self.target_interval_ns  # init with 1st
+        max_bucket_amount_ns = self.bucket_size * self.target_interval_ns
         for idx in range(1, len(self.request_items)):
             interval = (
                 self.request_items[idx].throttle_arrival_time
@@ -3700,12 +3715,12 @@ class RequestValidator:
 
             amount_in_bucket_ns = max(0, amount_in_bucket_ns - interval)
 
-            if max_bucket_amount_ns - amount_in_bucket_ns < self.target_interval:
+            if max_bucket_amount_ns - amount_in_bucket_ns < self.target_interval_ns:
                 exp_delay = max_bucket_amount_ns - amount_in_bucket_ns
                 amount_in_bucket_ns = max_bucket_amount_ns
             else:
                 exp_delay = 0
-                amount_in_bucket_ns += self.target_interval
+                amount_in_bucket_ns += self.target_interval_ns
 
             self.request_items[idx].expected_delay_ns = exp_delay
 
@@ -3735,45 +3750,6 @@ class RequestValidator:
             self.cumulative_throttle_wait_time_ns += self.request_items[
                 idx
             ].throttle_wait_time_ns
-
-    ####################################################################
-    # validate_sync_lb2
-    ####################################################################
-    def validate_sync_lb2(self) -> None:
-        """Validate the results for sync leaky bucket."""
-
-        throttle_verifier = ThrottleVerifier(
-            reqs_per_sec=self.reqs_per_sec,
-            seconds=self.seconds,
-            bucket_size=self.bucket_size,
-        )
-        print(
-            "\ninterval times: idx| throttle arrival interval sec | throttle wait_time sec | func arrival interval sec"
-        )
-        prev_arrival_time = self.request_items[0].throttle_arrival_time
-        for req_item in self.request_items:
-            print(
-                f"idx: {req_item.arrival_idx} "
-                f"| {(req_item.throttle_arrival_time - prev_arrival_time) * NS_2_SECS:.2f} "
-                f"| {req_item.throttle_wait_time_ns * NS_2_SECS:.2f} "
-                f"| {(req_item.actual_func_arrival_time_ns - req_item.throttle_arrival_time) * NS_2_SECS:.2f}"
-            )
-            prev_arrival_time = req_item.throttle_arrival_time
-
-        for req_item in self.request_items:
-            throttle_verifier.verify_request(request_item=req_item)
-
-        print(f"{throttle_verifier.num_excessive_request_delays=}")
-        print(f"{throttle_verifier.cumulative_expected_delay_ns=}")
-        print(f"{throttle_verifier.cumulative_actual_delay_ns=}")
-        print(f"{throttle_verifier.cumulative_throttle_wait_time_ns=}")
-        ratio_expected_to_actual_wait_time = (
-            throttle_verifier.cumulative_throttle_wait_time_ns + 1000
-        ) / (throttle_verifier.cumulative_expected_delay_ns + 1000)
-        print(f"ratio expected/actual: {ratio_expected_to_actual_wait_time:.2f}")
-
-        assert throttle_verifier.num_excessive_request_delays < 4
-        assert ratio_expected_to_actual_wait_time >= 0.95
 
     ####################################################################
     # request0c

@@ -80,7 +80,7 @@ are complete.
 ...           f'{time.time() - time_of_start:0.1f}')
 >>> start_time = time.time()
 >>> for i in range(10):
-...     async_throttle.send_request(target_rtn2, i, start_time)
+...     rc = async_throttle.send_request(target_rtn2, i, start_time)
 >>> # do other processing since not waiting for return from throttle
 >>> # after other processing, do a shutdown of the throttle
 >>> async_throttle.start_shutdown()
@@ -119,7 +119,7 @@ configured by specifying a *bucket_size* greater than 1 and
 
 >>> from scottbrian_throttle.throttle import Throttle
 >>> import time
->>> lb_throttle = Throttle(reqs_per_sec=2, name="t1", bucket_count=3)
+>>> lb_throttle = Throttle(reqs_per_sec=2, name="t1", bucket_size=3)
 >>> def target_rtn3(request_number, time_of_start):
 ...     print(f'request {request_number} sent at elapsed time: '
 ...           f'{time.time() - time_of_start:0.1f}')
@@ -189,12 +189,12 @@ request 8 sent at elapsed time: 16.0
 request 9 sent at elapsed time: 18.0
 
 
-:Example 7: Wrapping a function with the **@throttle** decorator for async
-            with leaky bucket
+:Example 7: Wrapping a function with the **@throttle** decorator for
+            async with leaky bucket
 
 >>> from scottbrian_throttle.throttle import throttle
 >>> import time
->>> @throttle(reqs_per_sec=.75, bucket_count=5, asynch=True)
+>>> @throttle(reqs_per_sec=.75, bucket_size=5, throttle_mode=ThrottleMode.ASYNC)
 >>> def func3(request_number, time_of_start):
 ...     print(f'request {request_number} sent at elapsed time: '
 ...           f'{time.time() - time_of_start:0.1f}')
@@ -412,8 +412,9 @@ class Throttle:
                          request interval has elapsed will be delayed.
                          The bucket_count must be greater than or equal
                          to 1.
-            throttle_mode: If ThrottleMode.ASYNC, the throttle is asynchronous. If
-                    ThrottleMode.SYNC, the default, the throttle is synchronous.
+            throttle_mode: If ThrottleMode.ASYNC, the throttle is
+                    asynchronous. If ThrottleMode.SYNC, the default, the
+                    throttle is synchronous.
             async_q_size: Specifies the size of the request
                           queue for async requests. When the request
                           queue is totally populated, any additional
@@ -538,9 +539,41 @@ class Throttle:
         self._next_target_time = time.perf_counter_ns() - self.lb_adjustment_ns
 
         if self.throttle_mode == ThrottleMode.ASYNC:
-            ########################################################
+            ############################################################
             # Set remainder of async vars
-            ########################################################
+            ############################################################
+            ############################################################
+            # States and processing for Throttle in ASYNC mode:
+            #
+            #     The Throttle is initialized with an empty async_q and
+            #     the scheduler thread is started and ready to receive
+            #     work. The starting state is 'active'.
+            #
+            #     1) state: active
+            #        a) send_request called (directly or via decorated
+            #           func call):
+            #           1) request is queued to the async_q
+            #           2) state remains 'active'
+            #        b) start_shutdown called:
+            #           1) state is changed to 'shutdown'
+            #           2) Any new requests are rejected. For "soft"
+            #              shutdown, scheduler schedules the remaining
+            #              requests currently queued on the async_q with
+            #              the normal interval. With "hard" shutdown,
+            #              the scheduler removes and discards the
+            #              requests on the async_q.
+            #           3) scheduler exits
+            #           4) control returns after scheduler thread
+            #              returns
+            #     2) state: shutdown
+            #        a) send_request called (directly or via decorated
+            #           func call):
+            #           1) request is ignored  (i.e, not queued to
+            #              async_q)
+            #        b) start_shutdown called (non-decorator only):
+            #           1) state remains 'shutdown'
+            #           2) control returns immediately
+            ################################################################
             self.shutdown_lock = threading.Lock()
             self._throttle_shutdown_started = False
             self.throttle_state = Throttle._ACTIVE
@@ -566,9 +599,9 @@ class Throttle:
         :Example 8: instantiate a throttle for 1 requests every 2 seconds
 
         >>> from scottbrian_throttle.throttle import Throttle
-        >>> request_throttle = Throttle(reqs_per_sec=0.5)
+        >>> request_throttle = Throttle(reqs_per_sec=0.5, name="t1")
         >>> repr(request_throttle)
-        'ThrottleSync(reqs_per_sec=0.5 bucket_size=1, throttle_mode=ThrottleMode.SYNC, async_q_size=None, name=3056773933840)'
+        'ThrottleSync(reqs_per_sec=0.5 bucket_size=1, throttle_mode=ThrottleMode.SYNC, async_q_size=0, name=t1)'
 
         """
         if TYPE_CHECKING:
@@ -600,23 +633,28 @@ class Throttle:
         Note that the returned queue size is the approximate size as
         described in the documentation for the python threading queue.
 
-        :Example 9: instantiate an asynchronous throttle for 1 request per second
+        :Example 9: instantiate an asynchronous throttle for 1 request
+                    per second
 
         >>> from scottbrian_throttle.throttle import Throttle
         >>> import time
         >>> def my_request():
         ...     pass
-        >>> request_throttle = Throttle(reqs_per_sec=1, throttle_mode=ThrottleMode.ASYNC)
+        >>> request_throttle = Throttle(reqs_per_sec=1,
+        ...                             throttle_mode=ThrottleMode.ASYNC)
         >>> for i in range(3):  # quickly queue up 3 items
         ...     _ = request_throttle.send_request(my_request)
-        >>> time.sleep(0.5)  # allow first request to be dequeued
+        >>> time.sleep(0.5)  # allow first 2 requests to be dequeued
         >>> print(len(request_throttle))
-        2
+        1
 
         >>> request_throttle.start_shutdown()
 
         """
-        return self.async_q.qsize()
+        if self.throttle_mode == ThrottleMode.ASYNC:
+            return self.async_q.qsize()
+        else:
+            return 0
 
     ####################################################################
     # get_interval
@@ -644,7 +682,7 @@ class Throttle:
     ####################################################################
     # get_completion_time_secs
     ####################################################################
-    def get_completion_time_secs(self, num_requests: int, from_start: bool) -> float:
+    def get_completion_time_secs(self, num_requests: int, from_start: bool) -> IntFloat:
         """Calculate completion time secs for given number requests.
 
         Args:
@@ -666,7 +704,7 @@ class Throttle:
     ####################################################################
     # get_completion_time_ns
     ####################################################################
-    def get_completion_time_ns(self, num_requests: int, from_start: bool) -> float:
+    def get_completion_time_ns(self, num_requests: int, from_start: bool) -> IntFloat:
         """Calculate completion time ns for given number requests.
 
         Args:
@@ -688,7 +726,7 @@ class Throttle:
     ####################################################################
     # get_expected_num_completed_reqs
     ####################################################################
-    def get_expected_num_completed_reqs(self, interval: float) -> int:
+    def get_expected_num_completed_reqs(self, interval: IntFloat) -> int:
         """Calculate number of requests that completed.
 
         Args:
@@ -728,24 +766,25 @@ class Throttle:
             # if self.throttle_state != Throttle._ACTIVE:
             #     return Throttle.RC_THROTTLE_IS_SHUTDOWN
 
-            # We obtain the shutdown lock to protect against the following
-            # scenario:
-            # 1) send_request is entered for async throttle_mode and sees at
-            # the while statement that we are *not* in shutdown
+            # We obtain the shutdown lock to protect against the
+            # following scenario:
+            # 1) send_request is entered for async throttle_mode and
+            #    sees at the while statement that we are *not* in
+            #    shutdown
             # 2) send_request proceeds to the try statement just
-            # before the request will be queued to the async_q
+            #    before the request will be queued to the async_q
             # 2) shutdown is requested and is detected by
-            # schedule_requests
+            #    schedule_requests
             # 3) schedule_requests cleans up the async_q end exits
             # 4) back here in send_request, we put our request on the
-            # async_q - this request will never be processed
+            #    async_q - this request will never be processed
             with self.shutdown_lock:
                 request_item = Throttle.Request(
                     func, args, kwargs, time.perf_counter_ns()
                 )
-                # start_shutdown will set _throttle_shutdown_started to tell
-                # us to abandon our attempts to get a request on a full
-                # async_q so that we give up the lock to allow
+                # start_shutdown will set _throttle_shutdown_started to
+                # tell us to abandon our attempts to get a request on a
+                # full async_q so that we give up the lock to allow
                 # start_shutdown to proceed
                 while not self._throttle_shutdown_started:
                     try:
@@ -755,26 +794,27 @@ class Throttle:
                         continue  # no need to wait since we already did
                 return Throttle.RC_THROTTLE_IS_SHUTDOWN
         else:
-            ################################################################
-            # SYNC_MODE
-            ################################################################
-            ################################################################
-            # The SYNC_MODE Throttle algorithm works as follows:
+            ############################################################
+            # SYNC mode
+            ############################################################
+            ############################################################
+            # The SYNC mode Throttle algorithm works as follows:
             # 1) during throttle instantiation:
             #    a) a target interval is calculated as 1/reqs_per_sec.
             #       For example, with a specification of 4 reqs_per_sec,
             #       the target interval will be 0.25 seconds.
-            #    b) _next_target_time is set to a current time reference via
-            #       time.perf_counter_ns
+            #    b) _next_target_time is set to a current time reference
+            #       via time.perf_counter_ns
             # 2) as each request arrives, it is checked against the
             #    _next_target_time and:
             #    a) if it arrives at or after _next_target_time, it is
             #       allowed to proceed without delay
-            #    b) if it arrives before the _next_target_time the request
-            #       is delayed until _next_target_time is reached
+            #    b) if it arrives before the _next_target_time the
+            #       request is delayed until _next_target_time is
+            #       reached
             # 3) _next_target_time is increased by the target_interval
             #
-            ################################################################
+            ############################################################
             with self.sync_lock:
                 # # set the time that this request is being made
                 # self._arrival_time = time.perf_counter_ns()
@@ -785,89 +825,95 @@ class Throttle:
                 #     ) * Throttle.NS_2_SECS
                 #     self.pauser.pause(wait_time)
 
-                ############################################################
-                # Update the expected arrival time for the next request by
-                # adding the request interval to our current time. Note that
-                # we update the target time before we send the request which
-                # means we
-                # face a possible scenario where we send a request that gets
-                # delayed en route to the service, but our next request
-                # arrives at the updated expected arrival time and is sent
-                # out immediately, but it now arrives early relative to the
-                # previous request, as observed by the service. If we update
-                # the target time after sending the request we avoid that
+                ########################################################
+                # Update the expected arrival time for the next request
+                # by adding the request interval to our current time.
+                # Note that we update the target time before we send the
+                # request which means we face a possible scenario where
+                # we send a request that gets delayed en route to the
+                # service, but our next request arrives at the updated
+                # expected arrival time and is sent out immediately, but
+                # it now arrives early, relative to the previous
+                # request, as observed by the service. If we update the
+                # target time after sending the request we avoid that
                 # scenario, but we would then be adding in the request
-                # processing time to the throttle delay with the undesirable
-                # effect that all requests will now be throttled more than
-                # they need to be.
+                # processing time to the throttle delay with the
+                # undesirable effect that all requests will now be
+                # throttled more than they need to be.
                 ########################################################
-                # self._next_target_time = time.perf_counter_ns() + self._target_interval_ns
+                # self._next_target_time = time.perf_counter_ns()
+                #   + self._target_interval_ns
                 ########################################################
-                # The leaky bucket algorith uses a virtual bucket into which
-                # arriving requests are placed. As time progresses, the
-                # bucket leaks the requests out at the rate of the target
-                # interval. If the bucket has room for an arriving request,
-                # the request is placed into the bucket and is sent
-                # immediately. If, instead, the bucket does not have room
-                # for the request, the request is delayed until the bucket
-                # has leaked enough of the preceding requests such that the
-                # new request can fit and be sent. The effect of the bucket
-                # is to allow a burst of requests to be sent immediately at
-                # a faster rate than the target interval, acting as a
-                # shock absorber to the flow of traffic. The number of
-                # requests allowed to go immediately is controlled by the
-                # size of the bucket which in turn is specified by the
-                # lb_threshold argument when the throttle is instantiated.
+                # The leaky bucket algorith uses a virtual bucket into
+                # which arriving requests are placed. As time
+                # progresses, the bucket leaks the requests out at the
+                # rate of the target interval. If the bucket has room
+                # for an arriving request, the request is placed into
+                # the bucket and is sent immediately. If, instead, the
+                # bucket does not have room for the request, the request
+                # is delayed until the bucket has leaked enough of the
+                # preceding requests such that the new request can fit
+                # and be sent. The effect of the bucket is to allow a
+                # burst of requests to be sent immediately at a faster
+                # rate than the target interval, acting as a shock
+                # absorber to the flow of traffic. The number of
+                # requests allowed to go immediately is controlled by
+                # the size of the bucket which in turn is specified by
+                # the bucket_size argument when the throttle is
+                # instantiated.
                 #
                 # Note that by allowing short bursts to go immediately,
-                # the overall effect is that the average interval will be
-                # less than the target interval.
+                # the overall effect is that the average interval will
+                # be less than the target interval.
                 #
-                # The actual implementation does not employ a bucket, but
-                # instead sets a target time for the next request by adding
-                # the target interval and subtracting the size of the
-                # bucket. This has the effect of making it appear as if
-                # requests are arriving after the target time and are thus
-                # in compliance with the target interval, but eventually
-                # the next target time will exceed the size of the bucket
-                # and requests will get delayed to allow the target time
-                # to catch up.
+                # The actual implementation does not employ a bucket,
+                # but instead sets a target time for the next request by
+                # adding the target interval and subtracting the size of
+                # the bucket. This has the effect of making it appear as
+                # if requests are arriving after the target time and are
+                # thus in compliance with the target interval, but
+                # eventually the next target time will exceed the size
+                # of the bucket and requests will get delayed to allow
+                # the target time to catch up.
                 ########################################################
 
                 ########################################################
                 # In the following code we handle three cases:
-                # 1) The current send request arrives well beyond the last
-                #    send such that the bucket is completely empty. We need
-                #    to start a new bucket relative to the current arrival
-                #    time.
-                # 2) The current send arrives rapidly on the heels of the
-                #    previous sends such that the bucket is full enough that
-                #    it does not contain enough room to add a new entry. We
-                #    need to delay this current send until there is room
-                #    enough in the bucket to add this one entry.
+                # 1) The current send request arrives well beyond the
+                #    last send such that the bucket is completely empty.
+                #    We need to start a new bucket relative to the
+                #    current arrival time.
+                # 2) The current send arrives rapidly on the heels of
+                #    the previous sends such that the bucket is full
+                #    enough that it does not contain enough room to add
+                #    a new entry. We need to delay this current send
+                #    until there is room enough in the bucket to add
+                #    this one entry.
                 # 3) The current send arrives when the bucket has one or
                 #    more previous sends still leaking out, but there is
                 #    still enough room in the bucket to add another send
                 #    without delay.
                 #
-                # Note that we update the bucket (i.e., target time) before
-                # we call the requested function instead of updating the
-                # target time after control returns from the requested
-                # function. This means we face a possible scenario where we
-                # encounter a delay during the call to the requested
-                # function, and upon return we receive the next send request
-                # which, because of the prior delay, appears ok to send
-                # immediately. But this new request might appear early as
-                # observed by the called service (i.e., requested function).
-                # If instead we were to update the target time after getting
-                # back control from the requested function, we avoid the
-                # "too early" scenario, but we would then be adding in the
-                # request processing time to the throttle delay with the
-                # undesirable effect that all requests will now be throttled
-                # more than they need to be. The "too early" scenario seemed
-                # less problematic compared to the "extra throttling"
-                # effect, so the design choice was made to update the target
-                # time before calling the requested function.
+                # Note that we update the bucket (i.e., target time)
+                # before we call the requested function instead of
+                # updating the target time after control returns from
+                # the requested function. This means we face a possible
+                # scenario where we encounter a delay during the call to
+                # the requested function, and upon return we receive the
+                # next send request which, because of the prior delay,
+                # appears ok to send immediately. But this new request
+                # might appear early as observed by the called service
+                # (i.e., requested function).
+                # If instead we were to update the target time after
+                # getting back control from the requested function, we
+                # avoid the "too early" scenario, but we would then be
+                # adding in the request processing time to the throttle
+                # delay with the undesirable effect that all requests
+                # will now be throttled more than they need to be. The
+                # "too early" scenario seemed less problematic compared
+                # to the "extra throttling" effect, so the design choice
+                # was made to update the target time before calling the
+                # requested function.
                 ########################################################
                 self._arrival_time = time.perf_counter_ns()
                 self._wait_time_ns = 0.0
@@ -925,9 +971,10 @@ class Throttle:
             try:
                 request_item = self.async_q.get(block=True, timeout=1)
 
-                self._next_target_time = (
-                    time.perf_counter_ns() + self._target_interval_ns
-                )
+                # self._next_target_time = (
+                #     time.perf_counter_ns() + self._target_interval_ns
+                # )
+
             except queue.Empty:
                 if self.throttle_state != Throttle._ACTIVE:
                     return
@@ -939,7 +986,33 @@ class Throttle:
             ############################################################
             try:
                 if self.throttle_state != Throttle._HARD_SHUTDOWN_STARTED:
-                    self._arrival_time = request_item.arrival_time
+                    # self._arrival_time = request_item.arrival_time
+                    self._arrival_time = time.perf_counter_ns()
+                    self._wait_time_ns = 0.0
+                    if (
+                        self._next_target_time + self.lb_adjustment_ns
+                        < self._arrival_time
+                    ):
+                        # we are well beyond the target time - we need
+                        # to start
+                        # a new bucket with the first send entry added
+                        self._next_target_time = (
+                            self._arrival_time
+                            - self.lb_adjustment_ns
+                            + self._target_interval_ns
+                        )
+                    else:  # still in the range of the bucket
+                        if self._arrival_time < self._next_target_time:
+                            # we need to delay to allow the bucket to
+                            # leak out
+                            # enough to fit the next entry we are
+                            # sending
+                            self._wait_time_ns = (
+                                self._next_target_time - self._arrival_time
+                            )
+                            self.pauser.pause_ns(self._wait_time_ns)
+                        # add one entry to the bucket
+                        self._next_target_time += self._target_interval_ns
                     request_item.request_func(*request_item.args, **request_item.kwargs)
                     # obtained_nowait=obtained_nowait)
             except Exception as e:
@@ -949,33 +1022,40 @@ class Throttle:
                 )
                 raise
 
-            ############################################################
-            # wait (i.e., throttle)
-            # Note that the wait time could be anywhere from a fraction
-            # of a second to several seconds. We want to be responsive
-            # in case we need to bail for shutdown, so we wait in 1
-            # second or fewer increments and bail if we detect shutdown.
-            ############################################################
-            self._wait_time_ns = self._next_target_time - time.perf_counter_ns()
-            while True:
-                # handle shutdown
-                if self.throttle_state != Throttle._ACTIVE:
-                    if self.async_q.empty():
-                        return  # we are done with shutdown
-                    if self.throttle_state == Throttle._HARD_SHUTDOWN_STARTED:
-                        break  # don't sleep for hard shutdown
+            if self.throttle_state != Throttle._ACTIVE:
+                if self.async_q.empty():
+                    return  # we are done with shutdown
 
-                # Use min to ensure we don't sleep too long and appear
-                # slow to respond to a shutdown request
-                sleep_ns = self._next_target_time - time.perf_counter_ns()
-                if sleep_ns > 0:  # if still time to go
-                    self.pauser.pause_ns(min(Throttle.MAX_PAUSE_NS, sleep_ns))
-                    # time_trace, stop_time = self.pauser.pause(min(1.0,
-                    #                                         sleep_ns))
-                    # self.time_traces.append(time_trace)
-                    # self.stop_times.append(stop_time)
-                else:  # we are done sleeping
-                    break
+        ############################################################
+        # wait (i.e., throttle)
+        # Note that the wait time could be anywhere from a fraction
+        # of a second to several seconds. We want to be responsive
+        # in case we need to bail for shutdown, so we wait in 1
+        # second or fewer increments and bail if we detect shutdown.
+        ############################################################
+        # self._wait_time_ns = self._next_target_time -
+        # time.perf_counter_ns()
+        # while True:
+        #     # handle shutdown
+        #     if self.throttle_state != Throttle._ACTIVE:
+        #         if self.async_q.empty():
+        #             return  # we are done with shutdown
+        #         if self.throttle_state ==
+        #                 Throttle._HARD_SHUTDOWN_STARTED:
+        #             break  # don't sleep for hard shutdown
+        #
+        #     # Use min to ensure we don't sleep too long and appear
+        #     # slow to respond to a shutdown request
+        #     sleep_ns = self._next_target_time - time.perf_counter_ns()
+        #     if sleep_ns > 0:  # if still time to go
+        #         self.pauser.pause_ns(min(Throttle.MAX_PAUSE_NS,
+        #                             sleep_ns))
+        #         # time_trace, stop_time = self.pauser.pause(min(1.0,
+        #         #                                         sleep_ns))
+        #         # self.time_traces.append(time_trace)
+        #         # self.stop_times.append(stop_time)
+        #     else:  # we are done sleeping
+        #         break
 
     ####################################################################
     # start_shutdown
@@ -1275,8 +1355,9 @@ def throttle(
                      request interval has elapsed will be delayed.
                      The bucket_count must be greater than or equal
                      to 1.
-        throttle_mode: If ThrottleMode.ASYNC, the throttle is asynchronous. If
-                ThrottleeMode.SYNC, the default, the throttle is synchronous.
+        throttle_mode: If ThrottleMode.ASYNC, the throttle is
+                asynchronous. If ThrottleeMode.SYNC, the default, the
+                throttle is synchronous.
         async_q_size: Specifies the size of the request
                       queue for async requests. When the request
                       queue is totally populated, any additional

@@ -60,9 +60,9 @@ than 2 requests per second. In the following code, make_request will be called 1
 limit. The first execution of make_request will be done immediately while the remaining executions will each be delayed
 by 1/2 second as seen in the output messages.
 
->>> from scottbrian_throttle.throttle import throttle_sync
+>>> from scottbrian_throttle.throttle import throttle
 >>> import time
->>> @throttle_sync(reqs_per_sec=2)
+>>> @throttle(reqs_per_sec=2)
 ... def make_request(request_number, time_of_start):
 ...     print(f'request {request_number} sent at elapsed time: '
 ...           f'{time.time() - time_of_start:0.1f}')
