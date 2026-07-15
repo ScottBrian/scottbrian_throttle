@@ -368,10 +368,12 @@ class Throttle:
         "bucket_size",
         "lb_adjustment",
         "lb_adjustment_ns",
+        "lb_with_one_request",
         "logger",
         "pauser",
         "reqs_per_sec",
         "request_scheduler_thread",
+        "sent_time_ns",
         "shutdown_elapsed_time",
         "shutdown_lock",
         "shutdown_start_time",
@@ -386,8 +388,8 @@ class Throttle:
     def __init__(
         self,
         *,
-        reqs_per_sec: int | float,
-        bucket_size: int | float = 1,
+        reqs_per_sec: IntFloat,
+        bucket_size: IntFloat = 1,
         throttle_mode: ThrottleMode = ThrottleMode.SYNC,
         async_q_size: Optional[int] = None,
         name: Optional[str] = None,
@@ -523,9 +525,11 @@ class Throttle:
         self._target_interval_ns: float = self._target_interval * Throttle.SECS_2_NS
         self.sync_lock = threading.Lock()
         self._arrival_time_ns = 0.0
+        self.sent_time_ns = time.perf_counter_ns()
         self._wait_time_ns: float = 0.0
         self.logger = logging.getLogger(__name__)
         self.pauser = Pauser()
+        # self.pauser.pause_ns(1000000000)
 
         ################################################################
         # Set leaky bucket vars
@@ -534,6 +538,8 @@ class Throttle:
             0.0, (self._target_interval * self.bucket_size) - self._target_interval
         )
         self.lb_adjustment_ns: float = self.lb_adjustment * Throttle.SECS_2_NS
+
+        self.lb_with_one_request = -self.lb_adjustment_ns + self._target_interval_ns
 
         # adjust _next_target_time_ns for normal or lb algo
         self._next_target_time_ns = time.perf_counter_ns() - self.lb_adjustment_ns
@@ -927,12 +933,19 @@ class Throttle:
                     # we are well beyond the target time - we need to start
                     # a new bucket with the first send entry added
 
+                    # self._next_target_time_ns = (
+                    #     self._arrival_time_ns
+                    #     - self.lb_adjustment_ns
+                    #     + self._target_interval_ns
+                    # )
+                    # self.logger.debug(f"entry 2a: {self._next_target_time_ns=}")
                     self._next_target_time_ns = (
-                        self._arrival_time_ns
-                        - self.lb_adjustment_ns
-                        + self._target_interval_ns
+                        self._arrival_time_ns + self.lb_with_one_request
                     )
-                    self.logger.debug(f"entry 2: {self._next_target_time_ns=}")
+
+                    self.logger.debug(
+                        f"entry 2b: {self._next_target_time_ns=}, elapsed: {time.perf_counter_ns()-self._arrival_time_ns}"
+                    )
                 else:  # still in the range of the bucket
                     if self._arrival_time_ns < self._next_target_time_ns:
                         # we need to delay to allow the bucket to leak out
@@ -940,12 +953,14 @@ class Throttle:
                         self._wait_time_ns = (
                             self._next_target_time_ns - self._arrival_time_ns
                         )
-                        self.logger.debug(f"entry 3: {self._wait_time_ns=}")
+                        self.logger.debug(
+                            f"entry 3: {self._wait_time_ns=}, {time.perf_counter_ns()=}, elapsed: {time.perf_counter_ns()-self._arrival_time_ns}"
+                        )
                         self.pauser.pause_ns(self._wait_time_ns)
                     # add one entry to the bucket
                     self._next_target_time_ns += self._target_interval_ns
                     self.logger.debug(
-                        f"entry 4: {self._wait_time_ns=}, {self._next_target_time_ns=}"
+                        f"entry 4: {self._wait_time_ns=}, {self._next_target_time_ns=}, {time.perf_counter_ns()=}, elapsed: {time.perf_counter_ns()-self._arrival_time_ns}"
                     )
 
                 ########################################################
@@ -953,6 +968,10 @@ class Throttle:
                 # return value. We use try/except to log and re-raise any
                 # unhandled errors.
                 ########################################################
+                self.sent_time_ns = time.perf_counter_ns()
+                self.logger.debug(
+                    f"entry 5: {self.sent_time_ns=}, {(self.sent_time_ns-self._arrival_time_ns)=}, elapsed: {time.perf_counter_ns()-self._arrival_time_ns} "
+                )
                 try:
                     return func(*args, **kwargs)
                 except Exception as e:
@@ -961,6 +980,14 @@ class Throttle:
                         f"request: {e}"
                     )
                     raise
+
+    ####################################################################
+    # get_bucket_desc
+    ####################################################################
+    def trace_bucket_desc(self) -> None:
+        """Calculate the current bucket contents."""
+
+        pass
 
     ####################################################################
     # schedule_requests
