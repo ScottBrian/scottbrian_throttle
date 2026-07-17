@@ -244,6 +244,7 @@ from typing import (
 ########################################################################
 # Third Party
 ########################################################################
+from scottbrian_utils.diag_msg import get_formatted_call_sequence as call_seq
 from scottbrian_utils.pauser import Pauser
 from scottbrian_utils.timer import Timer
 from typing_extensions import TypeAlias
@@ -297,6 +298,10 @@ class InvalidAsyncQSizeSpecified(ThrottleError):
     """Throttle exception for invalid asynjc_q_size specification."""
 
 
+class InvalidShutdownRequested(ThrottleError):
+    """Throttle exception for invalid shutdown request."""
+
+
 ########################################################################
 # Mode
 ########################################################################
@@ -308,6 +313,16 @@ class ThrottleMode(Enum):
 
 
 ########################################################################
+# ShutdownType
+########################################################################
+class ThrottleShutdownType(Enum):
+    """ThrottleShutdownType types."""
+
+    SOFT = auto()
+    HARD = auto()
+
+
+########################################################################
 # Throttle class
 ########################################################################
 class Throttle:
@@ -315,12 +330,6 @@ class Throttle:
 
     DEFAULT_ASYNC_Q_SIZE: Final[int] = 4096
     MAX_PAUSE_NS: Final[int] = 1000000000
-
-    ####################################################################
-    # start_shutdown request constants
-    ####################################################################
-    TYPE_SHUTDOWN_SOFT: Final[int] = 4
-    TYPE_SHUTDOWN_HARD: Final[int] = 8
 
     ####################################################################
     # start_shutdown return code constants
@@ -408,11 +417,11 @@ class Throttle:
                          request is delayed until enough time has
                          elapsed for the bucket to leak out enough to
                          allow the request to fit. A specification of
-                         one for the bucket_count will effectively
+                         one for the bucket_size will effectively
                          cause non-leaky bucket behavior, meaning that
                          each request that arrives before the previous
                          request interval has elapsed will be delayed.
-                         The bucket_count must be greater than or equal
+                         The bucket_size must be greater than or equal
                          to 1.
             throttle_mode: If ThrottleMode.ASYNC, the throttle is
                     asynchronous. If ThrottleMode.SYNC, the default, the
@@ -439,23 +448,31 @@ class Throttle:
         ################################################################
         # reqs_per_sec
         ################################################################
+        self.logger = logging.getLogger(__name__)
         if isinstance(reqs_per_sec, int | float) and (0 < reqs_per_sec):
             self.reqs_per_sec = reqs_per_sec
         else:
-            raise IncorrectReqsPerSecSpecified(
+            error_msg = (
                 "The reqs_per_sec specification must be a positive "
-                "int or float greater than zero."
+                "int or float greater than zero. "
+                f"Request call sequence: {call_seq(latest=1, depth=2)}"
             )
+            self.logger.error(error_msg)
+            raise IncorrectReqsPerSecSpecified(error_msg)
+
         ################################################################
         # bucket_size
         ################################################################
         if isinstance(bucket_size, int | float) and (1 <= bucket_size):
             self.bucket_size = bucket_size
         else:
-            raise IncorrectBucketSizeSpecified(
+            error_msg = (
                 "The bucket_size specification must be a positive "
-                "int or float greater than or equal to 1."
+                "int or float greater than or equal to 1. "
+                f"Request call sequence: {call_seq(latest=1, depth=2)}"
             )
+            self.logger.error(error_msg)
+            raise IncorrectBucketSizeSpecified(error_msg)
 
         ################################################################
         # async_throttle
@@ -496,17 +513,24 @@ class Throttle:
                 if isinstance(async_q_size, int) and (0 < async_q_size):
                     self.async_q_size = async_q_size
                 else:
-                    raise IncorrectAsyncQSizeSpecified(
-                        "async_q_size must be an integer greater than zero."
+                    error_msg = (
+                        "async_q_size must be an integer greater than zero. "
+                        f"Request call sequence: {call_seq(latest=1, depth=2)}"
                     )
+                    self.logger.error(error_msg)
+                    raise IncorrectAsyncQSizeSpecified(error_msg)
             else:
                 self.async_q_size = Throttle.DEFAULT_ASYNC_Q_SIZE
         else:
             if async_q_size is not None and async_q_size != 0:
-                raise InvalidAsyncQSizeSpecified(
+                error_msg = (
                     "a non_zero async_q_size is not allowed when throttle_mode is "
-                    "ThrottleMode.SYNC."
+                    "ThrottleMode.SYNC. "
+                    f"Request call sequence: {call_seq(latest=1, depth=2)}"
                 )
+                self.logger.error(error_msg)
+                raise InvalidAsyncQSizeSpecified(error_msg)
+
             self.async_q_size = 0
 
         ################################################################
@@ -529,7 +553,8 @@ class Throttle:
         self._wait_time_ns: float = 0.0
         self.logger = logging.getLogger(__name__)
         self.pauser = Pauser()
-        # self.pauser.pause_ns(1000000000)
+
+        # self.pauser.pause_ns(3000000000)
 
         ################################################################
         # Set leaky bucket vars
@@ -982,12 +1007,45 @@ class Throttle:
                     raise
 
     ####################################################################
-    # get_bucket_desc
+    # update_wait
     ####################################################################
-    def trace_bucket_desc(self) -> None:
-        """Calculate the current bucket contents."""
+    def update_wait(self) -> None:
+        """Calculate next target time and wait if needed."""
 
-        pass
+        self._arrival_time_ns = time.perf_counter_ns()
+        self._wait_time_ns = 0.0
+        self.logger.debug(
+            f"entry 1: {self._arrival_time_ns=}, {self._wait_time_ns=}, {self._next_target_time_ns=}, {self.lb_adjustment_ns=}"
+        )
+        if self._next_target_time_ns + self.lb_adjustment_ns < self._arrival_time_ns:
+            # we are well beyond the target time - we need to start
+            # a new bucket with the first send entry added
+
+            # self._next_target_time_ns = (
+            #     self._arrival_time_ns
+            #     - self.lb_adjustment_ns
+            #     + self._target_interval_ns
+            # )
+            # self.logger.debug(f"entry 2a: {self._next_target_time_ns=}")
+            self._next_target_time_ns = self._arrival_time_ns + self.lb_with_one_request
+
+            self.logger.debug(
+                f"entry 2b: {self._next_target_time_ns=}, elapsed: {time.perf_counter_ns()-self._arrival_time_ns}"
+            )
+        else:  # still in the range of the bucket
+            if self._arrival_time_ns < self._next_target_time_ns:
+                # we need to delay to allow the bucket to leak out
+                # enough to fit the next entry we are sending
+                self._wait_time_ns = self._next_target_time_ns - self._arrival_time_ns
+                self.logger.debug(
+                    f"entry 3: {self._wait_time_ns=}, {time.perf_counter_ns()=}, elapsed: {time.perf_counter_ns()-self._arrival_time_ns}"
+                )
+                self.pauser.pause_ns(self._wait_time_ns)
+            # add one entry to the bucket
+            self._next_target_time_ns += self._target_interval_ns
+            self.logger.debug(
+                f"entry 4: {self._wait_time_ns=}, {self._next_target_time_ns=}, {time.perf_counter_ns()=}, elapsed: {time.perf_counter_ns()-self._arrival_time_ns}"
+            )
 
     ####################################################################
     # schedule_requests
@@ -1004,17 +1062,13 @@ class Throttle:
         # calculated from the requests and seconds arguments when the
         # throttle was instantiated. If shutdown is indicated,
         # the async_q will be cleaned up with any remaining requests
-        # either processed (Throttle.TYPE_SHUTDOWN_SOFT) or dropped
-        # (Throttle.TYPE_SHUTDOWN_HARD). Note that async_q.get will
+        # either processed (ThrottleShutdownType.SOFT) or dropped
+        # (ThrottleShutdownType.HARD). Note that async_q.get will
         # only wait for a second to allow us to detect shutdown in a
         # timely fashion.
         while True:
             try:
                 request_item = self.async_q.get(block=True, timeout=1)
-
-                # self._next_target_time_ns = (
-                #     time.perf_counter_ns() + self._target_interval_ns
-                # )
 
             except queue.Empty:
                 if self.throttle_state != Throttle._ACTIVE:
@@ -1103,7 +1157,7 @@ class Throttle:
     ####################################################################
     def start_shutdown(
         self,
-        shutdown_type: int = TYPE_SHUTDOWN_SOFT,
+        shutdown_type: ThrottleShutdownType = ThrottleShutdownType.SOFT,
         timeout: OptIntFloat = None,
         suppress_timeout_msg: bool = False,
     ) -> int:
@@ -1128,7 +1182,7 @@ class Throttle:
                 shutdown:
 
                      * A soft shutdown
-                       (Throttle.TYPE_SHUTDOWN_SOFT),
+                       (ThrottleShutdownType.SOFT),
                        the default, stops any additional
                        requests from being queued and cleans up
                        the request queue by scheduling any
@@ -1137,7 +1191,7 @@ class Throttle:
                        *requests* arguments specified during
                        throttle instantiation.
                      * A hard shutdown
-                       (Throttle.TYPE_SHUTDOWN_HARD) stops
+                       (ThrottleShutdownType.HARD) stops
                        any additional requests from being queued
                        and cleans up the request queue by
                        quickly removing any remaining requests
@@ -1184,19 +1238,32 @@ class Throttle:
         Raises:
             IncorrectShutdownTypeSpecified: For start_shutdown,
             shutdownType must be specified as either
-            Throttle.TYPE_SHUTDOWN_SOFT or
-            Throttle.TYPE_SHUTDOWN_HARD
+            ThrottleShutdownType.SOFT or
+            ThrottleShutdownType.HARD
 
         """
-        if shutdown_type not in (
-            Throttle.TYPE_SHUTDOWN_SOFT,
-            Throttle.TYPE_SHUTDOWN_HARD,
-        ):
-            raise IncorrectShutdownTypeSpecified(
-                "For start_shutdown, shutdownType must be specified as "
-                "either Throttle.TYPE_SHUTDOWN_SOFT or "
-                "Throttle.TYPE_SHUTDOWN_HARD"
+        if self.throttle_mode == ThrottleMode.SYNC:
+            error_msg = (
+                "A shutdown was requested for a synchronous throttle. "
+                "Shutdown can only be requested for a throttle that is "
+                "created with a throttle_mode of ThrottleMode.ASYNC. "
+                f"Request call sequence: {call_seq(latest=1, depth=2)}"
             )
+            self.logger.error(error_msg)
+            raise InvalidShutdownRequested(error_msg)
+
+        if (
+            shutdown_type != ThrottleShutdownType.SOFT
+            and shutdown_type != ThrottleShutdownType.HARD
+        ):
+            error_msg = (
+                "For start_shutdown, shutdownType must be specified as "
+                "either ThrottleShutdownType.SOFT or "
+                "ThrottleShutdownType.HARD. "
+                f"Request call sequence: {call_seq(latest=1, depth=2)}"
+            )
+            self.logger.error(error_msg)
+            raise IncorrectShutdownTypeSpecified(error_msg)
 
         ################################################################
         # We are good to go for shutdown
@@ -1236,7 +1303,7 @@ class Throttle:
                 # elapsed time.
                 self.shutdown_start_time = time.time()
 
-                if shutdown_type == Throttle.TYPE_SHUTDOWN_SOFT:
+                if shutdown_type == ThrottleShutdownType.SOFT:
                     self.throttle_state = Throttle._SOFT_SHUTDOWN_STARTED
                 else:
                     self.throttle_state = Throttle._HARD_SHUTDOWN_STARTED
@@ -1246,7 +1313,7 @@ class Throttle:
                 # hard shutdown
                 if (
                     self.throttle_state == Throttle._SOFT_SHUTDOWN_STARTED
-                    and shutdown_type == Throttle.TYPE_SHUTDOWN_HARD
+                    and shutdown_type == ThrottleShutdownType.HARD
                 ):
                     self.throttle_state = Throttle._HARD_SHUTDOWN_STARTED
 
@@ -1288,7 +1355,7 @@ class Throttle:
                 self.shutdown_elapsed_time = (
                     time.time() - self.shutdown_start_time + 0.0001
                 )
-                self.logger.debug(
+                self.logger.info(
                     f"throttle {self.t_name} start_shutdown request successfully "
                     f"completed in {self.shutdown_elapsed_time:.4f} seconds"
                 )
@@ -1390,11 +1457,11 @@ def throttle(
                      request is delayed until enough time has
                      elapsed for the bucket to leak out enough to
                      allow the request to fit. A specification of
-                     one for the bucket_count will effectively
+                     one for the bucket_size will effectively
                      cause non-leaky bucket behavior, meaning that
                      each request that arrives before the previous
                      request interval has elapsed will be delayed.
-                     The bucket_count must be greater than or equal
+                     The bucket_size must be greater than or equal
                      to 1.
         throttle_mode: If ThrottleMode.ASYNC, the throttle is
                 asynchronous. If ThrottleeMode.SYNC, the default, the
@@ -1507,7 +1574,7 @@ def throttle(
 def shutdown_throttle_funcs(
     *args: FuncWithThrottleAttr[Callable[..., Any]],
     # *args: FuncWithThrottleAttr[Protocol[F]],
-    shutdown_type: int = Throttle.TYPE_SHUTDOWN_SOFT,
+    shutdown_type: int = ThrottleShutdownType.SOFT,
     timeout: OptIntFloat = None,
 ) -> bool:
     """Shutdown the throttle request scheduling for decorated functions.
@@ -1524,7 +1591,7 @@ def shutdown_throttle_funcs(
                          shutdown:
 
                          * A soft shutdown
-                           (Throttle.TYPE_SHUTDOWN_SOFT), the
+                           (ThrottleShutdownType.SOFT), the
                            default, stops any additional requests from
                            being queued and cleans up the request queue
                            by scheduling any remaining requests at the
@@ -1532,7 +1599,7 @@ def shutdown_throttle_funcs(
                            and requests that were specified during
                            instantiation.
                          * A hard shutdown
-                           (Throttle.TYPE_SHUTDOWN_HARD) stops any
+                           (ThrottleShutdownType.HARD) stops any
                            additional requests from being queued and
                            cleans up the request queue by quickly
                            removing any remaining requests without
