@@ -221,12 +221,7 @@ class TestThrottleErrors:
 
     def test_throttle_bad_args(self, caplog: pytest.LogCaptureFixture) -> None:
         """test_throttle using bad arguments."""
-        ################################################################
-        # bad reqs_per_sec
-        ################################################################
-        ################################################################
-        # SELockInputError
-        ################################################################
+
         ################################################################
         # mainline
         ################################################################
@@ -237,6 +232,9 @@ class TestThrottleErrors:
             "test_throttle.py::TestThrottleErrors.test_throttle_bad_args:[0-9]+"
         )
 
+        ################################################################
+        # bad reqs_per_sec SYNC
+        ################################################################
         ml_error_msg = (
             "The reqs_per_sec specification must be a positive "
             "int or float greater than zero. "
@@ -244,18 +242,38 @@ class TestThrottleErrors:
 
         log_ver.add_pattern(pattern=ml_error_msg, level=logging.ERROR)
         with pytest.raises(IncorrectReqsPerSecSpecified, match=ml_error_msg):
-            _ = Throttle(reqs_per_sec=0)
+            _ = Throttle(reqs_per_sec=-1)
 
         log_ver.add_pattern(pattern=ml_error_msg, level=logging.ERROR)
         with pytest.raises(IncorrectReqsPerSecSpecified, match=ml_error_msg):
-            _ = Throttle(reqs_per_sec=-1)
+            _ = Throttle(reqs_per_sec=0)
 
         log_ver.add_pattern(pattern=ml_error_msg, level=logging.ERROR)
         with pytest.raises(IncorrectReqsPerSecSpecified, match=ml_error_msg):
             _ = Throttle(reqs_per_sec="1")  # type: ignore
 
         ################################################################
-        # bad bucket_size
+        # bad reqs_per_sec ASYNC
+        ################################################################
+        ml_error_msg = (
+            "The reqs_per_sec specification must be a positive "
+            "int or float greater than zero. "
+        ) + ml_call_seq
+
+        log_ver.add_pattern(pattern=ml_error_msg, level=logging.ERROR)
+        with pytest.raises(IncorrectReqsPerSecSpecified, match=ml_error_msg):
+            _ = Throttle(reqs_per_sec=-1, throttle_mode=ThrottleMode.ASYNC)
+
+        log_ver.add_pattern(pattern=ml_error_msg, level=logging.ERROR)
+        with pytest.raises(IncorrectReqsPerSecSpecified, match=ml_error_msg):
+            _ = Throttle(reqs_per_sec=0, throttle_mode=ThrottleMode.ASYNC)
+
+        log_ver.add_pattern(pattern=ml_error_msg, level=logging.ERROR)
+        with pytest.raises(IncorrectReqsPerSecSpecified, match=ml_error_msg):
+            _ = Throttle(reqs_per_sec="1", throttle_mode=ThrottleMode.ASYNC)  # type: ignore
+
+        ################################################################
+        # bad bucket_size SYNC
         ################################################################
         ml_error_msg = (
             "The bucket_size specification must be a positive "
@@ -268,10 +286,48 @@ class TestThrottleErrors:
 
         log_ver.add_pattern(pattern=ml_error_msg, level=logging.ERROR)
         with pytest.raises(IncorrectBucketSizeSpecified, match=ml_error_msg):
+            _ = Throttle(reqs_per_sec=1, bucket_size=0)
+
+        log_ver.add_pattern(pattern=ml_error_msg, level=logging.ERROR)
+        with pytest.raises(IncorrectBucketSizeSpecified, match=ml_error_msg):
+            _ = Throttle(reqs_per_sec=1, bucket_size=0.3)
+
+        log_ver.add_pattern(pattern=ml_error_msg, level=logging.ERROR)
+        with pytest.raises(IncorrectBucketSizeSpecified, match=ml_error_msg):
             _ = Throttle(reqs_per_sec=1, bucket_size="1")  # type: ignore
 
         ################################################################
-        # bad async_q_size
+        # bad bucket_size ASYNC
+        ################################################################
+        ml_error_msg = (
+            "The bucket_size specification must be a positive "
+            "int or float greater than or equal to 1. "
+        ) + ml_call_seq
+
+        log_ver.add_pattern(pattern=ml_error_msg, level=logging.ERROR)
+        with pytest.raises(IncorrectBucketSizeSpecified, match=ml_error_msg):
+            _ = Throttle(
+                reqs_per_sec=1, bucket_size=-1, throttle_mode=ThrottleMode.ASYNC
+            )
+
+        log_ver.add_pattern(pattern=ml_error_msg, level=logging.ERROR)
+        with pytest.raises(IncorrectBucketSizeSpecified, match=ml_error_msg):
+            _ = Throttle(
+                reqs_per_sec=1, bucket_size=0, throttle_mode=ThrottleMode.ASYNC
+            )
+
+        log_ver.add_pattern(pattern=ml_error_msg, level=logging.ERROR)
+        with pytest.raises(IncorrectBucketSizeSpecified, match=ml_error_msg):
+            _ = Throttle(
+                reqs_per_sec=1, bucket_size=0.3, throttle_mode=ThrottleMode.ASYNC
+            )
+
+        log_ver.add_pattern(pattern=ml_error_msg, level=logging.ERROR)
+        with pytest.raises(IncorrectBucketSizeSpecified, match=ml_error_msg):
+            _ = Throttle(reqs_per_sec=1, bucket_size="1", throttle_mode=ThrottleMode.ASYNC)  # type: ignore
+
+        ################################################################
+        # bad async_q_size ASYNC
         ################################################################
         ml_error_msg = (
             "async_q_size must be an integer greater than zero. "
@@ -291,10 +347,16 @@ class TestThrottleErrors:
 
         log_ver.add_pattern(pattern=ml_error_msg, level=logging.ERROR)
         with pytest.raises(IncorrectAsyncQSizeSpecified, match=ml_error_msg):
+            _ = Throttle(
+                reqs_per_sec=1, throttle_mode=ThrottleMode.ASYNC, async_q_size=0.5
+            )
+
+        log_ver.add_pattern(pattern=ml_error_msg, level=logging.ERROR)
+        with pytest.raises(IncorrectAsyncQSizeSpecified, match=ml_error_msg):
             _ = Throttle(reqs_per_sec=1, throttle_mode=ThrottleMode.ASYNC, async_q_size="1")  # type: ignore
 
         ################################################################
-        # invalid async_q_size
+        # invalid async_q_size SYNC
         ################################################################
         ml_error_msg = (
             "a non_zero async_q_size is not allowed when throttle_mode is "
@@ -307,6 +369,10 @@ class TestThrottleErrors:
 
         log_ver.add_pattern(pattern=ml_error_msg, level=logging.ERROR)
         with pytest.raises(InvalidAsyncQSizeSpecified, match=ml_error_msg):
+            _ = Throttle(reqs_per_sec=1, async_q_size=0.5)
+
+        log_ver.add_pattern(pattern=ml_error_msg, level=logging.ERROR)
+        with pytest.raises(InvalidAsyncQSizeSpecified, match=ml_error_msg):
             _ = Throttle(reqs_per_sec=1, async_q_size=1)
 
         log_ver.add_pattern(pattern=ml_error_msg, level=logging.ERROR)
@@ -314,7 +380,7 @@ class TestThrottleErrors:
             _ = Throttle(reqs_per_sec=1, async_q_size="1")  # type: ignore
 
         ################################################################
-        # invalid shutdown request
+        # invalid shutdown request SYNC
         ################################################################
         ml_error_msg = (
             "A shutdown was requested for a synchronous throttle. "
@@ -329,7 +395,7 @@ class TestThrottleErrors:
             a_throttle.start_shutdown()
 
         ################################################################
-        # incorrect shutdown type
+        # incorrect shutdown type ASYNC
         ################################################################
         ml_error_msg = (
             "For start_shutdown, shutdownType must be specified as "
@@ -985,42 +1051,44 @@ class TestThrottleDecoratorErrors:
 
     def test_pie_throttle_bad_args(self) -> None:
         """test_throttle using bad arguments."""
-        ################################################################
-        # bad reqs_per_sec SYNC
-        ################################################################
+
         log_ver = LogVer(log_name="scottbrian_throttle.throttle")
 
         ml_call_seq = (
-            "Request call sequence: python.py::pytest_pyfunc_call:[0-9]+ -> "
-            "test_throttle.py::TestThrottleDecoratorErrors."
-            "test_pie_throttle_bad_args:[0-9]+"
+            "Request call sequence: test_throttle.py::TestThrottleDecoratorErrors."
+            "test_pie_throttle_bad_args:[0-9]+ -> throttle.py::throttle:[0-9]+"
         )
 
+        ################################################################
+        # bad reqs_per_sec SYNC
+        ################################################################
         ml_error_msg = (
-                           "The reqs_per_sec specification must be a positive "
-                           "int or float greater than zero. "
-                       ) + ml_call_seq
+            "The reqs_per_sec specification must be a positive "
+            "int or float greater than zero. "
+        ) + ml_call_seq
 
         log_ver.add_pattern(pattern=ml_error_msg, level=logging.ERROR)
         with pytest.raises(IncorrectReqsPerSecSpecified, match=ml_error_msg):
 
-            @throttle(reqs_per_sec=0)
+            @throttle(reqs_per_sec=-1)
             def f1() -> None:
                 print("42")
 
             f1()
 
+        log_ver.add_pattern(pattern=ml_error_msg, level=logging.ERROR)
         with pytest.raises(IncorrectReqsPerSecSpecified, match=ml_error_msg):
 
-            @throttle(reqs_per_sec=-1)
+            @throttle(reqs_per_sec=0)
             def f2() -> None:
                 print("42")
 
             f2()
 
+        log_ver.add_pattern(pattern=ml_error_msg, level=logging.ERROR)
         with pytest.raises(IncorrectReqsPerSecSpecified, match=ml_error_msg):
 
-            @throttle(reqs_per_sec="1")  # type: ignore
+            @throttle(reqs_per_sec="1")
             def f3() -> None:
                 print("42")
 
@@ -1029,22 +1097,30 @@ class TestThrottleDecoratorErrors:
         ################################################################
         # bad reqs_per_sec ASYNC
         ################################################################
+        ml_error_msg = (
+            "The reqs_per_sec specification must be a positive "
+            "int or float greater than zero. "
+        ) + ml_call_seq
+
+        log_ver.add_pattern(pattern=ml_error_msg, level=logging.ERROR)
         with pytest.raises(IncorrectReqsPerSecSpecified, match=ml_error_msg):
 
-            @throttle(reqs_per_sec=0, throttle_mode=ThrottleMode.ASYNC)
+            @throttle(reqs_per_sec=-1, throttle_mode=ThrottleMode.ASYNC)
             def f4() -> None:
                 print("42")
 
             f4()
 
+        log_ver.add_pattern(pattern=ml_error_msg, level=logging.ERROR)
         with pytest.raises(IncorrectReqsPerSecSpecified, match=ml_error_msg):
 
-            @throttle(reqs_per_sec=-1, throttle_mode=ThrottleMode.ASYNC)
+            @throttle(reqs_per_sec=0, throttle_mode=ThrottleMode.ASYNC)
             def f5() -> None:
                 print("42")
 
             f5()
 
+        log_ver.add_pattern(pattern=ml_error_msg, level=logging.ERROR)
         with pytest.raises(IncorrectReqsPerSecSpecified, match=ml_error_msg):
 
             @throttle(reqs_per_sec="1", throttle_mode=ThrottleMode.ASYNC)  # type: ignore
@@ -1056,161 +1132,224 @@ class TestThrottleDecoratorErrors:
         ################################################################
         # bad bucket_size SYNC
         ################################################################
+        ml_error_msg = (
+            "The bucket_size specification must be a positive "
+            "int or float greater than or equal to 1. "
+        ) + ml_call_seq
+
+        log_ver.add_pattern(pattern=ml_error_msg, level=logging.ERROR)
         with pytest.raises(IncorrectBucketSizeSpecified, match=ml_error_msg):
 
             @throttle(reqs_per_sec=1, bucket_size=-1)
-            def f10() -> None:
-                print("42")
-
-            f10()
-
-        with pytest.raises(IncorrectBucketSizeSpecified, match=ml_error_msg):
-
-            @throttle(reqs_per_sec=1, bucket_size=0)
-            def f10() -> None:
-                print("42")
-
-            f10()
-
-        with pytest.raises(IncorrectBucketSizeSpecified, match=ml_error_msg):
-
-            @throttle(reqs_per_sec=1, bucket_size=0.7)
-            def f10() -> None:
-                print("42")
-
-            f10()
-
-        with pytest.raises(IncorrectBucketSizeSpecified, match=ml_error_msg):
-
-            @throttle(reqs_per_sec=1, bucket_size="1")  # type: ignore
-            def f11() -> None:
-                print("42")
-
-            f11()
-
-        ################################################################
-        # bad async_q_size
-        ################################################################
-        with pytest.raises(IncorrectAsyncQSizeSpecified, match=ml_error_msg):
-
-            @throttle(reqs_per_sec=1, throttle_mode=ThrottleMode.ASYNC, async_q_size=-1)
             def f7() -> None:
                 print("42")
 
             f7()
-        with pytest.raises(IncorrectAsyncQSizeSpecified, match=ml_error_msg):
 
-            @throttle(reqs_per_sec=1, throttle_mode=ThrottleMode.ASYNC, async_q_size=0)
+        log_ver.add_pattern(pattern=ml_error_msg, level=logging.ERROR)
+        with pytest.raises(IncorrectBucketSizeSpecified, match=ml_error_msg):
+
+            @throttle(reqs_per_sec=1, bucket_size=0)
             def f8() -> None:
                 print("42")
 
             f8()
-        with pytest.raises(IncorrectAsyncQSizeSpecified, match=ml_error_msg):
 
-            @throttle(reqs_per_sec=1, throttle_mode=ThrottleMode.ASYNC, async_q_size="1")  # type: ignore
+        log_ver.add_pattern(pattern=ml_error_msg, level=logging.ERROR)
+        with pytest.raises(IncorrectBucketSizeSpecified, match=ml_error_msg):
+
+            @throttle(reqs_per_sec=1, bucket_size=0.3)
             def f9() -> None:
                 print("42")
 
             f9()
 
-            ################################################################
-            ################################################################
-            # bad bucket_size
-            ################################################################
-            ml_error_msg = (
-                "The bucket_size specification must be a positive "
-                "int or float greater than or equal to 1. "
-            ) + ml_call_seq
+        log_ver.add_pattern(pattern=ml_error_msg, level=logging.ERROR)
+        with pytest.raises(IncorrectBucketSizeSpecified, match=ml_error_msg):
 
-            log_ver.add_pattern(pattern=ml_error_msg, level=logging.ERROR)
-            with pytest.raises(IncorrectBucketSizeSpecified, match=ml_error_msg):
-                _ = Throttle(reqs_per_sec=1, bucket_size=-1)
+            @throttle(reqs_per_sec=1, bucket_size="1")  # type: ignore
+            def f10() -> None:
+                print("42")
 
-            log_ver.add_pattern(pattern=ml_error_msg, level=logging.ERROR)
-            with pytest.raises(IncorrectBucketSizeSpecified, match=ml_error_msg):
-                _ = Throttle(reqs_per_sec=1, bucket_size="1")  # type: ignore
+            f10()
 
-            ################################################################
-            # bad async_q_size
-            ################################################################
-            ml_error_msg = (
-                "async_q_size must be an integer greater than zero. "
-            ) + ml_call_seq
+        ################################################################
+        # bad bucket_size ASYNC
+        ################################################################
+        ml_error_msg = (
+            "The bucket_size specification must be a positive "
+            "int or float greater than or equal to 1. "
+        ) + ml_call_seq
 
-            log_ver.add_pattern(pattern=ml_error_msg, level=logging.ERROR)
-            with pytest.raises(IncorrectAsyncQSizeSpecified, match=ml_error_msg):
-                _ = Throttle(
-                    reqs_per_sec=1, throttle_mode=ThrottleMode.ASYNC, async_q_size=-1
-                )
+        log_ver.add_pattern(pattern=ml_error_msg, level=logging.ERROR)
+        with pytest.raises(IncorrectBucketSizeSpecified, match=ml_error_msg):
 
-            log_ver.add_pattern(pattern=ml_error_msg, level=logging.ERROR)
-            with pytest.raises(IncorrectAsyncQSizeSpecified, match=ml_error_msg):
-                _ = Throttle(
-                    reqs_per_sec=1, throttle_mode=ThrottleMode.ASYNC, async_q_size=0
-                )
+            @throttle(reqs_per_sec=1, bucket_size=-1, throttle_mode=ThrottleMode.ASYNC)
+            def f11() -> None:
+                print("42")
 
-            log_ver.add_pattern(pattern=ml_error_msg, level=logging.ERROR)
-            with pytest.raises(IncorrectAsyncQSizeSpecified, match=ml_error_msg):
-                _ = Throttle(reqs_per_sec=1, throttle_mode=ThrottleMode.ASYNC, async_q_size="1")  # type: ignore
+            f11()
 
-            ################################################################
-            # invalid async_q_size
-            ################################################################
-            ml_error_msg = (
-                "a non_zero async_q_size is not allowed when throttle_mode is "
-                "ThrottleMode.SYNC. "
-            ) + ml_call_seq
+        log_ver.add_pattern(pattern=ml_error_msg, level=logging.ERROR)
+        with pytest.raises(IncorrectBucketSizeSpecified, match=ml_error_msg):
 
-            log_ver.add_pattern(pattern=ml_error_msg, level=logging.ERROR)
-            with pytest.raises(InvalidAsyncQSizeSpecified, match=ml_error_msg):
-                _ = Throttle(reqs_per_sec=1, async_q_size=-1)
+            @throttle(reqs_per_sec=1, bucket_size=0, throttle_mode=ThrottleMode.ASYNC)
+            def f12() -> None:
+                print("42")
 
-            log_ver.add_pattern(pattern=ml_error_msg, level=logging.ERROR)
-            with pytest.raises(InvalidAsyncQSizeSpecified, match=ml_error_msg):
-                _ = Throttle(reqs_per_sec=1, async_q_size=1)
+            f12()
 
-            log_ver.add_pattern(pattern=ml_error_msg, level=logging.ERROR)
-            with pytest.raises(InvalidAsyncQSizeSpecified, match=ml_error_msg):
-                _ = Throttle(reqs_per_sec=1, async_q_size="1")  # type: ignore
+        log_ver.add_pattern(pattern=ml_error_msg, level=logging.ERROR)
+        with pytest.raises(IncorrectBucketSizeSpecified, match=ml_error_msg):
 
-            ################################################################
-            # invalid shutdown request
-            ################################################################
-            ml_error_msg = (
-                "A shutdown was requested for a synchronous throttle. "
-                "Shutdown can only be requested for a throttle that is "
-                "created with a throttle_mode of ThrottleMode.ASYNC. "
-            ) + ml_call_seq
+            @throttle(reqs_per_sec=1, bucket_size=0.3, throttle_mode=ThrottleMode.ASYNC)
+            def f13() -> None:
+                print("42")
 
-            log_ver.add_pattern(pattern=ml_error_msg, level=logging.ERROR)
+            f13()
 
-            with pytest.raises(InvalidShutdownRequested, match=ml_error_msg):
-                a_throttle = Throttle(reqs_per_sec=1)
-                a_throttle.start_shutdown()
+        log_ver.add_pattern(pattern=ml_error_msg, level=logging.ERROR)
+        with pytest.raises(IncorrectBucketSizeSpecified, match=ml_error_msg):
 
-            ################################################################
-            # incorrect shutdown type
-            ################################################################
-            ml_error_msg = (
-                "For start_shutdown, shutdownType must be specified as "
-                "either ThrottleShutdownType.SOFT or "
-                "ThrottleShutdownType.HARD. "
-            ) + ml_call_seq
+            @throttle(reqs_per_sec=1, bucket_size="1", throttle_mode=ThrottleMode.ASYNC)  # type: ignore
+            def f14() -> None:
+                print("42")
 
-            log_ver.add_pattern(pattern=ml_error_msg, level=logging.ERROR)
-            log_ver.add_pattern(
-                pattern=(
-                    "throttle t1 start_shutdown request "
-                    "successfully completed in [0-9.]+ seconds"
-                ),
-                level=logging.INFO,
+            f14()
+
+        ################################################################
+        # bad async_q_size ASYNC
+        ################################################################
+        ml_error_msg = (
+            "async_q_size must be an integer greater than zero. "
+        ) + ml_call_seq
+
+        log_ver.add_pattern(pattern=ml_error_msg, level=logging.ERROR)
+        with pytest.raises(IncorrectAsyncQSizeSpecified, match=ml_error_msg):
+
+            @throttle(reqs_per_sec=1, throttle_mode=ThrottleMode.ASYNC, async_q_size=-1)
+            def f15() -> None:
+                print("42")
+
+            f15()
+
+        log_ver.add_pattern(pattern=ml_error_msg, level=logging.ERROR)
+        with pytest.raises(IncorrectAsyncQSizeSpecified, match=ml_error_msg):
+
+            @throttle(reqs_per_sec=1, throttle_mode=ThrottleMode.ASYNC, async_q_size=0)
+            def f16() -> None:
+                print("42")
+
+            f16()
+
+        log_ver.add_pattern(pattern=ml_error_msg, level=logging.ERROR)
+        with pytest.raises(IncorrectAsyncQSizeSpecified, match=ml_error_msg):
+
+            @throttle(
+                reqs_per_sec=1, throttle_mode=ThrottleMode.ASYNC, async_q_size=0.5
             )
-            with pytest.raises(IncorrectShutdownTypeSpecified, match=ml_error_msg):
-                a_throttle = Throttle(
-                    reqs_per_sec=1, throttle_mode=ThrottleMode.ASYNC, name="t1"
-                )
-                a_throttle.start_shutdown()
-                a_throttle.start_shutdown(shutdown_type=42)  # type: ignore
+            def f17() -> None:
+                print("42")
+
+            f17()
+
+        log_ver.add_pattern(pattern=ml_error_msg, level=logging.ERROR)
+        with pytest.raises(IncorrectAsyncQSizeSpecified, match=ml_error_msg):
+
+            @throttle(reqs_per_sec=1, throttle_mode=ThrottleMode.ASYNC, async_q_size="1")  # type: ignore
+            def f18() -> None:
+                print("42")
+
+            f18()
+
+        ################################################################
+        # invalid async_q_size SYNC
+        ################################################################
+        ml_error_msg = (
+            "a non_zero async_q_size is not allowed when throttle_mode is "
+            "ThrottleMode.SYNC. "
+        ) + ml_call_seq
+
+        log_ver.add_pattern(pattern=ml_error_msg, level=logging.ERROR)
+        with pytest.raises(InvalidAsyncQSizeSpecified, match=ml_error_msg):
+
+            @throttle(reqs_per_sec=1, throttle_mode=ThrottleMode.SYNC, async_q_size=-1)
+            def f19() -> None:
+                print("42")
+
+            f19()
+
+        log_ver.add_pattern(pattern=ml_error_msg, level=logging.ERROR)
+        with pytest.raises(InvalidAsyncQSizeSpecified, match=ml_error_msg):
+
+            @throttle(reqs_per_sec=1, throttle_mode=ThrottleMode.SYNC, async_q_size=0.5)
+            def f20() -> None:
+                print("42")
+
+            f20()
+
+        log_ver.add_pattern(pattern=ml_error_msg, level=logging.ERROR)
+        with pytest.raises(InvalidAsyncQSizeSpecified, match=ml_error_msg):
+
+            @throttle(reqs_per_sec=1, throttle_mode=ThrottleMode.SYNC, async_q_size=1)
+            def f21() -> None:
+                print("42")
+
+            f21()
+
+        log_ver.add_pattern(pattern=ml_error_msg, level=logging.ERROR)
+        with pytest.raises(InvalidAsyncQSizeSpecified, match=ml_error_msg):
+
+            @throttle(reqs_per_sec=1, throttle_mode=ThrottleMode.SYNC, async_q_size="1")  # type: ignore
+            def f22() -> None:
+                print("42")
+
+            f22()
+
+        ################################################################
+        # invalid shutdown request SYNC
+        ################################################################
+        ml_error_msg = (
+            "A shutdown was requested for a synchronous throttle. "
+            "Shutdown can only be requested for a throttle that is "
+            "created with a throttle_mode of ThrottleMode.ASYNC. "
+        ) + ml_call_seq
+
+        with pytest.raises(AttributeError):
+
+            @throttle(reqs_per_sec=1)
+            def f23() -> None:
+                print("42")
+
+            f23()
+            f23.start_shutdown()
+
+        ################################################################
+        # incorrect shutdown type ASYNC
+        ################################################################
+        ml_error_msg = (
+            "For start_shutdown, shutdownType must be specified as "
+            "either ThrottleShutdownType.SOFT or "
+            "ThrottleShutdownType.HARD. "
+        ) + ml_call_seq
+
+        log_ver.add_pattern(pattern=ml_error_msg, level=logging.ERROR)
+        log_ver.add_pattern(
+            pattern=(
+                "throttle t1 start_shutdown request "
+                "successfully completed in [0-9.]+ seconds"
+            ),
+            level=logging.INFO,
+        )
+        with pytest.raises(IncorrectShutdownTypeSpecified, match=ml_error_msg):
+
+            @throttle(reqs_per_sec=1, throttle_mode=ThrottleMode.ASYNC, name="t1")
+            def f24() -> None:
+                print("42")
+
+            f24()
+            f24.start_shutdown()
+            f24.start_shutdown(shutdown_type=42)  # type: ignore
 
         ################################################################
         # check log results
