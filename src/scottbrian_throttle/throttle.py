@@ -1007,31 +1007,26 @@ class Throttle:
                     raise
 
     ####################################################################
-    # update_wait
+    # perform_throttle
     ####################################################################
-    def update_wait(self) -> None:
+    def throttle_request(self) -> None:
         """Calculate next target time and wait if needed."""
 
         self._arrival_time_ns = time.perf_counter_ns()
         self._wait_time_ns = 0.0
-        self.logger.debug(
-            f"entry 1: {self._arrival_time_ns=}, {self._wait_time_ns=}, {self._next_target_time_ns=}, {self.lb_adjustment_ns=}"
-        )
+        # self.logger.debug(
+        #     f"entry 1: {self._arrival_time_ns=}, {self._wait_time_ns=}, {self._next_target_time_ns=}, {self.lb_adjustment_ns=}"
+        # )
         if self._next_target_time_ns + self.lb_adjustment_ns < self._arrival_time_ns:
             # we are well beyond the target time - we need to start
             # a new bucket with the first send entry added
 
-            # self._next_target_time_ns = (
-            #     self._arrival_time_ns
-            #     - self.lb_adjustment_ns
-            #     + self._target_interval_ns
-            # )
             # self.logger.debug(f"entry 2a: {self._next_target_time_ns=}")
             self._next_target_time_ns = self._arrival_time_ns + self.lb_with_one_request
 
-            self.logger.debug(
-                f"entry 2b: {self._next_target_time_ns=}, elapsed: {time.perf_counter_ns()-self._arrival_time_ns}"
-            )
+            # self.logger.debug(
+            #     f"entry 2b: {self._next_target_time_ns=}, elapsed: {time.perf_counter_ns()-self._arrival_time_ns}"
+            # )
         else:  # still in the range of the bucket
             if self._arrival_time_ns < self._next_target_time_ns:
                 # we need to delay to allow the bucket to leak out
@@ -1573,8 +1568,7 @@ def throttle(
 ########################################################################
 def shutdown_throttle_funcs(
     *args: FuncWithThrottleAttr[Callable[..., Any]],
-    # *args: FuncWithThrottleAttr[Protocol[F]],
-    shutdown_type: int = ThrottleShutdownType.SOFT,
+    shutdown_type: ThrottleShutdownType = ThrottleShutdownType.SOFT,
     timeout: OptIntFloat = None,
 ) -> bool:
     """Shutdown the throttle request scheduling for decorated functions.

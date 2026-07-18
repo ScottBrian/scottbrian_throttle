@@ -45,6 +45,7 @@ from scottbrian_throttle.throttle import (
     InvalidShutdownRequested,
     shutdown_throttle_funcs,
     ThrottleMode,
+    ThrottleShutdownType,
 )
 
 ########################################################################
@@ -348,7 +349,7 @@ class TestThrottleErrors:
         log_ver.add_pattern(pattern=ml_error_msg, level=logging.ERROR)
         with pytest.raises(IncorrectAsyncQSizeSpecified, match=ml_error_msg):
             _ = Throttle(
-                reqs_per_sec=1, throttle_mode=ThrottleMode.ASYNC, async_q_size=0.5
+                reqs_per_sec=1, throttle_mode=ThrottleMode.ASYNC, async_q_size=0.5  # type: ignore
             )
 
         log_ver.add_pattern(pattern=ml_error_msg, level=logging.ERROR)
@@ -369,7 +370,7 @@ class TestThrottleErrors:
 
         log_ver.add_pattern(pattern=ml_error_msg, level=logging.ERROR)
         with pytest.raises(InvalidAsyncQSizeSpecified, match=ml_error_msg):
-            _ = Throttle(reqs_per_sec=1, async_q_size=0.5)
+            _ = Throttle(reqs_per_sec=1, async_q_size=0.5)  # type: ignore
 
         log_ver.add_pattern(pattern=ml_error_msg, level=logging.ERROR)
         with pytest.raises(InvalidAsyncQSizeSpecified, match=ml_error_msg):
@@ -516,7 +517,7 @@ class TestThrottleBasic:
         a_throttle.start_shutdown()
         assert len(a_throttle) == 0
 
-        a_throttle.start_shutdown(shutdown_type=Throttle.TYPE_SHUTDOWN_HARD)
+        a_throttle.start_shutdown(shutdown_type=ThrottleShutdownType.HARD)
 
     ####################################################################
     # repr with throttle_mode async
@@ -1049,7 +1050,7 @@ class TestThrottleBasic:
 class TestThrottleDecoratorErrors:
     """TestThrottleDecoratorErrors class."""
 
-    def test_pie_throttle_bad_args(self) -> None:
+    def test_pie_throttle_bad_args(self, caplog: pytest.LogCaptureFixture) -> None:
         """test_throttle using bad arguments."""
 
         log_ver = LogVer(log_name="scottbrian_throttle.throttle")
@@ -1057,6 +1058,10 @@ class TestThrottleDecoratorErrors:
         ml_call_seq = (
             "Request call sequence: test_throttle.py::TestThrottleDecoratorErrors."
             "test_pie_throttle_bad_args:[0-9]+ -> throttle.py::throttle:[0-9]+"
+        )
+        ml_call_seq2 = (
+            "Request call sequence: python.py::pytest_pyfunc_call:[0-9]+ -> "
+            "test_throttle.py::TestThrottleDecoratorErrors.test_pie_throttle_bad_args:[0-9]+"
         )
 
         ################################################################
@@ -1088,7 +1093,7 @@ class TestThrottleDecoratorErrors:
         log_ver.add_pattern(pattern=ml_error_msg, level=logging.ERROR)
         with pytest.raises(IncorrectReqsPerSecSpecified, match=ml_error_msg):
 
-            @throttle(reqs_per_sec="1")
+            @throttle(reqs_per_sec="1")  # type: ignore
             def f3() -> None:
                 print("42")
 
@@ -1246,7 +1251,7 @@ class TestThrottleDecoratorErrors:
         with pytest.raises(IncorrectAsyncQSizeSpecified, match=ml_error_msg):
 
             @throttle(
-                reqs_per_sec=1, throttle_mode=ThrottleMode.ASYNC, async_q_size=0.5
+                reqs_per_sec=1, throttle_mode=ThrottleMode.ASYNC, async_q_size=0.5  # type: ignore
             )
             def f17() -> None:
                 print("42")
@@ -1282,7 +1287,7 @@ class TestThrottleDecoratorErrors:
         log_ver.add_pattern(pattern=ml_error_msg, level=logging.ERROR)
         with pytest.raises(InvalidAsyncQSizeSpecified, match=ml_error_msg):
 
-            @throttle(reqs_per_sec=1, throttle_mode=ThrottleMode.SYNC, async_q_size=0.5)
+            @throttle(reqs_per_sec=1, throttle_mode=ThrottleMode.SYNC, async_q_size=0.5)  # type: ignore
             def f20() -> None:
                 print("42")
 
@@ -1313,16 +1318,16 @@ class TestThrottleDecoratorErrors:
             "A shutdown was requested for a synchronous throttle. "
             "Shutdown can only be requested for a throttle that is "
             "created with a throttle_mode of ThrottleMode.ASYNC. "
-        ) + ml_call_seq
+        ) + ml_call_seq2
 
-        with pytest.raises(AttributeError):
+        log_ver.add_pattern(pattern=ml_error_msg, level=logging.ERROR)
+        with pytest.raises(InvalidShutdownRequested, match=ml_error_msg):
 
             @throttle(reqs_per_sec=1)
             def f23() -> None:
                 print("42")
 
-            f23()
-            f23.start_shutdown()
+            f23.throttle.start_shutdown()
 
         ################################################################
         # incorrect shutdown type ASYNC
@@ -1331,7 +1336,7 @@ class TestThrottleDecoratorErrors:
             "For start_shutdown, shutdownType must be specified as "
             "either ThrottleShutdownType.SOFT or "
             "ThrottleShutdownType.HARD. "
-        ) + ml_call_seq
+        ) + ml_call_seq2
 
         log_ver.add_pattern(pattern=ml_error_msg, level=logging.ERROR)
         log_ver.add_pattern(
@@ -1348,8 +1353,8 @@ class TestThrottleDecoratorErrors:
                 print("42")
 
             f24()
-            f24.start_shutdown()
-            f24.start_shutdown(shutdown_type=42)  # type: ignore
+            f24.throttle.start_shutdown()
+            f24.throttle.start_shutdown(shutdown_type=42)  # type: ignore
 
         ################################################################
         # check log results
@@ -1740,7 +1745,7 @@ class TestThrottle:
             self.make_reqs(request_validator, request_style)
             if throttle_mode == ThrottleMode.ASYNC:
                 logger.debug(f"throttle_router doing throttle shutdown")
-                a_throttle.start_shutdown(shutdown_type=Throttle.TYPE_SHUTDOWN_SOFT)
+                a_throttle.start_shutdown(shutdown_type=ThrottleShutdownType.SOFT)
             logger.debug(f"throttle_router validating series")
             request_validator.validate_series()  # validate for the series
         else:
@@ -1753,7 +1758,10 @@ class TestThrottle:
                     num_reqs=len(send_intervals),
                     send_intervals=send_intervals.copy(),
                 )
-                req_thread_item.thread_item._args = (request_validator, req_thread_item)
+                req_thread_item.thread_item._args = (  # type: ignore[attr-defined]
+                    request_validator,
+                    req_thread_item,
+                )
                 request_validator.thread_items.append(req_thread_item)
 
             logger.debug(f"throttle_router starting threads")
@@ -1766,7 +1774,7 @@ class TestThrottle:
 
             if throttle_mode == ThrottleMode.ASYNC:
                 logger.debug(f"throttle_router doing throttle shutdown")
-                a_throttle.start_shutdown(shutdown_type=Throttle.TYPE_SHUTDOWN_SOFT)
+                a_throttle.start_shutdown(shutdown_type=ThrottleShutdownType.SOFT)
 
             logger.debug(f"throttle_router validating series")
             request_validator.validate_series()
@@ -2593,7 +2601,7 @@ class TestThrottleShutdownErrors:
         # throttle.
         ################################################################
         with pytest.raises(AttributeError):
-            a_throttle1.start_shutdown(shutdown_type=100)
+            a_throttle1.start_shutdown(shutdown_type=100)  # type: ignore
 
         ################################################################
         # ensure that throttle is still OK
@@ -2668,7 +2676,7 @@ class TestThrottleShutdownErrors:
         # attempt to shutdown the incorrect shutdown_type
         ################################################################
         with pytest.raises(IncorrectShutdownTypeSpecified):
-            a_throttle1.start_shutdown(shutdown_type=100)
+            a_throttle1.start_shutdown(shutdown_type=100)  # type: ignore
 
         ################################################################
         # ensure that throttle is still OK
@@ -2870,7 +2878,7 @@ def final_shutdown_and_verification(
     # pattern for the lagging message
     if ret_code == Throttle.RC_SHUTDOWN_TIMED_OUT:
         ret_code = throttle.start_shutdown(
-            shutdown_type=Throttle.TYPE_SHUTDOWN_HARD, timeout=60
+            shutdown_type=ThrottleShutdownType.HARD, timeout=60
         )
     assert ret_code != Throttle.RC_SHUTDOWN_TIMED_OUT
 
@@ -3005,7 +3013,7 @@ class TestThrottleShutdown:
                     num_reqs_done_before_shutdown = a_req_time.num_reqs
 
                 ret_code = a_throttle.start_shutdown(
-                    shutdown_type=Throttle.TYPE_SHUTDOWN_HARD, timeout=timeout
+                    shutdown_type=ThrottleShutdownType.HARD, timeout=timeout
                 )
 
                 async_q_empty, num_reqs = issue_remaining_requests_log_entry(
@@ -3042,7 +3050,7 @@ class TestThrottleShutdown:
             )
 
         finally:
-            a_throttle.start_shutdown(Throttle.TYPE_SHUTDOWN_HARD)
+            a_throttle.start_shutdown(ThrottleShutdownType.HARD)
 
     ####################################################################
     # test_throttle_shutdown
@@ -3136,7 +3144,7 @@ class TestThrottleShutdown:
                 log_ver.test_msg(f"about to shutdown with {timeout=}")
 
                 ret_code = a_throttle.start_shutdown(
-                    shutdown_type=Throttle.TYPE_SHUTDOWN_SOFT, timeout=timeout
+                    shutdown_type=ThrottleShutdownType.SOFT, timeout=timeout
                 )
 
                 shutdown_elapsed_time = time.time() - shutdown_start_time
@@ -3164,7 +3172,7 @@ class TestThrottleShutdown:
                     assert (
                         Throttle.RC_SHUTDOWN_SOFT_COMPLETED_OK
                         == a_throttle.start_shutdown(
-                            shutdown_type=Throttle.TYPE_SHUTDOWN_SOFT,
+                            shutdown_type=ThrottleShutdownType.SOFT,
                             timeout=timeout,
                         )
                     )
@@ -3188,7 +3196,7 @@ class TestThrottleShutdown:
             )
 
         finally:
-            a_throttle.start_shutdown(Throttle.TYPE_SHUTDOWN_HARD)
+            a_throttle.start_shutdown(ThrottleShutdownType.HARD)
 
     ####################################################################
     # test_throttle_shutdown
@@ -3243,7 +3251,7 @@ class TestThrottleShutdown:
             # nonlocal shutdown_completed
             nonlocal ret_code
             rc = a_throttle.start_shutdown(
-                shutdown_type=Throttle.TYPE_SHUTDOWN_SOFT, timeout=ss_timeout
+                shutdown_type=ThrottleShutdownType.SOFT, timeout=ss_timeout
             )
 
             log_ver.test_msg(f"soft shutdown {rc=} with {ss_timeout=:.4f}")
@@ -3350,7 +3358,7 @@ class TestThrottleShutdown:
             )
 
         finally:
-            a_throttle.start_shutdown(Throttle.TYPE_SHUTDOWN_HARD)
+            a_throttle.start_shutdown(ThrottleShutdownType.HARD)
 
     ####################################################################
     # test_throttle_shutdown
@@ -3447,7 +3455,7 @@ class TestThrottleShutdown:
                 short_long_timeout_arg, hard_soft_combo_arg
             ):
                 if hard_soft == "Soft":
-                    shutdown_type = Throttle.TYPE_SHUTDOWN_SOFT
+                    shutdown_type = ThrottleShutdownType.SOFT
                     if short_long == "Short":
                         timeout = 0.0001
                     else:
@@ -3458,7 +3466,7 @@ class TestThrottleShutdown:
                             else:
                                 exp_ret_code = Throttle.RC_SHUTDOWN_SOFT_COMPLETED_OK
                 else:
-                    shutdown_type = Throttle.TYPE_SHUTDOWN_HARD
+                    shutdown_type = ThrottleShutdownType.HARD
                     hard_shutdown_issued = True
                     if short_long == "Short":
                         timeout = 0.0001
@@ -3507,7 +3515,7 @@ class TestThrottleShutdown:
             )
 
         finally:
-            a_throttle.start_shutdown(Throttle.TYPE_SHUTDOWN_HARD)
+            a_throttle.start_shutdown(ThrottleShutdownType.HARD)
 
     ####################################################################
     # test_throttle_shutdown
@@ -3554,13 +3562,11 @@ class TestThrottleShutdown:
             """
             if timeout_tf:
                 rc = a_throttle.start_shutdown(
-                    shutdown_type=Throttle.TYPE_SHUTDOWN_SOFT,
+                    shutdown_type=ThrottleShutdownType.SOFT,
                     timeout=max_timeout_seconds,
                 )
             else:
-                rc = a_throttle.start_shutdown(
-                    shutdown_type=Throttle.TYPE_SHUTDOWN_SOFT
-                )
+                rc = a_throttle.start_shutdown(shutdown_type=ThrottleShutdownType.SOFT)
 
             log_ver.test_msg(f"soft shutdown {rc=} with {timeout_tf=}")
             assert rc == Throttle.RC_SHUTDOWN_HARD_COMPLETED_OK
@@ -3619,7 +3625,7 @@ class TestThrottleShutdown:
                 "started soft shutdown."
             )
             ret_code = a_throttle.start_shutdown(
-                shutdown_type=Throttle.TYPE_SHUTDOWN_HARD
+                shutdown_type=ThrottleShutdownType.HARD
             )
             assert ret_code == Throttle.RC_SHUTDOWN_HARD_COMPLETED_OK
             assert abs(a_req_time.num_reqs - exp_reqs_done) <= 1
@@ -3636,7 +3642,7 @@ class TestThrottleShutdown:
             )
 
         finally:
-            a_throttle.start_shutdown(Throttle.TYPE_SHUTDOWN_HARD)
+            a_throttle.start_shutdown(ThrottleShutdownType.HARD)
 
     ####################################################################
     # test_shutdown_throttle_funcs
@@ -3758,9 +3764,9 @@ class TestThrottleShutdown:
         if 0 <= mean_reqs_to_make <= 22:
             shutdown1_type_arg = None
         elif 22 <= mean_reqs_to_make <= 43:
-            shutdown1_type_arg = Throttle.TYPE_SHUTDOWN_SOFT
+            shutdown1_type_arg = ThrottleShutdownType.SOFT
         else:
-            shutdown1_type_arg = Throttle.TYPE_SHUTDOWN_HARD
+            shutdown1_type_arg = ThrottleShutdownType.HARD
 
         log_ver.test_msg(f"{mean_reqs_to_make=}, {shutdown1_type_arg=}")
 
@@ -3774,14 +3780,14 @@ class TestThrottleShutdown:
 
         timeout_arg = None
         if (
-            (shutdown1_type_arg != Throttle.TYPE_SHUTDOWN_HARD)
+            (shutdown1_type_arg != ThrottleShutdownType.HARD)
             and (num_shutdown1_funcs_arg == 2)
             and (f1_num_reqs_arg > 0)
             and (f2_num_reqs_arg > 0)
         ):
             timeout_arg = min(f1_exp_elapsed_seconds, f2_exp_elapsed_seconds) / 2
         elif (
-            (shutdown1_type_arg != Throttle.TYPE_SHUTDOWN_HARD)
+            (shutdown1_type_arg != ThrottleShutdownType.HARD)
             and (num_shutdown1_funcs_arg == 3)
             and (f1_num_reqs_arg > 0)
             and (f2_num_reqs_arg > 0)
@@ -4866,7 +4872,7 @@ class TestThrottleDocstrings:
             func2(i, start_time)
         # do other processing since not waiting for return from throttle
         # after other processing, do a shutdown of the throttle
-        func2.start_shutdown()
+        func2.throttle.start_shutdown()
 
         expected_result = "****************************************************************************\n"
         expected_result += " :Example 6: Wrapping a function with the **@throttle** decorator for async \n"
@@ -4917,7 +4923,7 @@ class TestThrottleDocstrings:
             func3(i, start_time)
         # do other processing since not waiting for return from throttle
         # after other processing, do a shutdown of the throttle
-        func3.start_shutdown()
+        func3.throttle.start_shutdown()
 
         expected_result = "****************************************************************************\n"
         expected_result += " :Example 7: Wrapping a function with the **@throttle** decorator for async \n"
