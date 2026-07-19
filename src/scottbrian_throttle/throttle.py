@@ -82,8 +82,6 @@ are complete.
 >>> start_time = time.time()
 >>> for i in range(10):
 ...     rc = async_throttle.send_request(target_rtn2, i, start_time)
->>> # do other processing since not waiting for return from throttle
->>> # after other processing, do a shutdown of the throttle
 >>> async_throttle.start_shutdown()
 request 0 sent at elapsed time: 0.0
 request 1 sent at elapsed time: 0.5
@@ -167,7 +165,7 @@ request 9 sent at elapsed time: 4.5
 :Example 6: Wrapping a function with the **@throttle** decorator for
             async mode
 
->>> from scottbrian_throttle.throttle import throttle
+>>> from scottbrian_throttle.throttle import Throttle
 >>> import time
 >>> @throttle(reqs_per_sec=0.5, throttle_mode=ThrottleMode.ASYNC)
 >>> def func2(request_number, time_of_start):
@@ -178,7 +176,7 @@ request 9 sent at elapsed time: 4.5
 ...     func2(i, start_time)
 >>> # do other processing since not waiting for return from throttle
 >>> # after other processing, do a shutdown of the throttle
->>> func2.start_shutdown()
+>>> func2.throttle.start_shutdown()
 request 0 sent at elapsed time: 0.0
 request 1 sent at elapsed time: 2.0
 request 2 sent at elapsed time: 4.0
@@ -207,7 +205,7 @@ request 9 sent at elapsed time: 18.0
 ...     func3(i, start_time)
 >>> # do other processing since not waiting for return from throttle
 >>> # after other processing, do a shutdown of the throttle
->>> func3.start_shutdown()
+>>> func3.throttle.start_shutdown()
 request 0 sent at elapsed time: 0.0
 request 1 sent at elapsed time: 0.0
 request 2 sent at elapsed time: 0.0
@@ -226,7 +224,6 @@ import logging
 import queue
 import threading
 import time
-
 ########################################################################
 # Standard Library
 ########################################################################
@@ -823,6 +820,7 @@ class Throttle:
                 request_item = Throttle.Request(
                     func, args, kwargs, time.perf_counter_ns()
                 )
+                self.logger.debug(f"{request_item=}")
                 # start_shutdown will set _throttle_shutdown_started to
                 # tell us to abandon our attempts to get a request on a
                 # full async_q so that we give up the lock to allow

@@ -126,7 +126,8 @@ class RequestItem:
     # instance
     throttle_arrival_time_ns: float = 0.0
 
-    # actual_func_arrival_time_ns assigned by the req target code when entered
+    # actual_func_arrival_time_ns assigned by the req target code when
+    # entered
     expected_func_arrival_time_ns: float = 0.0
     actual_func_arrival_time_ns: float = 0.0
 
@@ -271,7 +272,9 @@ class TestThrottleErrors:
 
         log_ver.add_pattern(pattern=ml_error_msg, level=logging.ERROR)
         with pytest.raises(IncorrectReqsPerSecSpecified, match=ml_error_msg):
-            _ = Throttle(reqs_per_sec="1", throttle_mode=ThrottleMode.ASYNC)  # type: ignore
+            _ = Throttle(
+                reqs_per_sec="1", throttle_mode=ThrottleMode.ASYNC
+            )  # type: ignore
 
         ################################################################
         # bad bucket_size SYNC
@@ -325,7 +328,9 @@ class TestThrottleErrors:
 
         log_ver.add_pattern(pattern=ml_error_msg, level=logging.ERROR)
         with pytest.raises(IncorrectBucketSizeSpecified, match=ml_error_msg):
-            _ = Throttle(reqs_per_sec=1, bucket_size="1", throttle_mode=ThrottleMode.ASYNC)  # type: ignore
+            _ = Throttle(
+                reqs_per_sec=1, bucket_size="1", throttle_mode=ThrottleMode.ASYNC
+            )  # type: ignore
 
         ################################################################
         # bad async_q_size ASYNC
@@ -349,12 +354,16 @@ class TestThrottleErrors:
         log_ver.add_pattern(pattern=ml_error_msg, level=logging.ERROR)
         with pytest.raises(IncorrectAsyncQSizeSpecified, match=ml_error_msg):
             _ = Throttle(
-                reqs_per_sec=1, throttle_mode=ThrottleMode.ASYNC, async_q_size=0.5  # type: ignore
+                reqs_per_sec=1,
+                throttle_mode=ThrottleMode.ASYNC,
+                async_q_size=0.5,  # type: ignore
             )
 
         log_ver.add_pattern(pattern=ml_error_msg, level=logging.ERROR)
         with pytest.raises(IncorrectAsyncQSizeSpecified, match=ml_error_msg):
-            _ = Throttle(reqs_per_sec=1, throttle_mode=ThrottleMode.ASYNC, async_q_size="1")  # type: ignore
+            _ = Throttle(
+                reqs_per_sec=1, throttle_mode=ThrottleMode.ASYNC, async_q_size="1"
+            )  # type: ignore
 
         ################################################################
         # invalid async_q_size SYNC
@@ -502,14 +511,14 @@ class TestThrottleBasic:
         for i in range(num_reqs_to_send_arg):
             a_throttle.send_request(dummy_func, event, i)
 
-        logger.debug(f"mainline waiting on event")
+        logger.debug("mainline waiting on event")
         event.wait()
-        logger.debug(f"mainline after wait on event")
+        logger.debug("mainline after wait on event")
         # assert is for 1 less than queued because the first request
         # will be scheduled immediately
         try:
             assert len(a_throttle) == num_reqs_to_send_arg - 2
-        except Exception as e:
+        except Exception:
             a_throttle.start_shutdown()
             raise
 
@@ -596,7 +605,8 @@ class TestThrottleBasic:
             and async_q_size_arg is not None
             and name_arg is None
         ):
-            # not a valid combo to have throttle_mode=ThrottleMode.SYNC and async_q_size non-zero
+            # not a valid combo to have throttle_mode=ThrottleMode.SYNC
+            # and async_q_size non-zero
             async_q_size_arg = 0
             a_throttle = Throttle(
                 reqs_per_sec=reqs_per_sec_arg, async_q_size=async_q_size_arg
@@ -618,7 +628,8 @@ class TestThrottleBasic:
             and async_q_size_arg is not None
             and name_arg is not None
         ):
-            # not a valid combo to have throttle_mode=ThrottleMode.SYNC and async_q_size non-zero
+            # not a valid combo to have throttle_mode=ThrottleMode.SYNC
+            # and async_q_size non-zero
             async_q_size_arg = 0
             a_throttle = Throttle(
                 reqs_per_sec=reqs_per_sec_arg,
@@ -799,7 +810,8 @@ class TestThrottleBasic:
             and async_q_size_arg is not None
             and name_arg is None
         ):
-            # not a valid combo to have throttle_mode=ThrottleMode.SYNC and async_q_size non-zero
+            # not a valid combo to have throttle_mode=ThrottleMode.SYNC
+            # and async_q_size non-zero
             async_q_size_arg = 0
             a_throttle = Throttle(
                 reqs_per_sec=reqs_per_sec_arg,
@@ -823,7 +835,8 @@ class TestThrottleBasic:
             and async_q_size_arg is not None
             and name_arg is not None
         ):
-            # not a valid combo to have throttle_mode=ThrottleMode.SYNC and async_q_size non-zero
+            # not a valid combo to have throttle_mode=ThrottleMode.SYNC
+            # and async_q_size non-zero
             async_q_size_arg = 0
             a_throttle = Throttle(
                 reqs_per_sec=reqs_per_sec_arg,
@@ -964,12 +977,12 @@ class TestThrottleBasic:
             # cause failure since we should never reach this else
             a_throttle = Throttle(reqs_per_sec=-1)
             expected_repr_str = (
-                f"Throttle("
-                f"reqs_per_sec=None, "
-                f"bucket_size=None, "
-                f"throttle_mode=None, "
-                f"async_q_size=None, "
-                f"name=None, "
+                "Throttle("
+                "reqs_per_sec=None, "
+                "bucket_size=None, "
+                "throttle_mode=None, "
+                "async_q_size=None, "
+                "name=None, "
             )
 
         assert repr(a_throttle) == expected_repr_str
@@ -1061,7 +1074,8 @@ class TestThrottleDecoratorErrors:
         )
         ml_call_seq2 = (
             "Request call sequence: python.py::pytest_pyfunc_call:[0-9]+ -> "
-            "test_throttle.py::TestThrottleDecoratorErrors.test_pie_throttle_bad_args:[0-9]+"
+            "test_throttle.py::TestThrottleDecoratorErrors."
+            "test_pie_throttle_bad_args:[0-9]+"
         )
 
         ################################################################
@@ -1128,7 +1142,9 @@ class TestThrottleDecoratorErrors:
         log_ver.add_pattern(pattern=ml_error_msg, level=logging.ERROR)
         with pytest.raises(IncorrectReqsPerSecSpecified, match=ml_error_msg):
 
-            @throttle(reqs_per_sec="1", throttle_mode=ThrottleMode.ASYNC)  # type: ignore
+            @throttle(
+                reqs_per_sec="1", throttle_mode=ThrottleMode.ASYNC
+            )  # type: ignore
             def f6() -> None:
                 print("42")
 
@@ -1216,7 +1232,9 @@ class TestThrottleDecoratorErrors:
         log_ver.add_pattern(pattern=ml_error_msg, level=logging.ERROR)
         with pytest.raises(IncorrectBucketSizeSpecified, match=ml_error_msg):
 
-            @throttle(reqs_per_sec=1, bucket_size="1", throttle_mode=ThrottleMode.ASYNC)  # type: ignore
+            @throttle(
+                reqs_per_sec=1, bucket_size="1", throttle_mode=ThrottleMode.ASYNC
+            )  # type: ignore
             def f14() -> None:
                 print("42")
 
@@ -1251,7 +1269,9 @@ class TestThrottleDecoratorErrors:
         with pytest.raises(IncorrectAsyncQSizeSpecified, match=ml_error_msg):
 
             @throttle(
-                reqs_per_sec=1, throttle_mode=ThrottleMode.ASYNC, async_q_size=0.5  # type: ignore
+                reqs_per_sec=1,
+                throttle_mode=ThrottleMode.ASYNC,
+                async_q_size=0.5,  # type: ignore
             )
             def f17() -> None:
                 print("42")
@@ -1261,7 +1281,9 @@ class TestThrottleDecoratorErrors:
         log_ver.add_pattern(pattern=ml_error_msg, level=logging.ERROR)
         with pytest.raises(IncorrectAsyncQSizeSpecified, match=ml_error_msg):
 
-            @throttle(reqs_per_sec=1, throttle_mode=ThrottleMode.ASYNC, async_q_size="1")  # type: ignore
+            @throttle(
+                reqs_per_sec=1, throttle_mode=ThrottleMode.ASYNC, async_q_size="1"
+            )  # type: ignore
             def f18() -> None:
                 print("42")
 
@@ -1287,7 +1309,9 @@ class TestThrottleDecoratorErrors:
         log_ver.add_pattern(pattern=ml_error_msg, level=logging.ERROR)
         with pytest.raises(InvalidAsyncQSizeSpecified, match=ml_error_msg):
 
-            @throttle(reqs_per_sec=1, throttle_mode=ThrottleMode.SYNC, async_q_size=0.5)  # type: ignore
+            @throttle(
+                reqs_per_sec=1, throttle_mode=ThrottleMode.SYNC, async_q_size=0.5
+            )  # type: ignore
             def f20() -> None:
                 print("42")
 
@@ -1305,7 +1329,9 @@ class TestThrottleDecoratorErrors:
         log_ver.add_pattern(pattern=ml_error_msg, level=logging.ERROR)
         with pytest.raises(InvalidAsyncQSizeSpecified, match=ml_error_msg):
 
-            @throttle(reqs_per_sec=1, throttle_mode=ThrottleMode.SYNC, async_q_size="1")  # type: ignore
+            @throttle(
+                reqs_per_sec=1, throttle_mode=ThrottleMode.SYNC, async_q_size="1"
+            )  # type: ignore
             def f22() -> None:
                 print("42")
 
@@ -1494,7 +1520,7 @@ class TestThrottleDecoratorRequestErrors:
             )
             log_ver.add_pattern(
                 log_name="scottbrian_throttle.throttle",
-                level=logging.DEBUG,
+                level=logging.INFO,
                 pattern=log_msg,
             )
             log_ver.test_msg("about to call thread_exc.raise_exc_if_one()")
@@ -1538,20 +1564,6 @@ class TestThrottle:
         "throttle_mode_arg", (ThrottleMode.SYNC, ThrottleMode.ASYNC)
     )
     @pytest.mark.parametrize("request_style_arg", (0, 1, 2, 3, 4, 5, 6))
-    # @pytest.mark.parametrize("throttle_mode_arg", (ThrottleMode.SYNC,))
-    # @pytest.mark.parametrize(
-    #     "request_style_arg",
-    #     (
-    #         0,
-    #         0,
-    #         0,
-    #         0,
-    #         0,
-    #         0,
-    #         0,
-    #         0,
-    #     ),
-    # )
     def test_throttle_args_style(
         self, throttle_mode_arg: ThrottleMode, request_style_arg: int
     ) -> None:
@@ -1665,8 +1677,6 @@ class TestThrottle:
         # the remaining are the same value send_interval passed in
         send_intervals = [0.0] + [send_interval] * (num_reqs_to_do // 2 - 1)
 
-        # send_intervals.append(8.0)  # @sbt 3 second delay for test of delay problem
-
         # the second half are random values
         for _ in range(num_reqs_to_do // 2):
             send_intervals.append(send_interval * (random.random() * 2))
@@ -1698,8 +1708,8 @@ class TestThrottle:
 
         """
         logger.debug(
-            f"throttle_router entered: {reqs_per_sec=}, {str(throttle_mode)=}, {bucket_size=}, {send_interval=}, "
-            f"{request_style=}, {num_threads=} "
+            f"throttle_router entered: {reqs_per_sec=}, {str(throttle_mode)=},"
+            f"{bucket_size=}, {send_interval=}, {request_style=}, {num_threads=} "
         )
         ################################################################
         # get send interval list
@@ -1733,23 +1743,21 @@ class TestThrottle:
         )
 
         ################################################################
-        # dummy send_request to avoid extra delay in request 2
+        # pauser for 3 seconds to avoid extra time is second request
         ################################################################
-        # for idx, interval in enumerate(send_intervals):
-        #     a_throttle.send_request(lambda x: x + 2, idx)
-
-        # time.sleep(request_validator.target_interval * (bucket_size + 1))
+        pauser = Pauser()
+        pauser.pause(3)
 
         if num_threads == 0:
-            logger.debug(f"throttle_router making requests")
+            logger.debug("throttle_router making requests")
             self.make_reqs(request_validator, request_style)
             if throttle_mode == ThrottleMode.ASYNC:
-                logger.debug(f"throttle_router doing throttle shutdown")
+                logger.debug("throttle_router doing throttle shutdown")
                 a_throttle.start_shutdown(shutdown_type=ThrottleShutdownType.SOFT)
-            logger.debug(f"throttle_router validating series")
+            logger.debug("throttle_router validating series")
             request_validator.validate_series()  # validate for the series
         else:
-            logger.debug(f"throttle_router creating threads")
+            logger.debug("throttle_router creating threads")
             for t_num in range(num_threads):
                 req_thread_item = RequestThreadItem(
                     thread_item=threading.Thread(target=self.make_multi_reqs),
@@ -1764,22 +1772,22 @@ class TestThrottle:
                 )
                 request_validator.thread_items.append(req_thread_item)
 
-            logger.debug(f"throttle_router starting threads")
+            logger.debug("throttle_router starting threads")
             for thread_item in request_validator.thread_items:
                 thread_item.thread_item.start()
 
-            logger.debug(f"throttle_router joining threads")
+            logger.debug("throttle_router joining threads")
             for thread_item in request_validator.thread_items:
                 thread_item.thread_item.join()
 
             if throttle_mode == ThrottleMode.ASYNC:
-                logger.debug(f"throttle_router doing throttle shutdown")
+                logger.debug("throttle_router doing throttle shutdown")
                 a_throttle.start_shutdown(shutdown_type=ThrottleShutdownType.SOFT)
 
-            logger.debug(f"throttle_router validating series")
+            logger.debug("throttle_router validating series")
             request_validator.validate_series()
 
-        logger.debug(f"throttle_router exiting")
+        logger.debug("throttle_router exiting")
 
     ####################################################################
     # make_reqs
@@ -1799,7 +1807,7 @@ class TestThrottle:
 
         pauser = Pauser()
         a_throttle = request_validator.t_throttle
-        throttle_mode = request_validator.throttle_mode
+        throttle_mode = a_throttle.throttle_mode
 
         call_args: str
 
@@ -1808,15 +1816,24 @@ class TestThrottle:
         elif request_style == 1:
             call_args = "a_throttle.send_request(request_validator.request1b, idx)"
         elif request_style == 2:
-            call_args = "a_throttle.send_request(request_validator.request2b, idx, request_validator.reqs_per_sec)"
+            call_args = (
+                "a_throttle.send_request(request_validator.request2b, idx, "
+                "request_validator.reqs_per_sec)"
+            )
         elif request_style == 3:
             call_args = (
                 "a_throttle.send_request(request_validator.request3b, req_id=idx)"
             )
         elif request_style == 4:
-            call_args = "a_throttle.send_request(request_validator.request4b, req_id=idx, send_interval=request_validator.send_interval)"
+            call_args = (
+                "a_throttle.send_request(request_validator.request4b, "
+                "req_id=idx, send_interval=request_validator.send_interval)"
+            )
         elif request_style == 5:
-            call_args = "a_throttle.send_request(request_validator.request5b, idx, send_interval=request_validator.send_interval,)"
+            call_args = (
+                "a_throttle.send_request(request_validator.request5b, idx, "
+                "send_interval=request_validator.send_interval,)"
+            )
         elif request_style == 6:
             call_args = (
                 "a_throttle.send_request(request_validator.request6b, "
@@ -2516,6 +2533,9 @@ class TestThrottleMisc:
             assert actual_completion_time == exp_completion_time
             assert actual_completion_time_ns == exp_completion_time_ns
 
+        if throttle_mode_arg == ThrottleMode.ASYNC:
+            a_throttle1.start_shutdown()
+
 
 ########################################################################
 # TestThrottleShutdown
@@ -2537,9 +2557,14 @@ class TestThrottleShutdownErrors:
         ################################################################
         log_ver = LogVer(log_name=__name__)
         alpha_call_seq = (
-            "test_throttle.py::TestThrottleShutdown" ".test_incorrect_shutdown_type"
+            "test_throttle.py::TestThrottleShutdown.test_attempt_sync_throttle_shutdown"
         )
         log_ver.add_call_seq(name="alpha", seq=alpha_call_seq)
+        ml_call_seq = (
+            "Request call sequence: python.py::pytest_pyfunc_call:[0-9]+ -> "
+            "test_throttle.py::TestThrottleShutdownErrors."
+            "test_attempt_sync_throttle_shutdown:[0-9]+"
+        )
 
         ################################################################
         # create a sync throttle_mode throttle
@@ -2569,14 +2594,18 @@ class TestThrottleShutdownErrors:
 
         ################################################################
         # attempt to shutdown the sync throttle
-        # Note: this test is not really needed since the sync throttle
-        # does not have a shutdown method to call. We are essentially
-        # and unnecessarily testing Python's ability to detect an
-        # attribute error. It is, however, nice to know that we get the
-        # expected error and are able to continue the use of the
-        # throttle.
         ################################################################
-        with pytest.raises(AttributeError):
+        log_error_msg = (
+            "A shutdown was requested for a synchronous throttle. "
+            "Shutdown can only be requested for a throttle that is "
+            "created with a throttle_mode of ThrottleMode.ASYNC. "
+        ) + ml_call_seq
+        log_ver.add_pattern(
+            log_name="scottbrian_throttle.throttle",
+            level=logging.ERROR,
+            pattern=log_error_msg,
+        )
+        with pytest.raises(InvalidShutdownRequested, match=log_error_msg):
             a_throttle1.start_shutdown(shutdown_type=100)  # type: ignore
 
         ################################################################
@@ -2611,9 +2640,14 @@ class TestThrottleShutdownErrors:
         ################################################################
         log_ver = LogVer(log_name=__name__)
         alpha_call_seq = (
-            "test_throttle.py::TestThrottleShutdown" ".test_incorrect_shutdown_type"
+            "test_throttle.py::TestThrottleShutdown.test_incorrect_shutdown_type"
         )
         log_ver.add_call_seq(name="alpha", seq=alpha_call_seq)
+        ml_call_seq = (
+            "Request call sequence: python.py::pytest_pyfunc_call:[0-9]+ -> "
+            "test_throttle.py::TestThrottleShutdownErrors."
+            "test_incorrect_shutdown_type:[0-9]+"
+        )
         ################################################################
         # create an async throttle_mode throttle
         ################################################################
@@ -2650,7 +2684,17 @@ class TestThrottleShutdownErrors:
         ################################################################
         # attempt to shutdown the incorrect shutdown_type
         ################################################################
-        with pytest.raises(IncorrectShutdownTypeSpecified):
+        log_error_msg = (
+            "For start_shutdown, shutdownType must be specified as "
+            "either ThrottleShutdownType.SOFT or "
+            "ThrottleShutdownType.HARD. "
+        ) + ml_call_seq
+        log_ver.add_pattern(
+            log_name="scottbrian_throttle.throttle",
+            level=logging.ERROR,
+            pattern=log_error_msg,
+        )
+        with pytest.raises(IncorrectShutdownTypeSpecified, match=log_error_msg):
             a_throttle1.start_shutdown(shutdown_type=100)  # type: ignore
 
         ################################################################
@@ -2678,7 +2722,7 @@ class TestThrottleShutdownErrors:
         )
         log_ver.add_pattern(
             log_name="scottbrian_throttle.throttle",
-            level=logging.DEBUG,
+            level=logging.INFO,
             pattern=log_msg,
         )
 
@@ -3622,13 +3666,6 @@ class TestThrottleShutdown:
     ####################################################################
     # test_shutdown_throttle_funcs
     ####################################################################
-    # @pytest.mark.parametrize("sleep2_delay_arg", (1.1,))
-    # @pytest.mark.parametrize("num_shutdown1_funcs_arg", (3,))
-    # @pytest.mark.parametrize("f1_num_reqs_arg", (32,))
-    # @pytest.mark.parametrize("f2_num_reqs_arg", (32,))
-    # @pytest.mark.parametrize("f3_num_reqs_arg", (0,))
-    # @pytest.mark.parametrize("f4_num_reqs_arg", (0,))
-    # @etrace(omit_parms="caplog", omit_caller=True, log_ver=True)
     @pytest.mark.parametrize("sleep2_delay_arg", (0.3, 1.1))
     @pytest.mark.parametrize("num_shutdown1_funcs_arg", (0, 1, 2, 3, 4))
     @pytest.mark.parametrize("f1_num_reqs_arg", (0, 16, 32))
@@ -3660,8 +3697,7 @@ class TestThrottleShutdown:
         """
         log_ver = self.log_ver
         alpha_call_seq = (
-            "test_throttle.py::TestThrottleShutdown"
-            ".test_throttle_hard_shutdown_timeout"
+            "test_throttle.py::TestThrottleShutdown.test_shutdown_throttle_funcs"
         )
         log_ver.add_call_seq(name="alpha", seq=alpha_call_seq)
 
@@ -3884,6 +3920,7 @@ class TestThrottleShutdown:
                     f"shutdown_throttle_funcs request timed out with "
                     f"{timeout=:.4f}"
                 )
+                log_level = logging.DEBUG
             else:
                 funcs_shutdown_complete_msg_added.append(func)
                 log_msg = (
@@ -3891,10 +3928,11 @@ class TestThrottleShutdown:
                     "successfully completed in "
                     f"{func.throttle.shutdown_elapsed_time:.4f} seconds"
                 )
+                log_level = logging.INFO
 
             log_ver.add_pattern(
                 log_name="scottbrian_throttle.throttle",
-                level=logging.DEBUG,
+                level=log_level,
                 pattern=log_msg,
             )
 
@@ -3931,7 +3969,7 @@ class TestThrottleShutdown:
                 )
                 log_ver.add_pattern(
                     log_name="scottbrian_throttle.throttle",
-                    level=logging.DEBUG,
+                    level=logging.INFO,
                     pattern=log_msg,
                 )
 
@@ -4122,11 +4160,11 @@ class RequestValidator:
 
         ratio_delay_time = (
             self.cumulative_actual_delay_ns - self.cumulative_expected_delay_ns
-        ) / self.target_interval_ns
+        ) / (self.target_interval_ns * self.total_requests)
         print(f"ratio diff expected/actual: {ratio_delay_time:.4f}")
 
         # assert throttle_verifier.num_excessive_request_delays < 4
-        assert ratio_delay_time <= 0.15
+        assert ratio_delay_time <= 0.05
 
         self.reset()
 
@@ -4474,27 +4512,20 @@ class TestThrottleDocstrings:
 
         """
 
-        flowers(
+        hdr_str = (
             ":Example 1: instantiate a synchronous throttle at 2 requests per second:"
         )
+        flowers(hdr_str)
 
         from scottbrian_throttle.throttle import Throttle
 
         throttle = Throttle(reqs_per_sec=2)
         print(f"{throttle.get_interval_secs()}")
 
-        expected_result = (
-            "***********************************************************"
-            "***************\n"
-        )
-        expected_result += (
-            " :Example 1: instantiate a synchronous throttle at 2"
-            " requests per second: \n"
-        )
-        expected_result += (
-            "**********************************************************"
-            "****************\n"
-        )
+        flower_str = ("*" * (len(hdr_str) + 4)) + "\n"
+        expected_result = "\n" + flower_str
+        expected_result += f"* {hdr_str} *\n"
+        expected_result += flower_str
         expected_result += "0.5\n"
 
         captured = capsys.readouterr().out
