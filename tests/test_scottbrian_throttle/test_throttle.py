@@ -1859,9 +1859,6 @@ class TestThrottle:
             request_thread_item: the request thread item
 
         """
-        # logger.debug(
-        #     f"making_multi_reqs entered for " f"{request_thread_item.thread_item_idx=}"
-        # )
         pauser = Pauser()
         a_throttle = request_validator.t_throttle
 
@@ -1876,16 +1873,10 @@ class TestThrottle:
             if s_interval > 0.0:
                 pauser.pause(s_interval)
             request_item.send_time_ns = perf_counter_ns()
-            # logger.debug(
-            #     f"making_multi_reqs {request_thread_item.thread_item_idx=} "
-            #     f"sending request {idx=} to throttle"
-            # )
             _ = a_throttle.send_request(
                 request_validator.request0c, request_item=request_item
             )
-            # logger.debug(f"making_multi_reqs sending request to throttle")
             request_item.return_time_ns = perf_counter_ns()
-        # logger.debug(f"making_multi_reqs exiting")
 
     ####################################################################
     # test_pie_throttle_args_style
@@ -1927,7 +1918,6 @@ class TestThrottle:
         ################################################################
         @throttle(reqs_per_sec=reqs_per_sec_arg, throttle_mode=throttle_mode_arg)
         def f0() -> Any:
-            # request_validator.callback0()
             request_validator.idx += 1
             request_item = request_validator.request_deque.pop()
             assert request_item.req_id == request_validator.idx
@@ -1961,8 +1951,6 @@ class TestThrottle:
         ################################################################
         @throttle(reqs_per_sec=reqs_per_sec_arg, throttle_mode=throttle_mode_arg)
         def f1(req_id: int) -> Any:
-            # request_validator.callback1(idx)
-
             request_validator.idx += 1
             request_item = request_validator.request_deque.pop()
             request_item.arrival_idx = request_validator.idx  # first is zero
@@ -1996,8 +1984,6 @@ class TestThrottle:
         ################################################################
         @throttle(reqs_per_sec=reqs_per_sec_arg, throttle_mode=throttle_mode_arg)
         def f2(req_id: int, reqs_per_sec: float) -> Any:
-            # request_validator.callback2(req_id, reqs_per_sec)
-
             request_validator.idx += 1
             request_item = request_validator.request_deque.pop()
             request_item.arrival_idx = request_validator.idx  # first is zero
@@ -2035,8 +2021,6 @@ class TestThrottle:
         ################################################################
         @throttle(reqs_per_sec=reqs_per_sec_arg, throttle_mode=throttle_mode_arg)
         def f3(*, req_id: int) -> Any:
-            # request_validator.callback3(req_id=req_id)
-
             request_validator.idx += 1
             request_item = request_validator.request_deque.pop()
             request_item.arrival_idx = request_validator.idx  # first is zero
@@ -2071,8 +2055,6 @@ class TestThrottle:
         ################################################################
         @throttle(reqs_per_sec=reqs_per_sec_arg, throttle_mode=throttle_mode_arg)
         def f4(*, req_id: int, interval: float) -> Any:
-            # request_validator.callback4(req_id=req_id, seconds=seconds)
-
             request_validator.idx += 1
             request_item = request_validator.request_deque.pop()
             request_item.arrival_idx = request_validator.idx  # first is zero
@@ -2114,8 +2096,6 @@ class TestThrottle:
         ################################################################
         @throttle(reqs_per_sec=reqs_per_sec_arg, throttle_mode=throttle_mode_arg)
         def f5(req_id: int, *, interval: float) -> Any:
-            # request_validator.callback5(req_id, interval=interval)
-
             request_validator.idx += 1
             request_item = request_validator.request_deque.pop()
             request_item.arrival_idx = request_validator.idx  # first is zero
@@ -2159,9 +2139,6 @@ class TestThrottle:
         def f6(
             req_id: int, reqs_per_sec: IntFloat, *, bucket_size: float, interval: float
         ) -> Any:
-            # request_validator.callback6(
-            #     req_id, reqs_per_sec, seconds=seconds, interval=interval
-            # )
             request_validator.idx += 1
             request_item = request_validator.request_deque.pop()
             request_item.arrival_idx = request_validator.idx  # first is zero
@@ -2290,8 +2267,6 @@ class TestThrottle:
             throttle_mode=throttle_mode_arg,
         )
         def f0() -> Any:
-            # request_validator.callback0()
-
             request_validator.idx += 1
             request_item = request_validator.request_deque.pop()
             assert request_item.req_id == request_validator.idx
@@ -2475,7 +2450,8 @@ class TestThrottleMisc:
 
         Args:
             throttle_mode_arg: sync or async
-            reqs_per_sec_arg: number of requests per second specified for the throttle
+            reqs_per_sec_arg: number of requests per second specified
+                for the throttle
 
         """
         ################################################################
@@ -2504,7 +2480,8 @@ class TestThrottleMisc:
 
         Args:
             throttle_mode_arg: sync or async
-            reqs_per_sec_arg: number of requests per second specified for the throttle
+            reqs_per_sec_arg: number of requests per second specified
+                for the throttle
 
         """
         ################################################################
@@ -2568,7 +2545,6 @@ class TestThrottleShutdownErrors:
         # create a sync throttle_mode throttle
         ################################################################
         reqs_per_sec_arg = 4
-        seconds_arg = 1
         a_throttle1 = Throttle(
             reqs_per_sec=reqs_per_sec_arg, throttle_mode=ThrottleMode.SYNC
         )
@@ -2642,7 +2618,6 @@ class TestThrottleShutdownErrors:
         # create an async throttle_mode throttle
         ################################################################
         reqs_per_sec_arg = 6
-        seconds_arg = 2
         a_throttle1 = Throttle(
             reqs_per_sec=reqs_per_sec_arg,
             throttle_mode=ThrottleMode.ASYNC,
@@ -4120,13 +4095,23 @@ class RequestValidator:
             expected_actual_diff_ratio = (
                 req_item.actual_delay_ns - req_item.expected_delay_ns
             ) / (req_item.expected_delay_ns + extra_time)
+
+            line4_val = (
+                req_item.throttle_arrival_time_ns - first_send_time
+            ) * NS_2_SECS
+            line5_val = (
+                req_item.expected_func_arrival_time_ns - first_send_time
+            ) * NS_2_SECS
+            line6_val = (
+                req_item.actual_func_arrival_time_ns - first_send_time
+            ) * NS_2_SECS
             print(
                 f"    {req_item.req_id:2} "
                 f"|          {req_item.arrival_idx:2} "
                 f"| {(req_item.send_time_ns - first_send_time) * NS_2_SECS:7.4f} "
-                f"|   {(req_item.throttle_arrival_time_ns - first_send_time) * NS_2_SECS:7.4f} "
-                f"|     {(req_item.expected_func_arrival_time_ns - first_send_time) * NS_2_SECS:7.4f} "
-                f"|     {(req_item.actual_func_arrival_time_ns - first_send_time) * NS_2_SECS:7.4f} "
+                f"|   {line4_val:7.4f} "
+                f"|     {line5_val:7.4f} "
+                f"|     {line6_val:7.4f} "
                 f"|   {req_item.expected_delay_ns * NS_2_SECS:7.4f} "
                 f"|   {req_item.actual_delay_ns * NS_2_SECS:7.4f} "
                 f"|    {expected_actual_diff_ratio * NS_2_SECS:7.12f} |"
@@ -4155,7 +4140,8 @@ class RequestValidator:
 
         self.request_items[0].expected_delay_ns = 0
 
-        # self.request_items[0].expected_func_arrival_time_ns = self.request_items[
+        # self.request_items[0].expected_func_arrival_time_ns =
+        # self.request_items[
         #     0
         # ].send_time_ns
         # self.request_items[0].actual_delay_ns = (
@@ -4173,7 +4159,8 @@ class RequestValidator:
         amount_in_bucket_ns = self.target_interval_ns  # init with 1st
         max_bucket_amount_ns = self.bucket_size * self.target_interval_ns
         for idx in range(1, len(self.request_items)):
-            # interval_ns = self.request_items[idx].throttle_arrival_time_ns - (
+            # interval_ns = self.request_items[idx].
+            # throttle_arrival_time_ns - (
             #     self.request_items[idx - 1].throttle_sent_time_ns
             # )
             interval_ns = self.request_items[idx].throttle_arrival_time_ns - (
@@ -4202,7 +4189,8 @@ class RequestValidator:
 
             # self.request_items[idx].expected_delay_ns = max(
             #     0,
-            #     self.request_items[idx - 1].throttle_next_target_time_ns
+            #     self.request_items[idx - 1].
+            #     throttle_next_target_time_ns
             #     - self.request_items[idx].send_time_ns,
             # )
             # self.request_items[idx].expected_func_arrival_time_ns = (
@@ -4468,144 +4456,6 @@ class RequestValidator:
         assert send_interval == self.send_interval
         return request_item.req_id
 
-    ####################################################################
-    # Queue callback targets
-    ####################################################################
-    ####################################################################
-    # callback0
-    ####################################################################
-    # def callback0(self) -> None:
-    #     """Queue the callback for request0."""
-    #     self.idx += 1
-    #     self.req_times.append((self.idx, perf_counter_ns()))
-    #     self.arrival_times.append(self.t_throttle._arrival_time_ns)
-    #     self.next_target_times.append(self.t_throttle._next_target_time_ns)
-    #     # self.check_async_q_times.append(self.t_throttle._check_async_q_time)
-    #
-    #     self.idx += 1
-    #     request_item = self.request_deque.pop()
-    #     assert request_item.req_id == self.idx
-    #     request_item.arrival_idx = self.idx  # first is zero
-    #     request_item.actual_func_arrival_time_ns = perf_counter_ns()
-    #     request_item.throttle_arrival_time_ns = self.t_throttle._arrival_time_ns
-    #     request_item.throttle_next_target_time_ns = self.t_throttle._next_target_time_ns
-    #     request_item.throttle_wait_time_ns = self.t_throttle._wait_time_ns
-    #     request_item.throttle_sent_time_ns = request_validator.t_throttle.sent_time_ns
-    #     self.request_items.append(request_item)
-    #
-    #     # logger.debug("request0b exiting")
-    #     return request_item.req_id
-    #
-    # ####################################################################
-    # # callback1
-    # ####################################################################
-    # def callback1(self, idx: int) -> None:
-    #     """Queue the callback for request0.
-    #
-    #     Args:
-    #         idx: index of the request call
-    #     """
-    #     self.req_times.append((idx, perf_counter_ns()))
-    #     self.arrival_times.append(self.t_throttle._arrival_time_ns)
-    #     self.next_target_times.append(self.t_throttle._next_target_time_ns)
-    #     # self.check_async_q_times.append(self.t_throttle._check_async_q_time)
-    #     assert idx == self.idx + 1
-    #     self.idx = idx
-    #
-    # ####################################################################
-    # # callback2
-    # ####################################################################
-    # def callback2(self, idx: int, reqs_per_sec: float) -> None:
-    #     """Queue the callback for request0.
-    #
-    #     Args:
-    #         idx: index of the request call
-    #         reqs_per_sec: number of requests per second for the throttle
-    #     """
-    #     self.req_times.append((idx, perf_counter_ns()))
-    #     self.arrival_times.append(self.t_throttle._arrival_time_ns)
-    #     self.next_target_times.append(self.t_throttle._next_target_time_ns)
-    #     # self.check_async_q_times.append(self.t_throttle._check_async_q_time)
-    #     assert idx == self.idx + 1
-    #     assert reqs_per_sec == self.reqs_per_sec
-    #     self.idx = idx
-    #
-    # ####################################################################
-    # # callback3
-    # ####################################################################
-    # def callback3(self, *, idx: int) -> None:
-    #     """Queue the callback for request0.
-    #
-    #     Args:
-    #         idx: index of the request call
-    #     """
-    #     self.req_times.append((idx, perf_counter_ns()))
-    #     self.arrival_times.append(self.t_throttle._arrival_time_ns)
-    #     self.next_target_times.append(self.t_throttle._next_target_time_ns)
-    #     # self.check_async_q_times.append(self.t_throttle._check_async_q_time)
-    #     assert idx == self.idx + 1
-    #     self.idx = idx
-    #
-    # ####################################################################
-    # # callback4
-    # ####################################################################
-    # def callback4(self, *, idx: int, interval: float) -> None:
-    #     """Queue the callback for request0.
-    #
-    #     Args:
-    #         idx: index of the request call
-    #         interval: interval for the throttle
-    #     """
-    #     self.req_times.append((idx, perf_counter_ns()))
-    #     self.arrival_times.append(self.t_throttle._arrival_time_ns)
-    #     self.next_target_times.append(self.t_throttle._next_target_time_ns)
-    #     # self.check_async_q_times.append(self.t_throttle._check_async_q_time)
-    #     assert idx == self.idx + 1
-    #     assert interval == self.target_interval
-    #     self.idx = idx
-    #
-    # ####################################################################
-    # # callback5
-    # ####################################################################
-    # def callback5(self, idx: int, *, interval: float) -> None:
-    #     """Queue the callback for request0.
-    #
-    #     Args:
-    #         idx: index of the request call
-    #         interval: interval between requests
-    #     """
-    #     self.req_times.append((idx, perf_counter_ns()))
-    #     self.arrival_times.append(self.t_throttle._arrival_time_ns)
-    #     self.next_target_times.append(self.t_throttle._next_target_time_ns)
-    #     # self.check_async_q_times.append(self.t_throttle._check_async_q_time)
-    #     assert idx == self.idx + 1
-    #     assert 0.0 <= interval
-    #     self.idx = idx
-    #
-    # ####################################################################
-    # # callback6
-    # ####################################################################
-    # def callback6(
-    #     self, idx: int, reqs_per_sec: float, *, seconds: float, interval: float
-    # ) -> None:
-    #     """Queue the callback for request0.
-    #
-    #     Args:
-    #         idx: index of the request call
-    #         reqs_per_sec: number of requests per second for the throttle
-    #         seconds: number of seconds for the throttle
-    #         interval: interval between requests
-    #     """
-    #     self.req_times.append((idx, perf_counter_ns()))
-    #     self.arrival_times.append(self.t_throttle._arrival_time_ns)
-    #     self.next_target_times.append(self.t_throttle._next_target_time_ns)
-    #     # self.check_async_q_times.append(self.t_throttle._check_async_q_time)
-    #     assert idx == self.idx + 1
-    #     assert reqs_per_sec == self.reqs_per_sec
-    #     assert seconds == self.seconds
-    #     assert 0.0 <= interval
-    #     self.idx = idx
-
 
 ########################################################################
 # TestThrottleDocstrings class
@@ -4633,9 +4483,18 @@ class TestThrottleDocstrings:
         throttle = Throttle(reqs_per_sec=2)
         print(f"{throttle.get_interval_secs()}")
 
-        expected_result = "**************************************************************************\n"
-        expected_result += " :Example 1: instantiate a synchronous throttle at 2 requests per second: \n"
-        expected_result += "**************************************************************************\n"
+        expected_result = (
+            "***********************************************************"
+            "***************\n"
+        )
+        expected_result += (
+            " :Example 1: instantiate a synchronous throttle at 2"
+            " requests per second: \n"
+        )
+        expected_result += (
+            "**********************************************************"
+            "****************\n"
+        )
         expected_result += "0.5\n"
 
         captured = capsys.readouterr().out
@@ -4773,9 +4632,18 @@ class TestThrottleDocstrings:
         for i in range(10):
             lb_throttle.send_request(target_rtn3, i, start_time)
 
-        expected_result = "*************************************************************************\n"
-        expected_result += " :Example 4: instantiate a leaky bucket throttle and send some requests: \n"
-        expected_result += "*************************************************************************\n"
+        expected_result = (
+            "***********************************************************"
+            "**************\n"
+        )
+        expected_result += (
+            " :Example 4: instantiate a leaky bucket throttle and send"
+            " some requests: \n"
+        )
+        expected_result += (
+            "**********************************************************"
+            "***************\n"
+        )
         expected_result += "request 0 sent at elapsed time: 0.0\n"
         expected_result += "request 1 sent at elapsed time: 0.0\n"
         expected_result += "request 2 sent at elapsed time: 0.0\n"
@@ -4874,9 +4742,18 @@ class TestThrottleDocstrings:
         # after other processing, do a shutdown of the throttle
         func2.throttle.start_shutdown()
 
-        expected_result = "****************************************************************************\n"
-        expected_result += " :Example 6: Wrapping a function with the **@throttle** decorator for async \n"
-        expected_result += "****************************************************************************\n"
+        expected_result = (
+            "***********************************************************"
+            "*****************\n"
+        )
+        expected_result += (
+            " :Example 6: Wrapping a function with the **@throttle**"
+            " decorator for async \n"
+        )
+        expected_result += (
+            "**********************************************************"
+            "******************\n"
+        )
         expected_result += "request 0 sent at elapsed time: 0.0\n"
         expected_result += "request 1 sent at elapsed time: 2.5\n"
         expected_result += "request 2 sent at elapsed time: 4.0\n"
@@ -4904,8 +4781,8 @@ class TestThrottleDocstrings:
         """
 
         flowers(
-            ":Example 7: Wrapping a function with the **@throttle** decorator for async "
-            "with leaky bucket"
+            ":Example 7: Wrapping a function with the **@throttle** decorator for "
+            "async with leaky bucket"
         )
 
         from scottbrian_throttle.throttle import throttle
@@ -4925,10 +4802,19 @@ class TestThrottleDocstrings:
         # after other processing, do a shutdown of the throttle
         func3.throttle.start_shutdown()
 
-        expected_result = "****************************************************************************\n"
-        expected_result += " :Example 7: Wrapping a function with the **@throttle** decorator for async \n"
+        expected_result = (
+            "***********************************************************"
+            "*****************\n"
+        )
+        expected_result += (
+            " :Example 7: Wrapping a function with the **@throttle**"
+            " decorator for async \n"
+        )
         expected_result += " with leaky bucket \n"
-        expected_result += "****************************************************************************\n"
+        expected_result += (
+            "**********************************************************"
+            "******************\n"
+        )
         expected_result += "request 0 sent at elapsed time: 0.0\n"
         expected_result += "request 1 sent at elapsed time: 0.0\n"
         expected_result += "request 2 sent at elapsed time: 0.0\n"
@@ -4972,7 +4858,8 @@ class TestThrottleDocstrings:
             "*******************************************************************\n"
         )
         expected_result += (
-            f"ThrottleSync(reqs_per_sec=0.5 bucket_size=1, throttle_mode=ThrottleMode.SYNC, "
+            f"ThrottleSync(reqs_per_sec=0.5 bucket_size=1, "
+            f"throttle_mode=ThrottleMode.SYNC, "
             f"async_q_size=None, name={id(request_throttle)})\n"
         )
 
@@ -5009,9 +4896,18 @@ class TestThrottleDocstrings:
 
         request_throttle.start_shutdown()
 
-        expected_result = "***************************************************************************\n"
-        expected_result += " :Example 9: instantiate an asynchronous throttle for 1 request per second \n"
-        expected_result += "***************************************************************************\n"
+        expected_result = (
+            "***********************************************************"
+            "****************\n"
+        )
+        expected_result += (
+            " :Example 9: instantiate an asynchronous throttle for 1"
+            " request per second \n"
+        )
+        expected_result += (
+            "**********************************************************"
+            "*****************\n"
+        )
         expected_result += "2\n"
 
         captured = capsys.readouterr().out
