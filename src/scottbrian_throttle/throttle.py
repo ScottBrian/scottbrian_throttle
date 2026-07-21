@@ -77,6 +77,7 @@ are complete.
 >>> async_throttle = Throttle(reqs_per_sec=2,
 ...                           throttle_mode=ThrottleMode.ASYNC)
 >>> def target_rtn2(request_number, time_of_start):
+...     time.sleep(0.01)
 ...     print(f'request {request_number} sent at elapsed time: '
 ...           f'{time.time() - time_of_start:0.1f}')
 >>> start_time = time.time()
@@ -168,15 +169,15 @@ request 9 sent at elapsed time: 4.5
 >>> from scottbrian_throttle.throttle import Throttle
 >>> import time
 >>> @throttle(reqs_per_sec=0.5, throttle_mode=ThrottleMode.ASYNC)
->>> def func2(request_number, time_of_start):
+... def func2(request_number, time_of_start):
+...     time.sleep(0.01)
 ...     print(f'request {request_number} sent at elapsed time: '
 ...           f'{time.time() - time_of_start:0.1f}')
 >>> start_time = time.time()
 >>> for i in range(10):
-...     func2(i, start_time)
->>> # do other processing since not waiting for return from throttle
->>> # after other processing, do a shutdown of the throttle
->>> func2.throttle.start_shutdown()
+...     _ = func2(i, start_time)
+...     if i == 9:
+...         time.sleep(20)
 request 0 sent at elapsed time: 0.0
 request 1 sent at elapsed time: 2.0
 request 2 sent at elapsed time: 4.0
@@ -188,34 +189,42 @@ request 7 sent at elapsed time: 14.0
 request 8 sent at elapsed time: 16.0
 request 9 sent at elapsed time: 18.0
 
+>>> time.sleep(6)
+>>> func2.throttle.start_shutdown()
+
 
 :Example 7: Wrapping a function with the **@throttle** decorator for
             async with leaky bucket
 
->>> from scottbrian_throttle.throttle import throttle
+>>> from scottbrian_throttle.throttle import (
+...    Throttle,
+...    throttle)
 >>> import time
->>> @throttle(reqs_per_sec=.75,
-...           bucket_size=5,
-...           throttle_mode=ThrottleMode.ASYNC)
->>> def func3(request_number, time_of_start):
+>>> @throttle(reqs_per_sec=2, throttle_mode=ThrottleMode.ASYNC)
+... def func3(request_number, time_of_start):
+...     time.sleep(0.01)
 ...     print(f'request {request_number} sent at elapsed time: '
 ...           f'{time.time() - time_of_start:0.1f}')
+...     return 0
+>>> time.sleep(1)
 >>> start_time = time.time()
 >>> for i in range(10):
-...     func3(i, start_time)
->>> # do other processing since not waiting for return from throttle
->>> # after other processing, do a shutdown of the throttle
->>> func3.throttle.start_shutdown()
+...     _ = func3(i, start_time)
+...     if i == 9:
+...         time.sleep(6)
 request 0 sent at elapsed time: 0.0
-request 1 sent at elapsed time: 0.0
-request 2 sent at elapsed time: 0.0
-request 3 sent at elapsed time: 0.0
-request 4 sent at elapsed time: 0.0
-request 5 sent at elapsed time: 1.3
-request 6 sent at elapsed time: 2.7
-request 7 sent at elapsed time: 4.0
-request 8 sent at elapsed time: 5.3
-request 9 sent at elapsed time: 6.7
+request 1 sent at elapsed time: 0.5
+request 2 sent at elapsed time: 1.0
+request 3 sent at elapsed time: 1.5
+request 4 sent at elapsed time: 2.0
+request 5 sent at elapsed time: 2.5
+request 6 sent at elapsed time: 3.0
+request 7 sent at elapsed time: 3.5
+request 8 sent at elapsed time: 4.0
+request 9 sent at elapsed time: 4.5
+
+>>> time.sleep(6)
+>>> func3.throttle.start_shutdown()
 
 """
 
@@ -451,7 +460,7 @@ class Throttle:
         # reqs_per_sec
         ################################################################
         self.logger = logging.getLogger(__name__)
-        if isinstance(reqs_per_sec, int | float) and (0 < reqs_per_sec):
+        if isinstance(reqs_per_sec, IntFloat) and (0 < reqs_per_sec):
             self.reqs_per_sec = reqs_per_sec
         else:
             error_msg = (
@@ -635,10 +644,7 @@ class Throttle:
         >>> from scottbrian_throttle.throttle import Throttle
         >>> request_throttle = Throttle(reqs_per_sec=0.5, name="t1")
         >>> repr(request_throttle)
-        'ThrottleSync(reqs_per_sec=0.5,
-                      bucket_size=1,
-                      throttle_mode=ThrottleMode.SYNC,
-                      async_q_size=0, name=t1)'
+        'Throttle(reqs_per_sec=0.5, bucket_size=1, throttle_mode=ThrottleMode.SYNC, async_q_size=0, name=t1)'
 
         """
         if TYPE_CHECKING:
@@ -820,7 +826,7 @@ class Throttle:
                 request_item = Throttle.Request(
                     func, args, kwargs, time.perf_counter_ns()
                 )
-                self.logger.debug(f"{request_item=}")
+                # self.logger.debug(f"send: {request_item=}")
                 # start_shutdown will set _throttle_shutdown_started to
                 # tell us to abandon our attempts to get a request on a
                 # full async_q so that we give up the lock to allow
@@ -977,6 +983,7 @@ class Throttle:
         while True:
             try:
                 request_item = self.async_q.get(block=True, timeout=1)
+                # self.logger.debug(f"sched 1: {request_item=}")
 
             except queue.Empty:
                 # Even though we just entered this except code because
@@ -993,9 +1000,9 @@ class Throttle:
             # errors.
             ############################################################
             self.perform_throttle()
+            # self.logger.debug(f"sched 2: {request_item=}")
             try:
                 request_item.request_func(*request_item.args, **request_item.kwargs)
-                # obtained_nowait=obtained_nowait)
             except Exception as e:
                 self.logger.debug(
                     f"throttle {self.t_name} schedule_requests unhandled exception in "
