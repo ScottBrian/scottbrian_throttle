@@ -228,14 +228,14 @@ request 9 sent at elapsed time: 4.5
 
 """
 
+########################################################################
+# Standard Library
+########################################################################
 import functools
 import logging
 import queue
 import threading
 import time
-########################################################################
-# Standard Library
-########################################################################
 from enum import Enum, auto
 from typing import (
     Any,
@@ -997,18 +997,20 @@ class Throttle:
             ############################################################
             # Call the request function.
             # We use try/except to log and re-raise any unhandled
-            # errors.
+            # errors. Note that a hard shutdown will cause the requests
+            # to be dequeued and tossed
             ############################################################
-            self.perform_throttle()
-            # self.logger.debug(f"sched 2: {request_item=}")
-            try:
-                request_item.request_func(*request_item.args, **request_item.kwargs)
-            except Exception as e:
-                self.logger.debug(
-                    f"throttle {self.t_name} schedule_requests unhandled exception in "
-                    f"request: {e}"
-                )
-                raise
+            if self.throttle_state != Throttle._HARD_SHUTDOWN_STARTED:
+                self.perform_throttle()
+                # self.logger.debug(f"sched 2: {request_item=}")
+                try:
+                    request_item.request_func(*request_item.args, **request_item.kwargs)
+                except Exception as e:
+                    self.logger.debug(
+                        f"throttle {self.t_name} schedule_requests unhandled exception in "
+                        f"request: {e}"
+                    )
+                    raise
 
     ####################################################################
     # start_shutdown
