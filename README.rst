@@ -67,8 +67,8 @@ by 1/2 second as seen in the output messages.
 ...     print(f'request {request_number} sent at elapsed time: '
 ...           f'{time.time() - time_of_start:0.1f}')
 >>> start_time = time.time()
->>> for i in range(10):
-...     make_request(i, start_time)
+>>> for idx in range(10):
+...     make_request(idx, start_time)
 request 0 sent at elapsed time: 0.0
 request 1 sent at elapsed time: 0.5
 request 2 sent at elapsed time: 1.0
@@ -91,8 +91,8 @@ in the make_request function and its arguments:
 ...           f'{time.time() - time_of_start:0.1f}')
 >>> a_throttle = Throttle(reqs_per_sec=2)
 >>> start_time = time.time()
->>> for i in range(10):
-...     a_throttle.send_request(make_request, i, start_time)
+>>> for idx in range(10):
+...     a_throttle.send_request(make_request, idx, start_time)
 request 0 sent at elapsed time: 0.0
 request 1 sent at elapsed time: 0.5
 request 2 sent at elapsed time: 1.0

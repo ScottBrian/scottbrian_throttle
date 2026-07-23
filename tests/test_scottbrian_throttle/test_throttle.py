@@ -4566,8 +4566,8 @@ class TestThrottleDocstrings:
         pauser.pause(3)
 
         start_time = time.time()
-        for i in range(10):
-            ret_val = throttle.send_request(target_rtn1, i, start_time)
+        for idx in range(10):
+            ret_val = throttle.send_request(target_rtn1, idx, start_time)
             print(ret_val)
 
         flower_str = ("*" * (len(hdr_str) + 4)) + "\n"
@@ -4617,8 +4617,8 @@ class TestThrottleDocstrings:
             )
 
         start_time = time.time()
-        for i in range(10):
-            async_throttle.send_request(target_rtn2, i, start_time)
+        for idx in range(10):
+            async_throttle.send_request(target_rtn2, idx, start_time)
         # do other processing since not waiting for return from throttle
         # after other processing, do a shutdown of the throttle
         async_throttle.start_shutdown()
@@ -4638,8 +4638,6 @@ class TestThrottleDocstrings:
         expected_result += "request 7 sent at elapsed time: 3.5\n"
         expected_result += "request 8 sent at elapsed time: 4.0\n"
         expected_result += "request 9 sent at elapsed time: 4.5\n"
-
-        # sys.stdout.flush()
 
         # captured = capsys.readouterr().out
         captured = capfd.readouterr().out
@@ -4674,8 +4672,8 @@ class TestThrottleDocstrings:
             )
 
         start_time = time.time()
-        for i in range(10):
-            lb_throttle.send_request(target_rtn3, i, start_time)
+        for idx in range(10):
+            lb_throttle.send_request(target_rtn3, idx, start_time)
 
         flower_str = ("*" * (len(hdr_str) + 4)) + "\n"
 
@@ -4721,8 +4719,8 @@ class TestThrottleDocstrings:
             )
 
         start_time = time.time()
-        for i in range(10):
-            func1(i, start_time)
+        for idx in range(10):
+            func1(idx, start_time)
 
         flower_str = ("*" * (len(hdr_str) + 4)) + "\n"
 
@@ -4789,8 +4787,8 @@ class TestThrottleDocstrings:
             )
 
         start_time = time.time()
-        for i in range(10):
-            func2(i, start_time)
+        for idx in range(10):
+            func2(idx, start_time)
         func2.throttle.start_shutdown()
 
         flower_str = ("*" * (len(hdr_str) + 4)) + "\n"
@@ -4841,8 +4839,8 @@ class TestThrottleDocstrings:
             )
 
         start_time = time.time()
-        for i in range(10):
-            func3(i, start_time)
+        for idx in range(10):
+            func3(idx, start_time)
         # do other processing since not waiting for return from throttle
         # after other processing, do a shutdown of the throttle
         func3.throttle.start_shutdown()
@@ -4963,8 +4961,8 @@ class TestThrottleDocstrings:
             )
 
         start_time = time.time()
-        for i in range(10):
-            make_request(i, start_time)
+        for idx in range(10):
+            make_request(idx, start_time)
 
         flower_str = ("*" * (len(hdr_str) + 4)) + "\n"
 
@@ -5011,8 +5009,8 @@ class TestThrottleDocstrings:
 
         a_throttle = Throttle(reqs_per_sec=2)
         start_time = time.time()
-        for i in range(10):
-            a_throttle.send_request(make_request, i, start_time)
+        for idx in range(10):
+            a_throttle.send_request(make_request, idx, start_time)
 
         flower_str = ("*" * (len(hdr_str) + 4)) + "\n"
 
