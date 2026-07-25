@@ -36,7 +36,7 @@ from typing_extensions import TypeAlias
 from scottbrian_throttle.throttle import (
     Throttle,
     throttle,
-    FuncWithThrottleAttr,
+    _FuncWithThrottleAttr,
     IncorrectReqsPerSecSpecified,
     IncorrectAsyncQSizeSpecified,
     IncorrectBucketSizeSpecified,
@@ -3919,7 +3919,7 @@ class TestThrottleShutdown:
                 assert ret_code is True
 
         funcs_shutdown_complete_msg_added: list[
-            FuncWithThrottleAttr[Callable[..., Any]]
+            _FuncWithThrottleAttr[Callable[..., Any]]
         ] = []
         for func in funcs_to_shutdown:
             if func.throttle.shutdown_elapsed_time == 0.0:

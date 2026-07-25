@@ -7,7 +7,7 @@ Throttle
 The throttle allows you to limit the rate at which a function is
 called. An internet service, for example, might have a limit for the
 number of requests you can send in a given interval - using the
-throttle will help adhere to that limit.
+throttle will help you adhere to that limit.
 
 The throttle can be used as a class or as a decorator. You specify the
 number of requests that can be sent per second with the *reqs_per_sec*
@@ -46,7 +46,7 @@ control to the throttle. The throttle returns control to the caller of
         return ret_value
     start_time = time.time()
     for idx in range(10):
-        ret_val = throttle.send_request(target_rtn1, idx, start_time)
+        ret_val = a_throttle.send_request(target_rtn1, idx, start_time)
         print(ret_val)
 
 
@@ -358,7 +358,7 @@ class ThrottleMode(Enum):
 # ShutdownType
 ########################################################################
 class ThrottleShutdownType(Enum):
-    """ThrottleShutdownType types."""
+    """ThrottleShutdownType is SOFT or HARD."""
 
     SOFT = auto()
     HARD = auto()
@@ -657,7 +657,7 @@ class Throttle:
                 maxsize=self.async_q_size
             )
             self.request_scheduler_thread: threading.Thread = threading.Thread(
-                target=self.schedule_requests
+                target=self._schedule_requests
             )
             self.request_scheduler_thread.start()
 
@@ -889,7 +889,7 @@ class Throttle:
             # SYNC mode
             ############################################################
             with self.sync_lock:
-                self.perform_throttle()
+                self._perform_throttle()
 
                 ########################################################
                 # Call the request function and return with the request
@@ -908,7 +908,7 @@ class Throttle:
     ####################################################################
     # perform_throttle
     ####################################################################
-    def perform_throttle(self) -> None:
+    def _perform_throttle(self) -> None:
         """Calculate next target time and wait if needed."""
 
         ################################################################
@@ -1010,7 +1010,7 @@ class Throttle:
     ####################################################################
     # schedule_requests
     ####################################################################
-    def schedule_requests(self) -> None:
+    def _schedule_requests(self) -> None:
         """Get tasks from queue and run them.
 
         Raises:
@@ -1047,7 +1047,7 @@ class Throttle:
             # to be dequeued and tossed
             ############################################################
             if self.throttle_state != Throttle._HARD_SHUTDOWN_STARTED:
-                self.perform_throttle()
+                self._perform_throttle()
                 # self.logger.debug(f"sched 2: {request_item=}")
                 try:
                     request_item.request_func(*request_item.args, **request_item.kwargs)
@@ -1279,16 +1279,16 @@ F = TypeVar("F", bound=Callable[..., Any])
 
 
 ########################################################################
-# FuncWithThrottleAttr class
+# _FuncWithThrottleAttr class
 ########################################################################
-class FuncWithThrottleAttr(Protocol[F]):
+class _FuncWithThrottleAttr(Protocol[F]):
     """Class to allow type checking on function with attribute."""
 
     throttle: Throttle
     __call__: F
 
 
-def add_throttle_attr(func: F) -> FuncWithThrottleAttr[F]:
+def _add_throttle_attr(func: F) -> _FuncWithThrottleAttr[F]:
     """Wrapper to add throttle attribute to function.
 
     Args:
@@ -1298,7 +1298,7 @@ def add_throttle_attr(func: F) -> FuncWithThrottleAttr[F]:
         input function with throttle attached as attribute
 
     """
-    return cast(FuncWithThrottleAttr[F], func)
+    return cast(_FuncWithThrottleAttr[F], func)
 
 
 ########################################################################
@@ -1306,14 +1306,14 @@ def add_throttle_attr(func: F) -> FuncWithThrottleAttr[F]:
 ########################################################################
 @overload
 def throttle(
-    wrapped: F,
+    _wrapped: F,
     *,
     reqs_per_sec: IntFloat,
     bucket_size: IntFloat = 1,
     throttle_mode: ThrottleMode = ThrottleMode.SYNC,
     async_q_size: Optional[int] = None,
     name: Optional[str] = None,
-) -> FuncWithThrottleAttr[F]:
+) -> _FuncWithThrottleAttr[F]:
     pass
 
 
@@ -1325,33 +1325,25 @@ def throttle(
     throttle_mode: ThrottleMode = ThrottleMode.SYNC,
     async_q_size: Optional[int] = None,
     name: Optional[str] = None,
-) -> Callable[[F], FuncWithThrottleAttr[F]]:
+) -> Callable[[F], _FuncWithThrottleAttr[F]]:
     pass
 
 
 def throttle(
-    wrapped: Optional[F] = None,
+    _wrapped: Optional[F] = None,
     *,
     reqs_per_sec: IntFloat,
     bucket_size: IntFloat = 1,
     throttle_mode: ThrottleMode = ThrottleMode.SYNC,
     async_q_size: Optional[int] = None,
     name: Optional[str] = None,
-) -> Union[F, FuncWithThrottleAttr[F]]:
-    """Decorator to wrap a function in a sync throttle.
+) -> Union[F, _FuncWithThrottleAttr[F]]:
+    """Decorator to wrap a function in a throttle.
 
-    The throttle wraps code around a function that is typically used to
-    issue requests to an online service. Some services state a limit as
-    to how many requests can be made per some time interval (e.g., 3
-    requests per second). The throttle code ensures that the limit is
-    not exceeded.
+    The throttle wraps code around a function to limit the rate that it
+    can be called.
 
     Args:
-        wrapped: Any callable function that accepts optional positional
-                   and/or optional keyword arguments, and optionally
-                   returns a value. The default is None, which will be
-                   the case when the pie decorator version is used with
-                   any of the following arguments specified.
         reqs_per_sec: The number of requests that can be made in
                       one second.
         bucket_size: Specifies the number of requests that can be
@@ -1386,15 +1378,15 @@ def throttle(
         A callable function that delays the request as needed in
         accordance with the specified limits.
 
-    :Example 10: wrap a function with a sync throttle for 1 request
+    :Example 10: wrap a function with a throttle for 1 request
                   per second
 
     .. code-block:: python
 
-    >>> from scottbrian_throttle.throttle import throttle
-    >>> @throttle(reqs_per_sec=1)
-    ... def f1() -> None:
-    ...     print('example 1 request function')
+        from scottbrian_throttle.throttle import throttle
+        @throttle(reqs_per_sec=1)
+        def f1() -> None:
+            print('example 1 request function')
 
 
     """
@@ -1435,9 +1427,9 @@ def throttle(
     #     ensure introspection will work as expected.
     # ==================================================================
 
-    if wrapped is None:
+    if _wrapped is None:
         return cast(
-            FuncWithThrottleAttr[F],
+            _FuncWithThrottleAttr[F],
             functools.partial(
                 throttle,
                 reqs_per_sec=reqs_per_sec,
@@ -1449,7 +1441,7 @@ def throttle(
         )
 
     if name is None:
-        name = wrapped.__name__
+        name = _wrapped.__name__
     a_throttle = Throttle(
         reqs_per_sec=reqs_per_sec,
         bucket_size=bucket_size,
@@ -1468,19 +1460,19 @@ def throttle(
 
         return a_throttle.send_request(func_to_wrap, *args, **kwargs2)
 
-    wrapper = wrapper(wrapped)
+    wrapper = wrapper(_wrapped)
 
-    wrapper = add_throttle_attr(wrapper)
+    wrapper = _add_throttle_attr(wrapper)
     wrapper.throttle = a_throttle
 
-    return cast(FuncWithThrottleAttr[F], wrapper)
+    return cast(_FuncWithThrottleAttr[F], wrapper)
 
 
 ########################################################################
 # shutdown_throttle_funcs
 ########################################################################
 def shutdown_throttle_funcs(
-    *args: FuncWithThrottleAttr[Callable[..., Any]],
+    *args: _FuncWithThrottleAttr[Callable[..., Any]],
     shutdown_type: ThrottleShutdownType = ThrottleShutdownType.SOFT,
     timeout: OptIntFloat = None,
 ) -> bool:

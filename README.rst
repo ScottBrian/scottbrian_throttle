@@ -9,41 +9,250 @@ Intro
 The throttle allows you to limit the rate at which a function is
 called. An internet service, for example, might have a limit for the
 number of requests you can send in a given interval - using the
-throttle will help adhere to that limit.
+throttle will help you stay within that limit.
 
 The throttle can be used as a class or as a decorator, can be
 synchronous or asynchronous, and can be optionally configured for a
 leaky bucket implementation.
 
+As a class: when you instantiate a throttle, you specify
+*reqs_per_sec* to establish the limit. You then call method
+*send_request* with the name of the function that is to be limited
+along with any args or kwargs that it needs. The *send_request* method
+keeps track of the intervals between calls and will sleep as needed to
+ensure the limit is not exceeded.
 
-1. Synchronous limiting with strict rate limiting:
-       For synchronous throttling, you specify *reqs_per_sec* which determines the send rate limit.
-       The throttle keeps track of the intervals between each request and will block only as needed
-       to ensure the send rate limit is not exceeded. This algorithm provides a strict adherence to the
-       send rate limit for those cases that need it.
+:Example 1: Instantiate a throttle and send some requests:
 
-1. Synchronous limiting with the leaky bucket algorithm:
-       For synchronous throttling with the leaky bucket algorithm, you specify a *bucket_size* value
-       greater than 1. This is the number of requests that will fit into a conceptual bucket.
-       You also specify the *reqs_per_sec* which determines the send rate limit. As each request is received,
-       if it fits, it is placed into the bucket and is sent. The bucket leaks at a fixed rate that reflects
-       the send rate limit such that each new request will fit given it does not exceed the send rate limit.
-       If the bucket becomes full, the next request will be delayed until the bucket has leaked enough to hold it,
-       at which time it will be sent. The leaky bucket algorithm results in an average send rate that is slightly
-       faster than the send rate limit. This algorithm is best used when you have an occasional burst of requests
-       that the target service will tolerate, with the limiting kicking in if more request continue to be sent
-       immediately following the burst.
+.. code-block:: python
 
-2. Asynchronous limiting:
-       With asynchronous throttling, you specify *throttle_mode=ThrottleMode.ASYNC*. The *reqs_per_sec*
-       is specified for the send rate limit. The *bucket_size* can be 1 for normal rate limiting or greater
-       than 1 for the leaky bucket algorithm. As each request is received, it is placed on a queue and
-       control returns to the caller. A separate request schedular thread pulls the requests from the
-       queue and sends them in as described above, either at a strict rate limit, or by using the leaky bucket
-       algorithm. You may also specify an *async_q_size* to set the number of requests that can build
-       up on the queue before the caller is blocked while trying to add requests. When you are done, you need to
-       perform a shutdown of the throttle when your program ends to ensure that the request schedular thread is
-       properly ended.
+    from scottbrian_throttle.throttle import Throttle
+    import time
+    throttle_1 = Throttle(reqs_per_sec=2)
+    def target_rtn1(request_number, time_of_start):
+        ret_value = (f'request {request_number} sent at elapsed time: '
+                     f'{time.time() - time_of_start:0.1f}')
+        return ret_value
+    start_time = time.time()
+    for idx in range(10):
+        ret_val = throttle_1.send_request(target_rtn1, idx, start_time)
+        print(ret_val)
+
+
+Expected output for Example 1::
+
+    request 0 sent at elapsed time: 0.0
+    request 1 sent at elapsed time: 0.5
+    request 2 sent at elapsed time: 1.0
+    request 3 sent at elapsed time: 1.5
+    request 4 sent at elapsed time: 2.0
+    request 5 sent at elapsed time: 2.5
+    request 6 sent at elapsed time: 3.0
+    request 7 sent at elapsed time: 3.5
+    request 8 sent at elapsed time: 4.0
+    request 9 sent at elapsed time: 4.5
+
+
+As a decorator: you place the decorator above the function that needs
+to be limited and specify the *reqs_per_sec*. When you call the
+function, the throttle keeps track of the intervals between calls and
+will sleep as needed to ensure the limit is not exceeded.
+
+:Example 2: Decorate a function with the throttle and call it a few
+            times:
+
+.. code-block:: python
+
+    from scottbrian_throttle.throttle import Throttle
+    import time
+    @throttle(reqs_per_sec=2)
+    def target_rtn2(request_number, time_of_start):
+        ret_value = (f'request {request_number} sent at elapsed time: '
+                     f'{time.time() - time_of_start:0.1f}')
+        return ret_value
+    start_time = time.time()
+    for idx in range(10):
+        ret_val = target_rtn2(idx, start_time)
+        print(ret_val)
+
+
+Expected output for Example 2::
+
+    request 0 sent at elapsed time: 0.0
+    request 1 sent at elapsed time: 0.5
+    request 2 sent at elapsed time: 1.0
+    request 3 sent at elapsed time: 1.5
+    request 4 sent at elapsed time: 2.0
+    request 5 sent at elapsed time: 2.5
+    request 6 sent at elapsed time: 3.0
+    request 7 sent at elapsed time: 3.5
+    request 8 sent at elapsed time: 4.0
+    request 9 sent at elapsed time: 4.5
+
+
+In the above examples, the throttle was used in synchronous mode, the
+default. With synchronous mode, the throttle returns control to the
+caller after the target function is called and returns. This means the
+caller is delayed by the throttling and the execution of the target
+function. Note also that the target function can return a value which
+the throttle will return to the caller.
+
+For an asynchronous throttle, you specify
+*throttle_mode=ThrottleMode.ASYNC*. With asynchronous mode, when you
+call *send_request* or call the decorated target function, the throttle
+will queue the request and return control immediately. A separate
+thread will take care of calling the target function and applying the
+throttling. Note that the target function will not be able to pass back
+a return value with asynchronous mode - you will need to devise some
+protocol if that is needed. Also, when it is time to end the
+application, you will need to call *start_shutdown* to cause the
+throttle to end the asynchronous thread.
+
+:Example 3: Instantiate an asynchronous throttle and send some requests:
+
+.. code-block:: python
+
+    from scottbrian_throttle.throttle import Throttle
+    import time
+    throttle_3 = Throttle(reqs_per_sec=2,
+                          throttle_mode=ThrottleMode.ASYNC)
+    def target_rtn3(request_number, time_of_start):
+        print(f'request {request_number} sent at elapsed time: '
+              f'{time.time() - time_of_start:0.1f}')
+    start_time = time.time()
+    for idx in range(10):
+        throttle_3.send_request(target_rtn3, idx, start_time)
+    throttle_3.start_shutdown()
+
+
+Expected output for Example 3::
+
+    request 0 sent at elapsed time: 0.0
+    request 1 sent at elapsed time: 0.5
+    request 2 sent at elapsed time: 1.0
+    request 3 sent at elapsed time: 1.5
+    request 4 sent at elapsed time: 2.0
+    request 5 sent at elapsed time: 2.5
+    request 6 sent at elapsed time: 3.0
+    request 7 sent at elapsed time: 3.5
+    request 8 sent at elapsed time: 4.0
+    request 9 sent at elapsed time: 4.5
+
+
+Note that the decorated function will have the throttle attached to it
+as an attribute to allow you to call *start_shutdown* as shown in the
+following example.
+
+:Example 4: Decorate a function with an asynchronous throttle and call
+            it a few times:
+
+.. code-block:: python
+
+    from scottbrian_throttle.throttle import Throttle
+    import time
+    @throttle(reqs_per_sec=2, throttle_mode=ThrottleMode.ASYNC)
+    def target_rtn4(request_number, time_of_start):
+        print(f'request {request_number} sent at elapsed time: '
+              f'{time.time() - time_of_start:0.1f}')
+    start_time = time.time()
+    for idx in range(10):
+        target_rtn4(idx, start_time)
+    target_rtn4.start_shutdown()
+
+
+Expected output for Example 4::
+
+    request 0 sent at elapsed time: 0.0
+    request 1 sent at elapsed time: 0.5
+    request 2 sent at elapsed time: 1.0
+    request 3 sent at elapsed time: 1.5
+    request 4 sent at elapsed time: 2.0
+    request 5 sent at elapsed time: 2.5
+    request 6 sent at elapsed time: 3.0
+    request 7 sent at elapsed time: 3.5
+    request 8 sent at elapsed time: 4.0
+    request 9 sent at elapsed time: 4.5
+
+
+You can also specify a *bucket_size* argument greater than 1 to
+configure the throttle in a leaky bucket configuration. The bucket is a
+conceptual mechanism where requests are placed. The bucket has a hole
+in the bottom and leaks out at the rate limit specified by
+the *reqs_per_sec* argument. The idea is that the *bucket_size* specifies
+how many requests will fit into the bucket. When *send_request* is
+called, or when the decorated function is called, the throttle will
+see if the new request will fit into the bucket. If not, the request is
+delayed until the bucket leaks out enough to fit the new request. Once
+placed into the bucket, the request is sent on its way. This allows some
+number of initial requests to be sent immediately until the bucket is
+filled up, at which point the throttle kicks in like a shock absorber to
+start delaying the requests.The leaky bucket algorithm results in an
+average send rate that is slightly faster than the send rate limit. This
+algorithm is best used when you have an occasional burst of requests
+that the target service will tolerate, with the limiting kicking in if
+more request continue to be sent immediately following the burst.
+
+:Example 5: Instantiate a leaky bucket throttle and send some requests:
+
+.. code-block:: python
+
+    from scottbrian_throttle.throttle import Throttle
+    import time
+    throttle_5 = Throttle(reqs_per_sec=2, bucket_size=3)
+    def target_rtn5(request_number, time_of_start):
+        print(f'request {request_number} sent at elapsed time: '
+              f'{time.time() - time_of_start:0.1f}')
+    start_time = time.time()
+    for idx in range(10):
+        throttle_5.send_request(target_rtn4, idx, start_time)
+
+
+Expected output for Example 5::
+
+    request 0 sent at elapsed time: 0.0
+    request 1 sent at elapsed time: 0.0
+    request 2 sent at elapsed time: 0.0
+    request 3 sent at elapsed time: 0.5
+    request 4 sent at elapsed time: 1.0
+    request 5 sent at elapsed time: 1.5
+    request 6 sent at elapsed time: 2.0
+    request 7 sent at elapsed time: 2.5
+    request 8 sent at elapsed time: 3.0
+    request 9 sent at elapsed time: 3.5
+
+
+Note that the decorated function will have the throttle attached to it
+as an attribute to allow you to call *start_shutdown* as shown in the
+following example.
+
+:Example 6: Decorate a function with a leaky bucket throttle and call
+            it a few times:
+
+.. code-block:: python
+
+    from scottbrian_throttle.throttle import Throttle
+    import time
+    @throttle(reqs_per_sec=2, bucket_size=3)
+    def target_rtn6(request_number, time_of_start):
+        print(f'request {request_number} sent at elapsed time: '
+              f'{time.time() - time_of_start:0.1f}')
+    start_time = time.time()
+    for idx in range(10):
+        target_rtn6(idx, start_time)
+
+
+Expected output for Example 6::
+
+    request 0 sent at elapsed time: 0.0
+    request 1 sent at elapsed time: 0.0
+    request 2 sent at elapsed time: 0.0
+    request 3 sent at elapsed time: 0.5
+    request 4 sent at elapsed time: 1.0
+    request 5 sent at elapsed time: 1.5
+    request 6 sent at elapsed time: 2.0
+    request 7 sent at elapsed time: 2.5
+    request 8 sent at elapsed time: 3.0
+    request 9 sent at elapsed time: 3.5
 
 
 Examples
