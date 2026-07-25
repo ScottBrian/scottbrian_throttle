@@ -4934,22 +4934,25 @@ class TestThrottleDocstrings:
 
         """
 
-        hdr_str = ":README example 1:"
+        hdr_str = ":Example 1: Instantiate a throttle and send some requests:"
         flowers(hdr_str)
 
-        from scottbrian_throttle.throttle import throttle
+        from scottbrian_throttle.throttle import Throttle
         import time
 
-        @throttle(reqs_per_sec=2)
-        def make_request(request_number: int, time_of_start: float) -> None:
-            print(
+        throttle_1 = Throttle(reqs_per_sec=2)
+
+        def target_rtn1(request_number, time_of_start):
+            ret_value = (
                 f"request {request_number} sent at elapsed time: "
                 f"{time.time() - time_of_start:0.1f}"
             )
+            return ret_value
 
         start_time = time.time()
         for idx in range(10):
-            make_request(idx, start_time)
+            ret_val = throttle_1.send_request(target_rtn1, idx, start_time)
+            print(ret_val)
 
         flower_str = ("*" * (len(hdr_str) + 4)) + "\n"
 
@@ -4982,22 +4985,26 @@ class TestThrottleDocstrings:
 
         """
 
-        hdr_str = ":README example 2:"
+        hdr_str = (
+            ":Example 2: Decorate a function with the throttle and call it a "
+            "few times:"
+        )
         flowers(hdr_str)
 
-        from scottbrian_throttle.throttle import Throttle
         import time
 
-        def make_request(request_number: int, time_of_start: float) -> None:
-            print(
+        @throttle(reqs_per_sec=2)
+        def target_rtn2(request_number, time_of_start):
+            ret_value = (
                 f"request {request_number} sent at elapsed time: "
                 f"{time.time() - time_of_start:0.1f}"
             )
+            return ret_value
 
-        a_throttle = Throttle(reqs_per_sec=2)
         start_time = time.time()
         for idx in range(10):
-            a_throttle.send_request(make_request, idx, start_time)
+            ret_val = target_rtn2(idx, start_time)
+            print(ret_val)
 
         flower_str = ("*" * (len(hdr_str) + 4)) + "\n"
 
@@ -5014,6 +5021,213 @@ class TestThrottleDocstrings:
         expected_result += "request 7 sent at elapsed time: 3.5\n"
         expected_result += "request 8 sent at elapsed time: 4.0\n"
         expected_result += "request 9 sent at elapsed time: 4.5\n"
+
+        captured = capsys.readouterr().out
+
+        assert captured == expected_result
+
+    ####################################################################
+    # test_throttle_readme_example_3
+    ####################################################################
+    def test_throttle_readme_example_3(self, capsys: Any) -> None:
+        """Method test_throttle_readme_example_3.
+
+        Args:
+            capsys: pytest fixture to capture print output
+
+        """
+
+        hdr_str = (
+            ":Example 3: Instantiate an asynchronous throttle and send some "
+            "requests:"
+        )
+
+        flowers(hdr_str)
+
+        from scottbrian_throttle.throttle import Throttle
+        import time
+
+        throttle_3 = Throttle(reqs_per_sec=2, throttle_mode=ThrottleMode.ASYNC)
+
+        def target_rtn3(request_number, time_of_start):
+            print(
+                f"request {request_number} sent at elapsed time: "
+                f"{time.time() - time_of_start:0.1f}"
+            )
+
+        start_time = time.time()
+        for idx in range(10):
+            throttle_3.send_request(target_rtn3, idx, start_time)
+        throttle_3.start_shutdown()
+
+        flower_str = ("*" * (len(hdr_str) + 4)) + "\n"
+
+        expected_result = "\n" + flower_str
+        expected_result += f"* {hdr_str} *\n"
+        expected_result += flower_str
+        expected_result += "request 0 sent at elapsed time: 0.0\n"
+        expected_result += "request 1 sent at elapsed time: 0.5\n"
+        expected_result += "request 2 sent at elapsed time: 1.0\n"
+        expected_result += "request 3 sent at elapsed time: 1.5\n"
+        expected_result += "request 4 sent at elapsed time: 2.0\n"
+        expected_result += "request 5 sent at elapsed time: 2.5\n"
+        expected_result += "request 6 sent at elapsed time: 3.0\n"
+        expected_result += "request 7 sent at elapsed time: 3.5\n"
+        expected_result += "request 8 sent at elapsed time: 4.0\n"
+        expected_result += "request 9 sent at elapsed time: 4.5\n"
+
+        captured = capsys.readouterr().out
+
+        assert captured == expected_result
+
+    ####################################################################
+    # test_throttle_readme_example_4
+    ####################################################################
+    def test_throttle_readme_example_4(self, capsys: Any) -> None:
+        """Method test_throttle_readme_example_4.
+
+        Args:
+            capsys: pytest fixture to capture print output
+
+        """
+
+        hdr_str = (
+            ":Example 4: Decorate a function with an asynchronous throttle and "
+            "call it a few times:"
+        )
+
+        flowers(hdr_str)
+
+        import time
+
+        @throttle(reqs_per_sec=2, throttle_mode=ThrottleMode.ASYNC)
+        def target_rtn4(request_number, time_of_start):
+            print(
+                f"request {request_number} sent at elapsed time: "
+                f"{time.time() - time_of_start:0.1f}"
+            )
+
+        start_time = time.time()
+        for idx in range(10):
+            target_rtn4(idx, start_time)
+        target_rtn4.throttle.start_shutdown()
+
+        flower_str = ("*" * (len(hdr_str) + 4)) + "\n"
+
+        expected_result = "\n" + flower_str
+        expected_result += f"* {hdr_str} *\n"
+        expected_result += flower_str
+        expected_result += "request 0 sent at elapsed time: 0.0\n"
+        expected_result += "request 1 sent at elapsed time: 0.5\n"
+        expected_result += "request 2 sent at elapsed time: 1.0\n"
+        expected_result += "request 3 sent at elapsed time: 1.5\n"
+        expected_result += "request 4 sent at elapsed time: 2.0\n"
+        expected_result += "request 5 sent at elapsed time: 2.5\n"
+        expected_result += "request 6 sent at elapsed time: 3.0\n"
+        expected_result += "request 7 sent at elapsed time: 3.5\n"
+        expected_result += "request 8 sent at elapsed time: 4.0\n"
+        expected_result += "request 9 sent at elapsed time: 4.5\n"
+
+        captured = capsys.readouterr().out
+
+        assert captured == expected_result
+
+    ####################################################################
+    # test_throttle_readme_example_5
+    ####################################################################
+    def test_throttle_readme_example_5(self, capsys: Any) -> None:
+        """Method test_throttle_readme_example_5.
+
+        Args:
+            capsys: pytest fixture to capture print output
+
+        """
+
+        hdr_str = (
+            ":Example 5: Instantiate a leaky bucket throttle and send some " "requests:"
+        )
+        flowers(hdr_str)
+
+        from scottbrian_throttle.throttle import Throttle
+        import time
+
+        throttle_5 = Throttle(reqs_per_sec=2, bucket_size=3)
+
+        def target_rtn5(request_number, time_of_start):
+            print(
+                f"request {request_number} sent at elapsed time: "
+                f"{time.time() - time_of_start:0.1f}"
+            )
+
+        start_time = time.time()
+        for idx in range(10):
+            throttle_5.send_request(target_rtn5, idx, start_time)
+
+        flower_str = ("*" * (len(hdr_str) + 4)) + "\n"
+
+        expected_result = "\n" + flower_str
+        expected_result += f"* {hdr_str} *\n"
+        expected_result += flower_str
+        expected_result += "request 0 sent at elapsed time: 0.0\n"
+        expected_result += "request 1 sent at elapsed time: 0.0\n"
+        expected_result += "request 2 sent at elapsed time: 0.0\n"
+        expected_result += "request 3 sent at elapsed time: 0.5\n"
+        expected_result += "request 4 sent at elapsed time: 1.0\n"
+        expected_result += "request 5 sent at elapsed time: 1.5\n"
+        expected_result += "request 6 sent at elapsed time: 2.0\n"
+        expected_result += "request 7 sent at elapsed time: 2.5\n"
+        expected_result += "request 8 sent at elapsed time: 3.0\n"
+        expected_result += "request 9 sent at elapsed time: 3.5\n"
+
+        captured = capsys.readouterr().out
+
+        assert captured == expected_result
+
+    ####################################################################
+    # test_throttle_readme_example_6
+    ####################################################################
+    def test_throttle_readme_example_6(self, capsys: Any) -> None:
+        """Method test_throttle_readme_example_6.
+
+        Args:
+            capsys: pytest fixture to capture print output
+
+        """
+
+        hdr_str = (
+            ":Example 6: Decorate a function with a leaky bucket throttle and call "
+            "it a few times:"
+        )
+        flowers(hdr_str)
+
+        import time
+
+        @throttle(reqs_per_sec=2, bucket_size=3)
+        def target_rtn6(request_number, time_of_start):
+            print(
+                f"request {request_number} sent at elapsed time: "
+                f"{time.time() - time_of_start:0.1f}"
+            )
+
+        start_time = time.time()
+        for idx in range(10):
+            target_rtn6(idx, start_time)
+
+        flower_str = ("*" * (len(hdr_str) + 4)) + "\n"
+
+        expected_result = "\n" + flower_str
+        expected_result += f"* {hdr_str} *\n"
+        expected_result += flower_str
+        expected_result += "request 0 sent at elapsed time: 0.0\n"
+        expected_result += "request 1 sent at elapsed time: 0.0\n"
+        expected_result += "request 2 sent at elapsed time: 0.0\n"
+        expected_result += "request 3 sent at elapsed time: 0.5\n"
+        expected_result += "request 4 sent at elapsed time: 1.0\n"
+        expected_result += "request 5 sent at elapsed time: 1.5\n"
+        expected_result += "request 6 sent at elapsed time: 2.0\n"
+        expected_result += "request 7 sent at elapsed time: 2.5\n"
+        expected_result += "request 8 sent at elapsed time: 3.0\n"
+        expected_result += "request 9 sent at elapsed time: 3.5\n"
 
         captured = capsys.readouterr().out
 

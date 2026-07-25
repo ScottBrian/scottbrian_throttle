@@ -157,7 +157,7 @@ following example.
     start_time = time.time()
     for idx in range(10):
         target_rtn4(idx, start_time)
-    target_rtn4.start_shutdown()
+    target_rtn4.throttle.start_shutdown()
 
 
 Expected output for Example 4::
@@ -204,7 +204,7 @@ more request continue to be sent immediately following the burst.
               f'{time.time() - time_of_start:0.1f}')
     start_time = time.time()
     for idx in range(10):
-        throttle_5.send_request(target_rtn4, idx, start_time)
+        throttle_5.send_request(target_rtn5, idx, start_time)
 
 
 Expected output for Example 5::
@@ -221,9 +221,10 @@ Expected output for Example 5::
     request 9 sent at elapsed time: 3.5
 
 
-Note that the decorated function will have the throttle attached to it
-as an attribute to allow you to call *start_shutdown* as shown in the
-following example.
+As you can see, with *bucket_size=3*, the first three requests just
+filled the bucket and were immediately sent, while the remaining
+were each delayed to allow the bucket to leak just enough to fit each
+new request.
 
 :Example 6: Decorate a function with a leaky bucket throttle and call
             it a few times:
@@ -255,58 +256,22 @@ Expected output for Example 6::
     request 9 sent at elapsed time: 3.5
 
 
-Examples
-========
+The leaky_bucket can also be used with an asynchronous throttle if that
+is deemed useful.
 
-Here we are using the **@throttle** decorator to wrap a function that needs to be limited to no more
-than 2 requests per second. In the following code, make_request will be called 10 times in rapid succession. The
-**@throttle** keeps track of the time for each invocation and will insert a wait as needed to stay within the
-limit. The first execution of make_request will be done immediately while the remaining executions will each be delayed
-by 1/2 second as seen in the output messages.
+Some additional thoughts:
+You can specify *reqs_per_sec* as a float or int of any value. For
+example, *reqs_per_sec=0.5* will mean a limit of 1 request every 2
+seconds, or perhaps *reqs_per_sec=1.33* for a limit close to 1 request
+every 3/4 of a second. The rate interval is calculated as
+1/*reqs_per_sec*. You can obtain the interval by calling
+*get_interval_secs* or, in nanoseconds, *get_interval_ns*.
 
->>> from scottbrian_throttle.throttle import throttle
->>> import time
->>> @throttle(reqs_per_sec=2)
-... def make_request(request_number, time_of_start):
-...     print(f'request {request_number} sent at elapsed time: '
-...           f'{time.time() - time_of_start:0.1f}')
->>> start_time = time.time()
->>> for idx in range(10):
-...     make_request(idx, start_time)
-request 0 sent at elapsed time: 0.0
-request 1 sent at elapsed time: 0.5
-request 2 sent at elapsed time: 1.0
-request 3 sent at elapsed time: 1.5
-request 4 sent at elapsed time: 2.0
-request 5 sent at elapsed time: 2.5
-request 6 sent at elapsed time: 3.0
-request 7 sent at elapsed time: 3.5
-request 8 sent at elapsed time: 4.0
-request 9 sent at elapsed time: 4.5
-
-
-Here's the same example using the **Throttle** class. Note that the loop now calls send_request, passing
-in the make_request function and its arguments:
-
->>> from scottbrian_throttle.throttle import Throttle
->>> import time
->>> def make_request(request_number, time_of_start):
-...     print(f'request {request_number} sent at elapsed time: '
-...           f'{time.time() - time_of_start:0.1f}')
->>> a_throttle = Throttle(reqs_per_sec=2)
->>> start_time = time.time()
->>> for idx in range(10):
-...     a_throttle.send_request(make_request, idx, start_time)
-request 0 sent at elapsed time: 0.0
-request 1 sent at elapsed time: 0.5
-request 2 sent at elapsed time: 1.0
-request 3 sent at elapsed time: 1.5
-request 4 sent at elapsed time: 2.0
-request 5 sent at elapsed time: 2.5
-request 6 sent at elapsed time: 3.0
-request 7 sent at elapsed time: 3.5
-request 8 sent at elapsed time: 4.0
-request 9 sent at elapsed time: 4.5
+You can specify *bucket_size* as a float or int greater than 1. A
+*bucket_size=2.5*, for example, would mean that given 4 requests in
+rapid succession, the first 2 requests would be sent immediately, the
+third delayed for half an interval, and the fourth delayed for a full
+interval.
 
 
 .. image:: https://img.shields.io/badge/security-bandit-yellow.svg
