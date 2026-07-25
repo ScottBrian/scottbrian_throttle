@@ -6,19 +6,14 @@ Intro
 =====
 
 
-The throttle allows you to limit the rate at which a function is executed. This is helpful to avoid exceeding a limit,
-such as when sending requests to an internet service that specifies a limit as to the number of requests that can be
-sent in a specific time interval.
+The throttle allows you to limit the rate at which a function is
+called. An internet service, for example, might have a limit for the
+number of requests you can send in a given interval - using the
+throttle will help adhere to that limit.
 
-The throttle can be used as a class or as a decorator, and can also be synchronous or asynchronous. The req_per_sec
-specifies how many requests can be processed per second. The send_request method is used to call the routine that is
-being throttled. The throttle_mode specifies whether the each request is processed before returning to the caller
-of send_request (throttle_mode=ThrottleMode.SYNC), or each request is queued to processed by another thread
-(throttle_mode=ThrottleMode.ASYNC). The throttle also providees a leaky bucket implementation where some number of
-requests are allow to be sent immediately before the throttle kicks in. This is controlled with bucket_size which
-species the number of requests that can fit into a conceptual bucket before being limited. The bucket leaks as the
-request rate and will need to leak out at least one request before the neext request can be placed into the bucket and
-sent.
+The throttle can be used as a class or as a decorator, can be
+synchronous or asynchronous, and can be optionally configured for a
+leaky bucket implementation.
 
 
 1. Synchronous limiting with strict rate limiting:
@@ -27,7 +22,7 @@ sent.
        to ensure the send rate limit is not exceeded. This algorithm provides a strict adherence to the
        send rate limit for those cases that need it.
 
-1. Synchronous limiting with the leaky buckeet algorithm:
+1. Synchronous limiting with the leaky bucket algorithm:
        For synchronous throttling with the leaky bucket algorithm, you specify a *bucket_size* value
        greater than 1. This is the number of requests that will fit into a conceptual bucket.
        You also specify the *reqs_per_sec* which determines the send rate limit. As each request is received,
@@ -45,7 +40,7 @@ sent.
        than 1 for the leaky bucket algorithm. As each request is received, it is placed on a queue and
        control returns to the caller. A separate request schedular thread pulls the requests from the
        queue and sends them in as described above, either at a strict rate limit, or by using the leaky bucket
-       algorithm. You may also specify an *async_q_size* to set the the number of requests that can build
+       algorithm. You may also specify an *async_q_size* to set the number of requests that can build
        up on the queue before the caller is blocked while trying to add requests. When you are done, you need to
        perform a shutdown of the throttle when your program ends to ensure that the request schedular thread is
        properly ended.

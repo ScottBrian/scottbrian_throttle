@@ -5,17 +5,16 @@ Throttle
 ========
 
 The throttle allows you to limit the rate at which a function is
-executed. This is helpful to avoid exceeding a limit, such as when
-sending requests to an internet service that specifies a limit on the
-number of requests that can be sent per some time interval.
+called. An internet service, for example, might have a limit for the
+number of requests you can send in a given interval - using the
+throttle will help adhere to that limit.
 
-The throttle can be used as a class or as a decorator, and can also be
-synchronous or asynchronous.
+The throttle can be used as a class or as a decorator. You specify the
+number of requests that can be sent per second with the *reqs_per_sec*
+argument.
 
-When you instantiate the throttle as a class, you specify the number of
-requests that can be sent per second with the *reqs_per_sec* argument.
-This is used to calculate the request interval as 1/*reqs_per_sec*.
-Method *get_interval_secs* can be used to obtain the request interval.
+When instantiated from the Throttle class:
+==========================================
 
 :Example 1: instantiate a synchronous throttle at 2 requests per second:
 
@@ -23,13 +22,7 @@ Method *get_interval_secs* can be used to obtain the request interval.
 
     from scottbrian_throttle.throttle import Throttle
 
-    throttle = Throttle(reqs_per_sec=2)
-    print(f"{throttle.get_interval_secs()}")
-
-
-Expected output for Example 1::
-
-    0.5
+    a_throttle = Throttle(reqs_per_sec=2)
 
 
 To send a request through the throttle, call the *send_request* method
@@ -40,13 +33,13 @@ The throttle then calls the target routine, which runs and returns
 control to the throttle. The throttle returns control to the caller of
 *send_request*, passing back any return values from the target routine.
 
-:Example 2: send requests through synchronous throttle:
+:Example 2: send requests through the throttle:
 
 .. code-block:: python
 
     from scottbrian_throttle.throttle import Throttle
     import time
-    throttle = Throttle(reqs_per_sec=2)
+    a_throttle = Throttle(reqs_per_sec=2)
     def target_rtn1(request_number, time_of_start):
         ret_value = (f'request {request_number} sent at elapsed time: '
                      f'{time.time() - time_of_start:0.1f}')
@@ -70,6 +63,8 @@ Expected output for Example 2::
     request 8 sent at elapsed time: 4.0
     request 9 sent at elapsed time: 4.5
 
+Using the asynchronous throttle:
+================================
 
 Note that in the above scenario, the caller of *send_request* does not
 receive control back until the target routine completes, which means the
@@ -79,9 +74,9 @@ receive control back immediately. In this case, the request is queued
 and is sent through the throttle from another thread. Note that the
 caller is unable to receive a return value from the target routine via
 the throttle, so some other protocol will need to be worked out if a
-return value is needed. Also, the caller will need to shut down the
-throttle at the end of its processing to ensure any in-progress requests
-are complete.
+return value is needed. Also, the caller will need to call
+*start_shutdown* at the end of its processing to ensure any in-progress
+requests are complete and to ensure that the thread is ended.
 
 :Example 3: send requests through asynchronous throttle:
 
@@ -114,6 +109,9 @@ Expected output for Example 3::
     request 9 sent at elapsed time: 4.5
 
 
+The throttle as leaky bucket:
+=============================
+
 The throttle also provides a leaky bucket implementation, configured by
 setting the *bucket_size* to a value greater than 1. In this case, some
 number of requests can be sent immediately. Each request is
@@ -123,14 +121,14 @@ the bucket is full, the throttle delays any addition requests until the
 bucket has leaked enough to fit a new request. At that point, the next
 request is placed into the bucket and sent. If no new requests arrive
 for an extended interval, the bucket becomes empty, and the next set of
-requests can be placed into the buck and immediately sent. The throttle
-acts like a shock absorber, allowing small bursts of requests to be sent
-without delay, with the limiting action kicking in as additional
-requests continue to rapidly arrive. The average request interval will
-decrease as the size of the bucket increases. Note that a *bucket_size*
-of 1 will effectively result in normal non-leaky bucket behavior. Note
-also that an asynchronous leaky bucket throttle can be configured by
-specifying a *bucket_size* greater than 1 and
+requests can be placed into the bucket and immediately sent. The
+throttle acts like a shock absorber, allowing small bursts of requests
+to be sent without delay, with the limiting action kicking in as
+additional requests continue to rapidly arrive. The average request
+interval will decrease as the size of the bucket increases. Note that a
+*bucket_size* of 1 will effectively result in normal non-leaky bucket
+behavior. Note also that an asynchronous leaky bucket throttle can be
+configured by specifying a *bucket_size* greater than 1 and
 *throttle_mode=ThrottleMode.Async*.
 
 :Example 4: instantiate a leaky bucket throttle and send some requests:
@@ -162,7 +160,9 @@ Expected output for Example 4::
     request 9 sent at elapsed time: 3.5
 
 
-All throttle configurations are also provided as decorators:
+
+Using the throttle decorator:
+=============================
 
 :Example 5: Wrapping a function with the **@throttle** decorator
 
@@ -230,7 +230,9 @@ Expected output for Example 6::
 
     from scottbrian_throttle.throttle import Throttle, throttle
     import time
-    @throttle(reqs_per_sec=2, bucket_size=3, throttle_mode=ThrottleMode.ASYNC)
+    @throttle(reqs_per_sec=2,
+              bucket_size=3,
+              throttle_mode=ThrottleMode.ASYNC)
     def func3(request_number, time_of_start):
         print(f'request {request_number} sent at elapsed time: '
               f'{time.time() - time_of_start:0.1f}')
@@ -489,7 +491,7 @@ class Throttle:
         # reqs_per_sec
         ################################################################
         self.logger = logging.getLogger(__name__)
-        if isinstance(reqs_per_sec, IntFloat) and (0 < reqs_per_sec):
+        if isinstance(reqs_per_sec, int | float) and (0 < reqs_per_sec):
             self.reqs_per_sec = reqs_per_sec
         else:
             error_msg = (
@@ -676,10 +678,13 @@ class Throttle:
             request_throttle = Throttle(reqs_per_sec=0.5, name="t1")
             repr(request_throttle)
 
-
         Expected output for Example 8::
 
-            'Throttle(reqs_per_sec=0.5, bucket_size=1, throttle_mode=ThrottleMode.SYNC, async_q_size=0, name=t1)'
+            ('Throttle(reqs_per_sec=0.5, bucket_size=1, '
+             'throttle_mode=ThrottleMode.SYNC, async_q_size=0, '
+             'name=t1)')
+
+
 
         """
         if TYPE_CHECKING:
@@ -1048,8 +1053,8 @@ class Throttle:
                     request_item.request_func(*request_item.args, **request_item.kwargs)
                 except Exception as e:
                     self.logger.debug(
-                        f"throttle {self.t_name} schedule_requests unhandled exception in "
-                        f"request: {e}"
+                        f"throttle {self.t_name} schedule_requests unhandled exception "
+                        f"in request: {e}"
                     )
                     raise
 

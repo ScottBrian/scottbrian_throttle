@@ -273,8 +273,8 @@ class TestThrottleErrors:
         log_ver.add_pattern(pattern=ml_error_msg, level=logging.ERROR)
         with pytest.raises(IncorrectReqsPerSecSpecified, match=ml_error_msg):
             _ = Throttle(
-                reqs_per_sec="1", throttle_mode=ThrottleMode.ASYNC
-            )  # type: ignore
+                reqs_per_sec="1", throttle_mode=ThrottleMode.ASYNC  # type: ignore
+            )
 
         ################################################################
         # bad bucket_size SYNC
@@ -329,8 +329,10 @@ class TestThrottleErrors:
         log_ver.add_pattern(pattern=ml_error_msg, level=logging.ERROR)
         with pytest.raises(IncorrectBucketSizeSpecified, match=ml_error_msg):
             _ = Throttle(
-                reqs_per_sec=1, bucket_size="1", throttle_mode=ThrottleMode.ASYNC
-            )  # type: ignore
+                reqs_per_sec=1,
+                bucket_size="1",  # type: ignore
+                throttle_mode=ThrottleMode.ASYNC,
+            )
 
         ################################################################
         # bad async_q_size ASYNC
@@ -362,8 +364,10 @@ class TestThrottleErrors:
         log_ver.add_pattern(pattern=ml_error_msg, level=logging.ERROR)
         with pytest.raises(IncorrectAsyncQSizeSpecified, match=ml_error_msg):
             _ = Throttle(
-                reqs_per_sec=1, throttle_mode=ThrottleMode.ASYNC, async_q_size="1"
-            )  # type: ignore
+                reqs_per_sec=1,
+                throttle_mode=ThrottleMode.ASYNC,
+                async_q_size="1",  # type: ignore
+            )
 
         ################################################################
         # invalid async_q_size SYNC
@@ -2386,7 +2390,8 @@ def issue_shutdown_log_entry(
     if req_time.num_reqs % 5000 == 0:
         log_msg = (
             f"{func_name} processing request #{req_time.num_reqs} ({expected_req}) at "
-            f"{time_str} ({expected_time}), interval={f_interval_str} ({req_time.interval})"
+            f"{time_str} ({expected_time}), interval={f_interval_str} "
+            f"({req_time.interval})"
         )
 
         log_ver.test_msg(log_msg)
@@ -4758,29 +4763,11 @@ class TestThrottleDocstrings:
         )
         flowers(hdr_str)
 
-        # from scottbrian_throttle.throttle import throttle
-        # import time
-        #
-        # @throttle(reqs_per_sec=0.5, throttle_mode=ThrottleMode.ASYNC)
-        # def func2(request_number: int, time_of_start: float) -> None:
-        #     print(
-        #         f"request {request_number} sent at elapsed time: "
-        #         f"{time.time() - time_of_start:0.1f}"
-        #     )
-        #
-        # Pauser().pause(3)
-        # start_time = time.time()
-        # for i in range(10):
-        #     func2(i, start_time)
-        # # do other processing since not waiting for return from throttle
-        # # after other processing, do a shutdown of the throttle
-        # func2.throttle.start_shutdown()
-
         from scottbrian_throttle.throttle import throttle, ThrottleMode
         import time
 
         @throttle(reqs_per_sec=0.5, throttle_mode=ThrottleMode.ASYNC)
-        def func2(request_number, time_of_start):
+        def func2(request_number, time_of_start):  # type: ignore
             print(
                 f"request {request_number} sent at elapsed time: "
                 f"{time.time() - time_of_start:0.1f}"
