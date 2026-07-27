@@ -7,11 +7,18 @@ Throttle
 The throttle allows you to limit the rate at which a function is
 called. An internet service, for example, might have a limit for the
 number of requests you can send in a given interval - using the
-throttle will help you adhere to that limit.
+throttle will help you stay within that limit.
 
-The throttle can be used as a class or as a decorator. You specify the
-number of requests that can be sent per second with the *reqs_per_sec*
-argument.
+The throttle can be used as a class or as a decorator, can be
+synchronous or asynchronous, and can be optionally configured for a
+leaky bucket implementation.
+
+When you create a throttle, you specify the number of requests that can
+be sent per second with the *reqs_per_sec* argument. This determines the
+required interval between requests and is calculated as
+1/*reqs_per_sec*. For example, *reqs_per_sec=1* will be an interval of
+1 second, while *reqs_per_sec=0.5* will be an interval of 2 seconds,
+and *reqs_per_sec=2* will be an interval of 1/2 seconds.
 
 When instantiated from the Throttle class:
 ==========================================
@@ -286,6 +293,7 @@ from typing import (
 ########################################################################
 # Third Party
 ########################################################################
+import scottbrian_locking.se_lock as selk  # noqa F401
 from scottbrian_utils.diag_msg import get_formatted_call_sequence as call_seq
 from scottbrian_utils.pauser import Pauser
 from scottbrian_utils.timer import Timer
@@ -649,7 +657,8 @@ class Throttle:
             #           1) state remains 'shutdown'
             #           2) control returns immediately
             ############################################################
-            self.shutdown_lock = threading.Lock()
+            # self.shutdown_lock = threading.Lock()
+            self.shutdown_lock = selk.SELock()
             self._throttle_shutdown_started = False
             self.shutdown_start_time = 0.0
             self.shutdown_elapsed_time = 0.0
@@ -868,7 +877,8 @@ class Throttle:
             # 3) schedule_requests cleans up the async_q end exits
             # 4) back here in send_request, we put our request on the
             #    async_q - this request will never be processed
-            with self.shutdown_lock:
+            # with self.shutdown_lock:
+            with selk.SELockShare(self.shutdown_lock):
                 request_item = Throttle.Request(
                     func, args, kwargs, time.perf_counter_ns()
                 )
@@ -1186,7 +1196,9 @@ class Throttle:
         # send_requests are complete, and to block other shutdown
         # requests while the variables are been checked and set.
         # TODO: use se_lock
-        with self.shutdown_lock:
+        # with self.shutdown_lock:
+        with selk.SELockExcl(self.shutdown_lock):
+
             # Soft shutdown finishes the queued requests while also
             # doing the throttling, meaning that a soft shutdown
             # is done when the queued requests are important and must be
@@ -1238,7 +1250,8 @@ class Throttle:
         ################################################################
         # determine results
         ################################################################
-        with self.shutdown_lock:
+        # with self.shutdown_lock:
+        with selk.SELockExcl(self.shutdown_lock):
             if self.request_scheduler_thread.is_alive():
                 if not suppress_timeout_msg:
                     self.logger.debug(

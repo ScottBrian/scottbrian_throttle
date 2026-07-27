@@ -5,11 +5,9 @@ scottbrian-throttle
 Intro
 =====
 
-
-The throttle allows you to limit the rate at which a function is
-called. An internet service, for example, might have a limit for the
-number of requests you can send in a given interval - using the
-throttle will help you stay within that limit.
+In some scenarios, you need to repeatedly call a service. That service
+might imposes a limit on how fast you can call it. The throttle can be
+used to delay your calls to ensure that you do not exceed the limit.
 
 The throttle can be used as a class or as a decorator, can be
 synchronous or asynchronous, and can be optionally configured for a
@@ -17,10 +15,10 @@ leaky bucket implementation.
 
 As a class: when you instantiate a throttle, you specify
 *reqs_per_sec* to establish the limit. You then call method
-*send_request* with the name of the function that is to be limited
+*send_request* with the name of the function that is to be called
 along with any args or kwargs that it needs. The *send_request* method
 keeps track of the intervals between calls and will sleep as needed to
-ensure the limit is not exceeded.
+ensure the limit is not exceeded before calling the function.
 
 :Example 1: Instantiate a throttle and send some requests:
 
@@ -94,19 +92,18 @@ In the above examples, the throttle was used in synchronous mode, the
 default. With synchronous mode, the throttle returns control to the
 caller after the target function is called and returns. This means the
 caller is delayed by the throttling and the execution of the target
-function. Note also that the target function can return a value which
-the throttle will return to the caller.
+function.
 
 For an asynchronous throttle, you specify
 *throttle_mode=ThrottleMode.ASYNC*. With asynchronous mode, when you
 call *send_request* or call the decorated target function, the throttle
 will queue the request and return control immediately. A separate
-thread will take care of calling the target function and applying the
-throttling. Note that the target function will not be able to pass back
+thread will take care of the throttling and call the target function.
+Note that the target function will not be able to pass back
 a return value with asynchronous mode - you will need to devise some
-protocol if that is needed. Also, when it is time to end the
-application, you will need to call *start_shutdown* to cause the
-throttle to end the asynchronous thread.
+other protocol if that is needed. Also, when it is time to end the
+application, you will need to call *start_shutdown* to wait for the
+throttle to complete any queued requests and end its thread.
 
 :Example 3: Instantiate an asynchronous throttle and send some requests:
 
@@ -139,9 +136,9 @@ Expected output for Example 3::
     request 9 sent at elapsed time: 4.5
 
 
-Note that the decorated function will have the throttle attached to it
-as an attribute to allow you to call *start_shutdown* as shown in the
-following example.
+As shown in the following example, the decorated function will have the
+throttle attached to it as an attribute to allow you to call
+*start_shutdown*.
 
 :Example 4: Decorate a function with an asynchronous throttle and call
             it a few times:
@@ -174,19 +171,22 @@ Expected output for Example 4::
     request 9 sent at elapsed time: 4.5
 
 
-You can also specify a *bucket_size* argument greater than 1 to
-configure the throttle in a leaky bucket configuration. The bucket is a
-conceptual mechanism where requests are placed. The bucket has a hole
-in the bottom and leaks out at the rate limit specified by
-the *reqs_per_sec* argument. The idea is that the *bucket_size* specifies
-how many requests will fit into the bucket. When *send_request* is
-called, or when the decorated function is called, the throttle will
-see if the new request will fit into the bucket. If not, the request is
-delayed until the bucket leaks out enough to fit the new request. Once
-placed into the bucket, the request is sent on its way. This allows some
+You can also configure the throttle as a leaky bucket. The leaky bucket
+is so named because it employs the concept of placing requests into a
+bucket with a hole in the bottom. When you create the throttle, you
+specify the *reqs_per_sec* to establish the rate limit which is used to
+determine how fast the bucket leaks, and you also specify the
+*bucket_size* which determines how many requests will fit into the
+bucket. The throttle starts out with an empty bucket. When you call
+*send_request*, or when you call the decorated function, the throttle
+determines whether there is room in the bucket. If so, it "places" the
+request into the bucket and immediately calls your function. As each
+new request arrives, the bucket may eventually become full. In that
+case, the throttle will sleep until the bucket has leaked out enough of
+the previous requests to fit the new request. This allows some
 number of initial requests to be sent immediately until the bucket is
 filled up, at which point the throttle kicks in like a shock absorber to
-start delaying the requests.The leaky bucket algorithm results in an
+start delaying the requests. The leaky bucket algorithm results in an
 average send rate that is slightly faster than the send rate limit. This
 algorithm is best used when you have an occasional burst of requests
 that the target service will tolerate, with the limiting kicking in if

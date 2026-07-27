@@ -20,7 +20,7 @@ classifiers = [
 dependencies = [
     #"scottbrian-utils ~=7.1",
     "scottbrian_utils @  file:///C:/Users/Tiger/PycharmProjects/scottbrian_utils/dist/scottbrian_utils-7.1.0-py3-none-any.whl",
-    "typing_extensions ~=4.15",
+    "typing_extensions ~=4.16",
     "wrapt ~=2.2",
 ]
 
@@ -33,5 +33,5 @@ Documentation = "https://scottbrian-throttle.readthedocs.io/en/latest/"
 Source = "https://github.com/ScottBrian/scottbrian_throttle.git"
 
 [build-system]
-requires = ["setuptools ~=82.0"]
+requires = ["setuptools ~=83.0"]
 build-backend = 'setuptools.build_meta'
