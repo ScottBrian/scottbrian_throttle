@@ -381,6 +381,9 @@ class Throttle:
     DEFAULT_ASYNC_Q_SIZE: Final[int] = 4096
     MAX_PAUSE_NS: Final[int] = 1000000000
 
+    SYNC: Final[int] = 1
+    ASYNC: Final[int] = 2
+
     ####################################################################
     # start_shutdown return code constants
     ####################################################################
@@ -557,6 +560,7 @@ class Throttle:
         #           2) control returns immediately
         ################################################################
         self.throttle_mode = throttle_mode
+        print(f"{self.throttle_mode=}, {Throttle.ASYNC=}, {ThrottleMode.ASYNC=}")
 
         if self.throttle_mode == ThrottleMode.ASYNC:
             if async_q_size is not None:
@@ -657,7 +661,6 @@ class Throttle:
             #           1) state remains 'shutdown'
             #           2) control returns immediately
             ############################################################
-            # self.shutdown_lock = threading.Lock()
             self.shutdown_lock = selk.SELock()
             self._throttle_shutdown_started = False
             self.shutdown_start_time = 0.0
@@ -877,7 +880,7 @@ class Throttle:
             # 3) schedule_requests cleans up the async_q end exits
             # 4) back here in send_request, we put our request on the
             #    async_q - this request will never be processed
-            # with self.shutdown_lock:
+
             with selk.SELockShare(self.shutdown_lock):
                 request_item = Throttle.Request(
                     func, args, kwargs, time.perf_counter_ns()
@@ -1195,8 +1198,6 @@ class Throttle:
         # We use the shutdown lock to block us until any in progress
         # send_requests are complete, and to block other shutdown
         # requests while the variables are been checked and set.
-        # TODO: use se_lock
-        # with self.shutdown_lock:
         with selk.SELockExcl(self.shutdown_lock):
 
             # Soft shutdown finishes the queued requests while also
@@ -1250,7 +1251,6 @@ class Throttle:
         ################################################################
         # determine results
         ################################################################
-        # with self.shutdown_lock:
         with selk.SELockExcl(self.shutdown_lock):
             if self.request_scheduler_thread.is_alive():
                 if not suppress_timeout_msg:

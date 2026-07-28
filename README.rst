@@ -61,7 +61,7 @@ will sleep as needed to ensure the limit is not exceeded.
 
 .. code-block:: python
 
-    from scottbrian_throttle.throttle import Throttle
+    from scottbrian_throttle.throttle import Throttle, throttle
     import time
     @throttle(reqs_per_sec=2)
     def target_rtn2(request_number, time_of_start):
@@ -109,7 +109,7 @@ throttle to complete any queued requests and end its thread.
 
 .. code-block:: python
 
-    from scottbrian_throttle.throttle import Throttle
+    from scottbrian_throttle.throttle import Throttle, ThrottleMode
     import time
     throttle_3 = Throttle(reqs_per_sec=2,
                           throttle_mode=ThrottleMode.ASYNC)
@@ -145,9 +145,9 @@ throttle attached to it as an attribute to allow you to call
 
 .. code-block:: python
 
-    from scottbrian_throttle.throttle import Throttle
+    from scottbrian_throttle.throttle import throttle
     import time
-    @throttle(reqs_per_sec=2, throttle_mode=ThrottleMode.ASYNC)
+    @throttle(reqs_per_sec=2, throttle_mode=Throttle.ASYNC)
     def target_rtn4(request_number, time_of_start):
         print(f'request {request_number} sent at elapsed time: '
               f'{time.time() - time_of_start:0.1f}')
@@ -231,7 +231,7 @@ new request.
 
 .. code-block:: python
 
-    from scottbrian_throttle.throttle import Throttle
+    from scottbrian_throttle.throttle import Throttle, throttle
     import time
     @throttle(reqs_per_sec=2, bucket_size=3)
     def target_rtn6(request_number, time_of_start):

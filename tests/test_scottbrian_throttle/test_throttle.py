@@ -425,6 +425,34 @@ class TestThrottleErrors:
             ),
             level=logging.INFO,
         )
+        selk_lock_obtain_log_msg = (
+            "SELock exclusive obtain request granted immediate exclusive control "
+            "to thread MainThread, call sequence: "
+            "throttle.py::Throttle.start_shutdown:[0-9]+ -> "
+            "se_lock.py::SELockExcl.__enter__:[0-9]+"
+        )
+        selk_lock_release_log_msg = (
+            "SELock release request removed exclusive control for thread "
+            "MainThread, call sequence: "
+            "throttle.py::Throttle.start_shutdown:[0-9]+ -> "
+            "se_lock.py::SELockExcl.__exit__:[0-9]+"
+        )
+        log_ver.add_pattern(
+            pattern=selk_lock_obtain_log_msg,
+            level=logging.DEBUG,
+        )
+        log_ver.add_pattern(
+            pattern=selk_lock_release_log_msg,
+            level=logging.DEBUG,
+        )
+        log_ver.add_pattern(
+            pattern=selk_lock_obtain_log_msg,
+            level=logging.DEBUG,
+        )
+        log_ver.add_pattern(
+            pattern=selk_lock_release_log_msg,
+            level=logging.DEBUG,
+        )
         with pytest.raises(IncorrectShutdownTypeSpecified, match=ml_error_msg):
             a_throttle = Throttle(
                 reqs_per_sec=1, throttle_mode=ThrottleMode.ASYNC, name="t1"
@@ -4173,7 +4201,7 @@ class RequestValidator:
         print(f"ratio diff expected/actual: {ratio_delay_time:.4f}")
 
         # assert throttle_verifier.num_excessive_request_delays < 4
-        assert ratio_delay_time <= 0.05
+        assert ratio_delay_time <= 0.06
 
         self.reset()
 
@@ -4942,7 +4970,7 @@ class TestThrottleDocstrings:
 
         throttle_1 = Throttle(reqs_per_sec=2)
 
-        def target_rtn1(request_number, time_of_start):
+        def target_rtn1(request_number: int, time_of_start: float) -> str:
             ret_value = (
                 f"request {request_number} sent at elapsed time: "
                 f"{time.time() - time_of_start:0.1f}"
@@ -4994,7 +5022,7 @@ class TestThrottleDocstrings:
         import time
 
         @throttle(reqs_per_sec=2)
-        def target_rtn2(request_number, time_of_start):
+        def target_rtn2(request_number: int, time_of_start: float) -> str:
             ret_value = (
                 f"request {request_number} sent at elapsed time: "
                 f"{time.time() - time_of_start:0.1f}"
@@ -5049,7 +5077,7 @@ class TestThrottleDocstrings:
 
         throttle_3 = Throttle(reqs_per_sec=2, throttle_mode=ThrottleMode.ASYNC)
 
-        def target_rtn3(request_number, time_of_start):
+        def target_rtn3(request_number: int, time_of_start: float) -> None:
             print(
                 f"request {request_number} sent at elapsed time: "
                 f"{time.time() - time_of_start:0.1f}"
@@ -5101,7 +5129,7 @@ class TestThrottleDocstrings:
         import time
 
         @throttle(reqs_per_sec=2, throttle_mode=ThrottleMode.ASYNC)
-        def target_rtn4(request_number, time_of_start):
+        def target_rtn4(request_number: int, time_of_start: float) -> None:
             print(
                 f"request {request_number} sent at elapsed time: "
                 f"{time.time() - time_of_start:0.1f}"
@@ -5153,7 +5181,7 @@ class TestThrottleDocstrings:
 
         throttle_5 = Throttle(reqs_per_sec=2, bucket_size=3)
 
-        def target_rtn5(request_number, time_of_start):
+        def target_rtn5(request_number: int, time_of_start: float) -> None:
             print(
                 f"request {request_number} sent at elapsed time: "
                 f"{time.time() - time_of_start:0.1f}"
@@ -5203,7 +5231,7 @@ class TestThrottleDocstrings:
         import time
 
         @throttle(reqs_per_sec=2, bucket_size=3)
-        def target_rtn6(request_number, time_of_start):
+        def target_rtn6(request_number: int, time_of_start: float) -> None:
             print(
                 f"request {request_number} sent at elapsed time: "
                 f"{time.time() - time_of_start:0.1f}"

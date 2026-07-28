@@ -18,8 +18,8 @@ classifiers = [
     "Programming Language :: Python :: 3.14",
     "Operating System :: Microsoft :: Windows :: Windows 11"]
 dependencies = [
-    #"scottbrian-utils ~=7.1",
-    "scottbrian_utils @  file:///C:/Users/Tiger/PycharmProjects/scottbrian_utils/dist/scottbrian_utils-7.1.0-py3-none-any.whl",
+    "scottbrian-locking ~=3.0",
+    "scottbrian-utils ~=7.1",
     "typing_extensions ~=4.16",
     "wrapt ~=2.2",
 ]
