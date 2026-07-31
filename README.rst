@@ -95,7 +95,7 @@ caller is delayed by the throttling and the execution of the target
 function.
 
 For an asynchronous throttle, you specify
-*throttle_mode=ThrottleMode.ASYNC*. With asynchronous mode, when you
+*throttle_mode=Throttle.MODE_ASYNC*. With asynchronous mode, when you
 call *send_request* or call the decorated target function, the throttle
 will queue the request and return control immediately. A separate
 thread will take care of the throttling and call the target function.
@@ -109,10 +109,10 @@ throttle to complete any queued requests and end its thread.
 
 .. code-block:: python
 
-    from scottbrian_throttle.throttle import Throttle, ThrottleMode
+    from scottbrian_throttle.throttle import Throttle
     import time
     throttle_3 = Throttle(reqs_per_sec=2,
-                          throttle_mode=ThrottleMode.ASYNC)
+                          throttle_mode=Throttle.MODE_ASYNC)
     def target_rtn3(request_number, time_of_start):
         print(f'request {request_number} sent at elapsed time: '
               f'{time.time() - time_of_start:0.1f}')
@@ -145,9 +145,9 @@ throttle attached to it as an attribute to allow you to call
 
 .. code-block:: python
 
-    from scottbrian_throttle.throttle import throttle
+    from scottbrian_throttle.throttle import Throttle, throttle
     import time
-    @throttle(reqs_per_sec=2, throttle_mode=Throttle.ASYNC)
+    @throttle(reqs_per_sec=2, throttle_mode=Throttle.MODE_ASYNC)
     def target_rtn4(request_number, time_of_start):
         print(f'request {request_number} sent at elapsed time: '
               f'{time.time() - time_of_start:0.1f}')

@@ -136,7 +136,7 @@ interval will decrease as the size of the bucket increases. Note that a
 *bucket_size* of 1 will effectively result in normal non-leaky bucket
 behavior. Note also that an asynchronous leaky bucket throttle can be
 configured by specifying a *bucket_size* greater than 1 and
-*throttle_mode=ThrottleMode.Async*.
+*throttle_mode=ThrottleMode.ASYNC*.
 
 :Example 4: instantiate a leaky bucket throttle and send some requests:
 
@@ -266,14 +266,14 @@ Expected output for Example 7::
 
 """
 
-########################################################################
-# Standard Library
-########################################################################
 import functools
 import logging
 import queue
 import threading
 import time
+########################################################################
+# Standard Library
+########################################################################
 from enum import Enum, auto
 from typing import (
     Any,
@@ -294,6 +294,7 @@ from typing import (
 # Third Party
 ########################################################################
 import scottbrian_locking.se_lock as selk  # noqa F401
+import wrapt
 from scottbrian_utils.diag_msg import get_formatted_call_sequence as call_seq
 from scottbrian_utils.pauser import Pauser
 from scottbrian_utils.timer import Timer
@@ -353,23 +354,9 @@ class InvalidShutdownRequested(ThrottleError):
 
 
 ########################################################################
-# Mode
+# Pie Throttle Decorator
 ########################################################################
-class ThrottleMode(Enum):
-    """ThrottleMode is SYNC or ASYNC."""
-
-    SYNC = auto()
-    ASYNC = auto()
-
-
-########################################################################
-# ShutdownType
-########################################################################
-class ThrottleShutdownType(Enum):
-    """ThrottleShutdownType is SOFT or HARD."""
-
-    SOFT = auto()
-    HARD = auto()
+F = TypeVar("F", bound=Callable[..., Any])
 
 
 ########################################################################
@@ -381,8 +368,12 @@ class Throttle:
     DEFAULT_ASYNC_Q_SIZE: Final[int] = 4096
     MAX_PAUSE_NS: Final[int] = 1000000000
 
-    SYNC: Final[int] = 1
-    ASYNC: Final[int] = 2
+    class ThrottleMode(Enum):
+        SYNC = auto()
+        ASYNC = auto()
+
+    SHUTDOWN_SOFT: Final[int] = 1
+    SHUTDOWN_HARD: Final[int] = 2
 
     ####################################################################
     # start_shutdown return code constants
@@ -448,13 +439,13 @@ class Throttle:
     # __init__
     ####################################################################
     def __init__(
-        self,
-        *,
-        reqs_per_sec: IntFloat,
-        bucket_size: IntFloat = 1,
-        throttle_mode: ThrottleMode = ThrottleMode.SYNC,
-        async_q_size: Optional[int] = None,
-        name: Optional[str] = None,
+            self,
+            *,
+            reqs_per_sec: IntFloat,
+            bucket_size: IntFloat = 1,
+            throttle_mode: ThrottleMode = ThrottleMode.SYNC,
+            async_q_size: Optional[int] = None,
+            name: Optional[str] = None,
     ) -> None:
         """Initialize an instance of the Throttle class.
 
@@ -477,8 +468,8 @@ class Throttle:
                          The bucket_size must be greater than or equal
                          to 1.
             throttle_mode: If ThrottleMode.ASYNC, the throttle is
-                    asynchronous. If ThrottleMode.SYNC, the default, the
-                    throttle is synchronous.
+                    asynchronous. If ThrottleMode.SYNC, the default,
+                    the throttle is synchronous.
             async_q_size: Specifies the size of the request
                           queue for async requests. When the request
                           queue is totally populated, any additional
@@ -560,9 +551,8 @@ class Throttle:
         #           2) control returns immediately
         ################################################################
         self.throttle_mode = throttle_mode
-        print(f"{self.throttle_mode=}, {Throttle.ASYNC=}, {ThrottleMode.ASYNC=}")
 
-        if self.throttle_mode == ThrottleMode.ASYNC:
+        if self.throttle_mode == Throttle.ThrottleMode.ASYNC:
             if async_q_size is not None:
                 if isinstance(async_q_size, int) and (0 < async_q_size):
                     self.async_q_size = async_q_size
@@ -625,7 +615,7 @@ class Throttle:
 
         self.throttle_state = Throttle._ACTIVE
 
-        if self.throttle_mode == ThrottleMode.ASYNC:
+        if self.throttle_mode == Throttle.ThrottleMode.ASYNC:
             ############################################################
             # Set remainder of async vars
             ############################################################
@@ -672,6 +662,36 @@ class Throttle:
                 target=self._schedule_requests
             )
             self.request_scheduler_thread.start()
+
+    ####################################################################
+    # __call__
+    ####################################################################
+    @wrapt.bind_state_to_wrapper(name='decorator_instance')
+    @wrapt.decorator
+    def __call__(self,
+                 wrapped: Callable[..., Any],
+                 instance: Throttle | None,
+                 args: Any,
+                 kwargs: Any) -> Any:
+        """Call the class for decorated function.
+
+        Args:
+            wrapped: the decorated function to be run
+            instance: the Throttle instance
+            args: the decorated function positional arguments
+            kwargs: the decorated function keyword arguments
+
+        Returns:
+              The return value from the request function. For
+              throttle_mode = ThrottleMode.SYNC, the return value may
+              be any value or None. For throttle_mode =
+              ThrottleMode.ASYNC, the return value will be
+              Throttle.RC_OK or Throttle.RC_THROTTLE_IS_SHUTDOWN.
+
+        """
+        self.logger.debug(f"__call_ entered for {self=}, {wrapped=}")
+        retval = self.send_request(wrapped, *args, **kwargs)
+        self.logger.debug(f"__call_ exiting with {retval=}")
 
     ####################################################################
     # repr
@@ -753,7 +773,7 @@ class Throttle:
         >>> request_throttle.start_shutdown()
 
         """
-        if self.throttle_mode == ThrottleMode.ASYNC:
+        if self.throttle_mode == Throttle.ThrottleMode.ASYNC:
             return self.async_q.qsize()
         else:
             return 0
@@ -855,16 +875,18 @@ class Throttle:
 
         Returns:
               The return value from the request function. For
-              throttle_mode = False, the return value may be any value
-              or None. For throttle_mode = True, the return value will
-              be None.
+              throttle_mode = ThrottleMode.SYNC, the return value may
+              be any value or None. For throttle_mode =
+              ThrottleMode.ASYNC, the return value will be
+              Throttle.RC_OK or Throttle.RC_THROTTLE_IS_SHUTDOWN.
 
         Raises:
             Exception: An exception occurred in the request target. It
                 will be logged and re-raised.
 
         """
-        if self.throttle_mode == ThrottleMode.ASYNC:
+        self.logger.debug(f"send_request entered for {self=}, {func=}, {args=}, {kwargs=}")
+        if self.throttle_mode == Throttle.ThrottleMode.ASYNC:
             # if self.throttle_state != Throttle._ACTIVE:
             #     return Throttle.RC_THROTTLE_IS_SHUTDOWN
 
@@ -910,6 +932,7 @@ class Throttle:
                 # any unhandled errors.
                 ########################################################
                 try:
+                    self.logger.debug(f"send_request calling {func=}")
                     return func(*args, **kwargs)
                 except Exception as e:
                     self.logger.debug(
@@ -1008,7 +1031,7 @@ class Throttle:
             # entry.
             sleep_ns = self._next_target_time_ns - time.perf_counter_ns()
             while (sleep_ns > 0) and (
-                self.throttle_state != Throttle._HARD_SHUTDOWN_STARTED
+                    self.throttle_state != Throttle._HARD_SHUTDOWN_STARTED
             ):
                 # Use min to ensure we don't sleep too long and appear
                 # slow to respond to a shutdown request
@@ -1035,8 +1058,8 @@ class Throttle:
         # calculated from the reqs_per_sec argument when the throttle
         # was instantiated. If shutdown is indicated, the async_q will
         # be cleaned up with any remaining requests either processed
-        # (ThrottleShutdownType.SOFT) or dropped
-        # (ThrottleShutdownType.HARD). Note that async_q.get will only
+        # (Throttle.SHUTDOWN_SOFT) or dropped
+        # (Throttle.SHUTDOWN_HARD). Note that async_q.get will only
         # wait for a second to allow us to detect shutdown in a timely
         # fashion.
         while True:
@@ -1071,14 +1094,106 @@ class Throttle:
                     )
                     raise
 
+    ########################################################################
+    # shutdown_throttle_funcs
+    ########################################################################
+    def shutdown_throttle_funcs(
+            # *args: _FuncWithThrottleAttr[Callable[..., Any]],
+            *args: Callable[..., Any],
+            shutdown_type: int = 1,  # Throttle.SHUTDOWN_SOFT,
+            timeout: OptIntFloat = None,
+    ) -> bool:
+        """Shutdown the throttle request scheduling for decorated functions.
+
+        The shutdown_throttle_funcs function is used to shutdown one or more
+        functions that were decorated with the throttle. The arguments apply
+        to each of the functions that are specified to be shutdown. If
+        timeout is specified, then True is returned if all functions
+        were shutdown within the timeout number of seconds specified.
+
+        Args:
+            args: one or more functions to be shutdown
+            shutdown_type: specifies whether to do a soft or a hard
+                             shutdown:
+
+                             * A soft shutdown
+                               (Throttle.SHUTDOWN_SOFT), the
+                               default, stops any additional requests from
+                               being queued and cleans up the request queue
+                               by scheduling any remaining requests at the
+                               normal interval as calculated by the seconds
+                               and requests that were specified during
+                               instantiation.
+                             * A hard shutdown
+                               (Throttle.SHUTDOWN_HARD) stops any
+                               additional requests from being queued and
+                               cleans up the request queue by quickly
+                               removing any remaining requests without
+                               executing them.
+            timeout: number of seconds to allow for shutdown to complete for
+                       all functions specified to be shutdown.
+                       Note that a *timeout* of zero or less is equivalent
+                       to a *timeout* of None, meaning start_shutdown will
+                       return when the shutdown is complete without a
+                       timeout.
+
+        .. # noqa: DAR101
+
+        Returns:
+            * ``True`` if *timeout* was not specified, or if it was
+              specified and all specified functions completed
+              shutdown within the specified number of seconds. Also, if the
+              list of funcs to shutdown is empty, True is returned.
+            * ``False`` if *timeout* was specified and at least one of the
+              functions specified to shutdown did not complete within the
+              specified number of seconds.
+
+        """
+        funcs = [func for func in args]
+        timer = Timer(timeout=timeout)
+        ####################################################################
+        # In the following code we loop until we all funcs are shutdown or
+        # until we time out when timeout is specified. We call shutdown for
+        # each func with a very short timeout value. The first attempt for
+        # each func will get its shutdown started and very likely result in
+        # a timeout retcode. This is OK since we suppress the timeout log
+        # message. Even though the timeout happens, the shutdown, once
+        # started, will continue processing. Each subsequent attempt will
+        # either timeout again or come back with a completed retcode. We
+        # remove each completed func from the list and keep trying the
+        # remining funcs.
+        ####################################################################
+        while funcs:
+            funcs_remaining = [func for func in funcs]
+            for func in funcs_remaining:
+                if Throttle.RC_SHUTDOWN_TIMED_OUT != func._self_wrapper._start_shutdown(
+                        shutdown_type=shutdown_type, timeout=0.01, suppress_timeout_msg=True
+                ):
+                    funcs.remove(func)
+
+            if timer.is_expired() and funcs:
+                for func in funcs:
+                    func._self_wrapper.logger.debug(
+                        f"Throttle {func._self_wrapper.t_name} shutdown_throttle_funcs request "
+                        f"timed out with {timeout=:.4f}"
+                    )
+                return False  # we timed out
+
+            time.sleep(0.1)  # allow shutdowns to progress
+
+        # if here, all funcs successfully shutdown
+        return True
+
     ####################################################################
     # start_shutdown
     ####################################################################
+    @staticmethod
     def start_shutdown(
-        self,
-        shutdown_type: ThrottleShutdownType = ThrottleShutdownType.SOFT,
-        timeout: OptIntFloat = None,
-        suppress_timeout_msg: bool = False,
+            func: Callable[..., Any],
+            # shutdown_type: int = Throttle.SHUTDOWN_SOFT,
+            shutdown_type: int = 1,
+            timeout: OptIntFloat = None,
+            suppress_timeout_msg: bool = False,
     ) -> int:
         """Shutdown the async throttle request scheduling.
 
@@ -1101,7 +1216,7 @@ class Throttle:
                 shutdown:
 
                      * A soft shutdown
-                       (ThrottleShutdownType.SOFT),
+                       (Throttle.SHUTDOWN_SOFT),
                        the default, stops any additional
                        requests from being queued and cleans up
                        the request queue by scheduling any
@@ -1110,7 +1225,7 @@ class Throttle:
                        *requests* arguments specified during
                        throttle instantiation.
                      * A hard shutdown
-                       (ThrottleShutdownType.HARD) stops
+                       (Throttle.SHUTDOWN_HARD) stops
                        any additional requests from being queued
                        and cleans up the request queue by
                        quickly removing any remaining requests
@@ -1157,11 +1272,108 @@ class Throttle:
         Raises:
             IncorrectShutdownTypeSpecified: For start_shutdown,
             shutdownType must be specified as either
-            ThrottleShutdownType.SOFT or
-            ThrottleShutdownType.HARD
+            Throttle.SHUTDOWN_SOFT or
+            Throttle.SHUTDOWN_HARD
 
         """
-        if self.throttle_mode == ThrottleMode.SYNC:
+        print(f"\n ********  start_shutdown entered {func=}\n")
+        return func.decorator_instance._start_shutdown(
+            shutdown_type=shutdown_type,
+            timeout=timeout,
+            suppress_timeout_msg=suppress_timeout_msg)
+
+    ####################################################################
+    # _start_shutdown
+    ####################################################################
+    def _start_shutdown(
+            self,
+            # shutdown_type: int = Throttle.SHUTDOWN_SOFT,
+            shutdown_type: int = 1,
+            timeout: OptIntFloat = None,
+            suppress_timeout_msg: bool = False,
+    ) -> int:
+        """Shutdown the async throttle request scheduling.
+
+        Shutdown is used to stop and clean up any pending requests on
+        the async request queue. This should be done during normal
+        application shutdown or when an error occurs. Once the throttle
+        has completed shutdown it can no longer be used. If a throttle
+        is once again needed after shutdown, a new one will need to be
+        instantiated to replace the old one.
+
+        Note that a soft shutdown can be started and eventually be
+        followed by a hard shutdown to force shutdown to complete
+        quickly. A hard shutdown, however, can not be followed by a
+        soft shutdown since there is no way to retrieve and run any
+        of the requests that were already removed and tossed by the
+        hard shutdown.
+
+        Args:
+            shutdown_type: specifies whether to do a soft or a hard
+                shutdown:
+
+                     * A soft shutdown
+                       (Throttle.SHUTDOWN_SOFT),
+                       the default, stops any additional
+                       requests from being queued and cleans up
+                       the request queue by scheduling any
+                       remaining requests at the normal interval
+                       as calculated by the *seconds* and
+                       *requests* arguments specified during
+                       throttle instantiation.
+                     * A hard shutdown
+                       (Throttle.SHUTDOWN_HARD) stops
+                       any additional requests from being queued
+                       and cleans up the request queue by
+                       quickly removing any remaining requests
+                       without executing them.
+
+            timeout: number of seconds to allow for shutdown to
+                       complete. If the shutdown times out, control is
+                       returned with a return value of False. The
+                       shutdown will continue and a subsequent call to
+                       start_shutdown, with or without a timeout value,
+                       may eventually return control with a return value
+                       of True to indicate that the shutdown has
+                       completed. Note that a *timeout* value of zero or
+                       less is handled as if shutdown None was
+                       specified, whether explicitly or by default, in
+                       which case the shutdown will not timeout and will
+                       control will be returned if and when the shutdown
+                       completes. A very small value, such as 0.001,
+                       can be used to start the shutdown and then get
+                       back control to allow other cleanup activities
+                       to be performed and eventually issue a second
+                       shutdown request to ensure that it is completed.
+            suppress_timeout_msg: used by shutdown_throttle_funcs to
+                       prevent the timeout log message since it will
+                       issue its own log message
+
+        .. # noqa: DAR101
+
+        Returns: One of the following return codes is returned:
+
+            * RC_SHUTDOWN_SOFT_COMPLETED_OK (0): the
+              ``start_shutdown()`` request either completed a soft
+              shutdown or detected that a previous soft shutdown
+              request had been completed.
+            * RC_SHUTDOWN_HARD_COMPLETED_OK (4): the
+              ``start_shutdown()`` request either completed a hard
+              shutdown or detected that a previous hard shutdown
+              request had been completed.
+            * RC_SHUTDOWN_TIMED_OUT (8): the ``start_shutdown()``
+              request with a non-zero positive *timeout* value was
+              specified and did not complete within the specified
+              number of seconds
+
+        Raises:
+            IncorrectShutdownTypeSpecified: For start_shutdown,
+            shutdownType must be specified as either
+            Throttle.SHUTDOWN_SOFT or
+            Throttle.SHUTDOWN_HARD
+
+        """
+        if self.throttle_mode != Throttle.ThrottleMode.ASYNC:
             error_msg = (
                 "A shutdown was requested for a synchronous throttle. "
                 "Shutdown can only be requested for a throttle that is "
@@ -1172,13 +1384,13 @@ class Throttle:
             raise InvalidShutdownRequested(error_msg)
 
         if (
-            shutdown_type != ThrottleShutdownType.SOFT
-            and shutdown_type != ThrottleShutdownType.HARD
+                shutdown_type != Throttle.SHUTDOWN_SOFT
+                and shutdown_type != Throttle.SHUTDOWN_HARD
         ):
             error_msg = (
                 "For start_shutdown, shutdownType must be specified as "
-                "either ThrottleShutdownType.SOFT or "
-                "ThrottleShutdownType.HARD. "
+                "either Throttle.SHUTDOWN_SOFT or "
+                "Throttle.SHUTDOWN_HARD. "
                 f"Request call sequence: {call_seq(latest=1, depth=2)}"
             )
             self.logger.error(error_msg)
@@ -1222,7 +1434,7 @@ class Throttle:
                 # elapsed time.
                 self.shutdown_start_time = time.time()
 
-                if shutdown_type == ThrottleShutdownType.SOFT:
+                if shutdown_type == Throttle.SHUTDOWN_SOFT:
                     self.throttle_state = Throttle._SOFT_SHUTDOWN_STARTED
                 else:
                     self.throttle_state = Throttle._HARD_SHUTDOWN_STARTED
@@ -1231,8 +1443,8 @@ class Throttle:
                 # shutdown is now being requested, we need to shift to a
                 # hard shutdown
                 if (
-                    self.throttle_state == Throttle._SOFT_SHUTDOWN_STARTED
-                    and shutdown_type == ThrottleShutdownType.HARD
+                        self.throttle_state == Throttle._SOFT_SHUTDOWN_STARTED
+                        and shutdown_type == Throttle.SHUTDOWN_HARD
                 ):
                     self.throttle_state = Throttle._HARD_SHUTDOWN_STARTED
 
@@ -1272,7 +1484,7 @@ class Throttle:
             if completion_log_msg_needed:
                 # add 0.0001 so we don't get a zero elapsed time
                 self.shutdown_elapsed_time = (
-                    time.time() - self.shutdown_start_time + 0.0001
+                        time.time() - self.shutdown_start_time + 0.0001
                 )
                 self.logger.info(
                     f"throttle {self.t_name} start_shutdown request successfully "
@@ -1283,12 +1495,6 @@ class Throttle:
                 return Throttle.RC_SHUTDOWN_SOFT_COMPLETED_OK
             else:
                 return Throttle.RC_SHUTDOWN_HARD_COMPLETED_OK
-
-
-########################################################################
-# Pie Throttle Decorator
-########################################################################
-F = TypeVar("F", bound=Callable[..., Any])
 
 
 ########################################################################
@@ -1319,37 +1525,37 @@ def _add_throttle_attr(func: F) -> _FuncWithThrottleAttr[F]:
 ########################################################################
 @overload
 def throttle(
-    _wrapped: F,
-    *,
-    reqs_per_sec: IntFloat,
-    bucket_size: IntFloat = 1,
-    throttle_mode: ThrottleMode = ThrottleMode.SYNC,
-    async_q_size: Optional[int] = None,
-    name: Optional[str] = None,
+        _wrapped: F,
+        *,
+        reqs_per_sec: IntFloat,
+        bucket_size: IntFloat = 1,
+        throttle_mode: Throttle.ThrottleMode = Throttle.ThrottleMode.SYNC,
+        async_q_size: Optional[int] = None,
+        name: Optional[str] = None,
 ) -> _FuncWithThrottleAttr[F]:
     pass
 
 
 @overload
 def throttle(
-    *,
-    reqs_per_sec: IntFloat,
-    bucket_size: IntFloat = 1,
-    throttle_mode: ThrottleMode = ThrottleMode.SYNC,
-    async_q_size: Optional[int] = None,
-    name: Optional[str] = None,
+        *,
+        reqs_per_sec: IntFloat,
+        bucket_size: IntFloat = 1,
+        throttle_mode: Throttle.ThrottleMode = Throttle.ThrottleMode.SYNC,
+        async_q_size: Optional[int] = None,
+        name: Optional[str] = None,
 ) -> Callable[[F], _FuncWithThrottleAttr[F]]:
     pass
 
 
 def throttle(
-    _wrapped: Optional[F] = None,
-    *,
-    reqs_per_sec: IntFloat,
-    bucket_size: IntFloat = 1,
-    throttle_mode: ThrottleMode = ThrottleMode.SYNC,
-    async_q_size: Optional[int] = None,
-    name: Optional[str] = None,
+        _wrapped: Optional[F] = None,
+        *,
+        reqs_per_sec: IntFloat,
+        bucket_size: IntFloat = 1,
+        throttle_mode: Throttle.ThrottleMode = Throttle.ThrottleMode.SYNC,
+        async_q_size: Optional[int] = None,
+        name: Optional[str] = None,
 ) -> Union[F, _FuncWithThrottleAttr[F]]:
     """Decorator to wrap a function in a throttle.
 
@@ -1455,6 +1661,7 @@ def throttle(
 
     if name is None:
         name = _wrapped.__name__
+
     a_throttle = Throttle(
         reqs_per_sec=reqs_per_sec,
         bucket_size=bucket_size,
@@ -1465,10 +1672,10 @@ def throttle(
 
     @decorator  # type: ignore
     def wrapper(
-        func_to_wrap: F,
-        instance: Optional[Any],
-        args: tuple[Any, ...],
-        kwargs2: dict[str, Any],
+            func_to_wrap: F,
+            instance: Optional[Any],
+            args: tuple[Any, ...],
+            kwargs2: dict[str, Any],
     ) -> Any:
 
         return a_throttle.send_request(func_to_wrap, *args, **kwargs2)
@@ -1481,91 +1688,4 @@ def throttle(
     return cast(_FuncWithThrottleAttr[F], wrapper)
 
 
-########################################################################
-# shutdown_throttle_funcs
-########################################################################
-def shutdown_throttle_funcs(
-    *args: _FuncWithThrottleAttr[Callable[..., Any]],
-    shutdown_type: ThrottleShutdownType = ThrottleShutdownType.SOFT,
-    timeout: OptIntFloat = None,
-) -> bool:
-    """Shutdown the throttle request scheduling for decorated functions.
-
-    The shutdown_throttle_funcs function is used to shutdown one or more
-    functions that were decorated with the throttle. The arguments apply
-    to each of the functions that are specified to be shutdown. If
-    timeout is specified, then True is returned if all functions
-    were shutdown within the timeout number of seconds specified.
-
-    Args:
-        args: one or more functions to be shutdown
-        shutdown_type: specifies whether to do a soft or a hard
-                         shutdown:
-
-                         * A soft shutdown
-                           (ThrottleShutdownType.SOFT), the
-                           default, stops any additional requests from
-                           being queued and cleans up the request queue
-                           by scheduling any remaining requests at the
-                           normal interval as calculated by the seconds
-                           and requests that were specified during
-                           instantiation.
-                         * A hard shutdown
-                           (ThrottleShutdownType.HARD) stops any
-                           additional requests from being queued and
-                           cleans up the request queue by quickly
-                           removing any remaining requests without
-                           executing them.
-        timeout: number of seconds to allow for shutdown to complete for
-                   all functions specified to be shutdown.
-                   Note that a *timeout* of zero or less is equivalent
-                   to a *timeout* of None, meaning start_shutdown will
-                   return when the shutdown is complete without a
-                   timeout.
-
-    .. # noqa: DAR101
-
-    Returns:
-        * ``True`` if *timeout* was not specified, or if it was
-          specified and all specified functions completed
-          shutdown within the specified number of seconds. Also, if the
-          list of funcs to shutdown is empty, True is returned.
-        * ``False`` if *timeout* was specified and at least one of the
-          functions specified to shutdown did not complete within the
-          specified number of seconds.
-
-    """
-    funcs = [func for func in args]
-    timer = Timer(timeout=timeout)
-    ####################################################################
-    # In the following code we loop until we all funcs are shutdown or
-    # until we time out when timeout is specified. We call shutdown for
-    # each func with a very short timeout value. The first attempt for
-    # each func will get its shutdown started and very likely result in
-    # a timeout retcode. This is OK since we suppress the timeout log
-    # message. Even though the timeout happens, the shutdown, once
-    # started, will continue processing. Each subsequent attempt will
-    # either timeout again or come back with a completed retcode. We
-    # remove each completed func from the list and keep trying the
-    # remining funcs.
-    ####################################################################
-    while funcs:
-        funcs_remaining = [func for func in funcs]
-        for func in funcs_remaining:
-            if Throttle.RC_SHUTDOWN_TIMED_OUT != func.throttle.start_shutdown(
-                shutdown_type=shutdown_type, timeout=0.01, suppress_timeout_msg=True
-            ):
-                funcs.remove(func)
-
-        if timer.is_expired() and funcs:
-            for func in funcs:
-                func.throttle.logger.debug(
-                    f"Throttle {func.throttle.t_name} shutdown_throttle_funcs request "
-                    f"timed out with {timeout=:.4f}"
-                )
-            return False  # we timed out
-
-        time.sleep(0.1)  # allow shutdowns to progress
-
-    # if here, all funcs successfully shutdown
-    return True
+throttle.mode = Throttle.ThrottleMode
