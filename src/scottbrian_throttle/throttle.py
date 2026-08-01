@@ -4,60 +4,84 @@
 Throttle
 ========
 
-The throttle allows you to limit the rate at which a function is
+The Throttle allows you to limit the rate at which a function is
 called. An internet service, for example, might have a limit for the
 number of requests you can send in a given interval - using the
 throttle will help you stay within that limit.
 
-The throttle can be used as a class or as a decorator, can be
-synchronous or asynchronous, and can be optionally configured for a
-leaky bucket implementation.
-
-When you create a throttle, you specify the number of requests that can
-be sent per second with the *reqs_per_sec* argument. This determines the
-required interval between requests and is calculated as
-1/*reqs_per_sec*. For example, *reqs_per_sec=1* will be an interval of
-1 second, while *reqs_per_sec=0.5* will be an interval of 2 seconds,
-and *reqs_per_sec=2* will be an interval of 1/2 seconds.
-
-When instantiated from the Throttle class:
-==========================================
-
-:Example 1: instantiate a synchronous throttle at 2 requests per second:
-
-.. code-block:: python
-
-    from scottbrian_throttle.throttle import Throttle
-
-    a_throttle = Throttle(reqs_per_sec=2)
-
-
-To send a request through the throttle, call the *send_request* method
-with the target routine and any args or keyword args. The throttle
+You decorate your function with the Throttle and optionally specify the
+required interval between calls with the *reqs_per_sec* parameter. The
+default is *reqs_per_sec=1*. When you call your function, the Throttle
 checks to see whether the request interval has elapsed since the last
-request was sent, and if not, sleeps for the remaining request interval.
-The throttle then calls the target routine, which runs and returns
-control to the throttle. The throttle returns control to the caller of
-*send_request*, passing back any return values from the target routine.
+call was made and adds a delay if needed to stay within the limit.
 
-:Example 2: send requests through the throttle:
+The interval is calculated as 1/*reqs_per_sec*. For example,
+*reqs_per_sec=1* will be an interval of 1 second, while
+*reqs_per_sec=0.5* will be an interval of 2 seconds, and
+*reqs_per_sec=2* will be an interval of 1/2 seconds.
+
+By default, the Throttle is synchronous - when you call your function
+you will not get back control until your function has completed. This
+means you will observe any delay imposed by the Throttle. The Throttle
+also provides an asynchronous mode that queues your function to a queue
+to be run from a separate thread. Note that a synchronous Throttle
+allows your function to return a value while an asynchronous throttle
+does not.
+
+Using a synchronous Throttle
+==============================
+
+:Example 1: a synchronous throttle at 1 requests per second:
 
 .. code-block:: python
 
     from scottbrian_throttle.throttle import Throttle
-    import time
-    a_throttle = Throttle(reqs_per_sec=2)
-    def target_rtn1(request_number, time_of_start):
+
+    @Throttle
+    def func1(request_number, time_of_start):
         ret_value = (f'request {request_number} sent at elapsed time: '
                      f'{time.time() - time_of_start:0.1f}')
         return ret_value
+
     start_time = time.time()
     for idx in range(10):
-        ret_val = a_throttle.send_request(target_rtn1, idx, start_time)
+        func1(idx, start_time)
         print(ret_val)
 
 
-Expected output for Example 2::
+Expected output for Example 1::
+
+    request 0 sent at elapsed time: 0.0
+    request 1 sent at elapsed time: 1.0
+    request 2 sent at elapsed time: 2.0
+    request 3 sent at elapsed time: 3.0
+    request 4 sent at elapsed time: 4.0
+    request 5 sent at elapsed time: 5.0
+    request 6 sent at elapsed time: 6.0
+    request 7 sent at elapsed time: 7.0
+    request 8 sent at elapsed time: 8.0
+    request 9 sent at elapsed time: 9.0
+
+
+:Example 2: a synchronous throttle at 2 requests per second:
+
+.. code-block:: python
+
+    from scottbrian_throttle.throttle import Throttle
+
+    @Throttle(reqs_per_sec=2)
+    def func2(request_number, time_of_start):
+        ret_value = (f'request {request_number} sent at elapsed time: '
+                     f'{time.time() - time_of_start:0.1f}')
+        return ret_value
+
+    start_time = time.time()
+    for idx in range(10):
+        func2(idx, start_time)
+        print(ret_val)
+
+
+Expected output for Example 1::
 
     request 0 sent at elapsed time: 0.0
     request 1 sent at elapsed time: 0.5
@@ -70,36 +94,34 @@ Expected output for Example 2::
     request 8 sent at elapsed time: 4.0
     request 9 sent at elapsed time: 4.5
 
-Using the asynchronous throttle:
+
+Using an asynchronous throttle:
 ================================
 
-Note that in the above scenario, the caller of *send_request* does not
-receive control back until the target routine completes, which means the
-caller will observe any delay imposed by the throttle. There is also an
-asynchronous mode that allows the caller to invoke *send_request* and
-receive control back immediately. In this case, the request is queued
-and is sent through the throttle from another thread. Note that the
-caller is unable to receive a return value from the target routine via
-the throttle, so some other protocol will need to be worked out if a
-return value is needed. Also, the caller will need to call
-*start_shutdown* at the end of its processing to ensure any in-progress
-requests are complete and to ensure that the thread is ended.
+Note that since an asynchronous Throttle queues your function to a
+separate thread, that thread will need to be ended when your program
+ends. To do this, you will need to call the *start_shutdown* method.
+When your function is decorated with the Throttle, the Throttle will
+attach its instance to your function as a function attribute. This is
+then used for the call to *start_shutdown* as shown in the following
+examples.
 
 :Example 3: send requests through asynchronous throttle:
 
 .. code-block:: python
 
     from scottbrian_throttle.throttle import Throttle
-    import time
-    async_throttle = Throttle(reqs_per_sec=2,
-                              throttle_mode=ThrottleMode.ASYNC)
-    def target_rtn2(request_number, time_of_start):
-        print(f'request {request_number} sent at elapsed time: '
-              f'{time.time() - time_of_start:0.1f}')
-    start_time = time.time()
-    for idx in range(10):
-        rc = async_throttle.send_request(target_rtn2, idx, start_time)
-    async_throttle.start_shutdown()
+import time
+
+@Throttle(reqs_per_sec=2, throttle_mode=ThrottleMode.ASYNC)
+def func3(request_number, time_of_start):
+    print(f'request {request_number} sent at elapsed time: '
+          f'{time.time() - time_of_start:0.1f}')
+
+start_time = time.time()
+for idx in range(10):
+    func3(idx, start_time)
+func3.throttle.start_shutdown()
 
 
 Expected output for Example 3::
@@ -143,14 +165,19 @@ configured by specifying a *bucket_size* greater than 1 and
 .. code-block:: python
 
     from scottbrian_throttle.throttle import Throttle
-    import time
-    lb_throttle = Throttle(reqs_per_sec=2, name="t1", bucket_size=3)
-    def target_rtn3(request_number, time_of_start):
-        print(f'request {request_number} sent at elapsed time: '
-              f'{time.time() - time_of_start:0.1f}')
-    start_time = time.time()
-    for idx in range(10):
-        lb_throttle.send_request(target_rtn3, idx, start_time)
+import time
+
+lb_throttle = Throttle(reqs_per_sec=2, name="t1", bucket_size=3)
+
+
+def target_rtn3(request_number, time_of_start):
+    print(f'request {request_number} sent at elapsed time: '
+          f'{time.time() - time_of_start:0.1f}')
+
+
+start_time = time.time()
+for idx in range(10):
+    lb_throttle._send_request(target_rtn3, idx, start_time)
 
 
 Expected output for Example 4::
@@ -176,14 +203,18 @@ Using the throttle decorator:
 .. code-block:: python
 
     from scottbrian_throttle.throttle import throttle
-    import time
-    @throttle(reqs_per_sec=2)
-    def func1(request_number, time_of_start):
-        print(f'request {request_number} sent at elapsed time: '
-              f'{time.time() - time_of_start:0.1f}')
-    start_time = time.time()
-    for idx in range(10):
-        func1(idx, start_time)
+import time
+
+
+@throttle(reqs_per_sec=2)
+def func1(request_number, time_of_start):
+    print(f'request {request_number} sent at elapsed time: '
+          f'{time.time() - time_of_start:0.1f}')
+
+
+start_time = time.time()
+for idx in range(10):
+    func1(idx, start_time)
 
 
 Expected output for Example 5::
@@ -206,15 +237,19 @@ Expected output for Example 5::
 .. code-block:: python
 
     from scottbrian_throttle.throttle import Throttle
-    import time
-    @throttle(reqs_per_sec=0.5, throttle_mode=ThrottleMode.ASYNC)
-    def func2(request_number, time_of_start):
-        print(f'request {request_number} sent at elapsed time: '
-              f'{time.time() - time_of_start:0.1f}')
-    start_time = time.time()
-    for idx in range(10):
-        _ = func2(idx, start_time)
-    func2.throttle.start_shutdown()
+import time
+
+
+@throttle(reqs_per_sec=0.5, throttle_mode=ThrottleMode.ASYNC)
+def func2(request_number, time_of_start):
+    print(f'request {request_number} sent at elapsed time: '
+          f'{time.time() - time_of_start:0.1f}')
+
+
+start_time = time.time()
+for idx in range(10):
+    _ = func2(idx, start_time)
+func2.throttle.start_shutdown()
 
 Expected output for Example 6::
 
@@ -236,19 +271,23 @@ Expected output for Example 6::
 .. code-block:: python
 
     from scottbrian_throttle.throttle import Throttle, throttle
-    import time
-    @throttle(reqs_per_sec=2,
-              bucket_size=3,
-              throttle_mode=ThrottleMode.ASYNC)
-    def func3(request_number, time_of_start):
-        print(f'request {request_number} sent at elapsed time: '
-              f'{time.time() - time_of_start:0.1f}')
-        return 0
-    time.sleep(1)
-    start_time = time.time()
-    for idx in range(10):
-        _ = func3(idx, start_time)
-    func3.throttle.start_shutdown()
+import time
+
+
+@throttle(reqs_per_sec=2,
+          bucket_size=3,
+          throttle_mode=ThrottleMode.ASYNC)
+def func3(request_number, time_of_start):
+    print(f'request {request_number} sent at elapsed time: '
+          f'{time.time() - time_of_start:0.1f}')
+    return 0
+
+
+time.sleep(1)
+start_time = time.time()
+for idx in range(10):
+    _ = func3(idx, start_time)
+func3.throttle.start_shutdown()
 
 
 Expected output for Example 7::
@@ -266,7 +305,6 @@ Expected output for Example 7::
 
 """
 
-import functools
 import logging
 import queue
 import threading
@@ -278,12 +316,9 @@ from enum import Enum, auto
 from typing import (
     Any,
     Callable,
-    cast,
     Final,
     NamedTuple,
     Optional,
-    overload,
-    Protocol,
     TYPE_CHECKING,
     Type,
     TypeVar,
@@ -351,6 +386,10 @@ class InvalidAsyncQSizeSpecified(ThrottleError):
 
 class InvalidShutdownRequested(ThrottleError):
     """Throttle exception for invalid shutdown request."""
+
+
+class InvalidArgs(ThrottleError):
+    """Throttle exception for invalid args."""
 
 
 ########################################################################
@@ -424,6 +463,7 @@ class Throttle:
         "lb_with_one_request",
         "logger",
         "pauser",
+        "processing_request",
         "reqs_per_sec",
         "request_scheduler_thread",
         "sent_time_ns",
@@ -439,13 +479,13 @@ class Throttle:
     # __init__
     ####################################################################
     def __init__(
-            self,
-            *,
-            reqs_per_sec: IntFloat,
-            bucket_size: IntFloat = 1,
-            throttle_mode: ThrottleMode = ThrottleMode.SYNC,
-            async_q_size: Optional[int] = None,
-            name: Optional[str] = None,
+        self,
+        *,
+        reqs_per_sec: IntFloat,
+        bucket_size: IntFloat = 1,
+        throttle_mode: ThrottleMode = ThrottleMode.SYNC,
+        async_q_size: Optional[int] = None,
+        name: Optional[str] = None,
     ) -> None:
         """Initialize an instance of the Throttle class.
 
@@ -615,6 +655,8 @@ class Throttle:
 
         self.throttle_state = Throttle._ACTIVE
 
+        self.processing_request = False
+
         if self.throttle_mode == Throttle.ThrottleMode.ASYNC:
             ############################################################
             # Set remainder of async vars
@@ -666,13 +708,15 @@ class Throttle:
     ####################################################################
     # __call__
     ####################################################################
-    @wrapt.bind_state_to_wrapper(name='decorator_instance')
+    @wrapt.bind_state_to_wrapper(name="throttle")
     @wrapt.decorator
-    def __call__(self,
-                 wrapped: Callable[..., Any],
-                 instance: Throttle | None,
-                 args: Any,
-                 kwargs: Any) -> Any:
+    def __call__(
+        self,
+        wrapped: Callable[..., Any],
+        instance: Throttle | None,
+        args: Any,
+        kwargs: Any,
+    ) -> Any:
         """Call the class for decorated function.
 
         Args:
@@ -689,9 +733,7 @@ class Throttle:
               Throttle.RC_OK or Throttle.RC_THROTTLE_IS_SHUTDOWN.
 
         """
-        self.logger.debug(f"__call_ entered for {self=}, {wrapped=}")
-        retval = self.send_request(wrapped, *args, **kwargs)
-        self.logger.debug(f"__call_ exiting with {retval=}")
+        return self._send_request(wrapped, *args, **kwargs)
 
     ####################################################################
     # repr
@@ -736,7 +778,7 @@ class Throttle:
     # len
     ####################################################################
     def __len__(self) -> int:
-        """Return the number of items in the async_q.
+        """Return the number of pending asynchronous items.
 
         Returns:
             The number of entries in the async_q as an integer
@@ -754,27 +796,34 @@ class Throttle:
         .. code-block:: python
 
             from scottbrian_throttle.throttle import Throttle
-            import time
-            def my_request():
-                pass
-            request_throttle = Throttle(reqs_per_sec=1,
-                                        throttle_mode=ThrottleMode.ASYNC
-                                        )
-            for i in range(3):  # quickly queue up 3 items
-                _ = request_throttle.send_request(my_request)
-            time.sleep(0.5)  # allow first 2 requests to be dequeued
-            print(len(request_throttle))
+        import time
 
 
-        Expected output for Example 9::
+        def my_request():
+            pass
 
-            1
 
-        >>> request_throttle.start_shutdown()
+        request_throttle = Throttle(reqs_per_sec=1,
+                                    throttle_mode=ThrottleMode.ASYNC
+                                    )
+        for i in range(3):  # quickly queue up 3 items
+            _ = request_throttle._send_request(my_request)
+        time.sleep(0.5)  # allow first request to be processed
+        print(len(request_throttle))
+
+
+                Expected output for Example 9::
+
+                    2
+
+                >>> request_throttle.start_shutdown()
 
         """
         if self.throttle_mode == Throttle.ThrottleMode.ASYNC:
-            return self.async_q.qsize()
+            num_reqs_pending = self.async_q.qsize()
+            if self.processing_request:
+                num_reqs_pending += 1
+            return num_reqs_pending
         else:
             return 0
 
@@ -865,7 +914,7 @@ class Throttle:
     ####################################################################
     # send_request
     ####################################################################
-    def send_request(self, func: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+    def _send_request(self, func: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
         """Send the request.
 
         Args:
@@ -885,7 +934,6 @@ class Throttle:
                 will be logged and re-raised.
 
         """
-        self.logger.debug(f"send_request entered for {self=}, {func=}, {args=}, {kwargs=}")
         if self.throttle_mode == Throttle.ThrottleMode.ASYNC:
             # if self.throttle_state != Throttle._ACTIVE:
             #     return Throttle.RC_THROTTLE_IS_SHUTDOWN
@@ -932,7 +980,6 @@ class Throttle:
                 # any unhandled errors.
                 ########################################################
                 try:
-                    self.logger.debug(f"send_request calling {func=}")
                     return func(*args, **kwargs)
                 except Exception as e:
                     self.logger.debug(
@@ -1031,7 +1078,7 @@ class Throttle:
             # entry.
             sleep_ns = self._next_target_time_ns - time.perf_counter_ns()
             while (sleep_ns > 0) and (
-                    self.throttle_state != Throttle._HARD_SHUTDOWN_STARTED
+                self.throttle_state != Throttle._HARD_SHUTDOWN_STARTED
             ):
                 # Use min to ensure we don't sleep too long and appear
                 # slow to respond to a shutdown request
@@ -1065,7 +1112,7 @@ class Throttle:
         while True:
             try:
                 request_item = self.async_q.get(block=True, timeout=1)
-                # self.logger.debug(f"sched 1: {request_item=}")
+                self.processing_request = True
 
             except queue.Empty:
                 # Even though we just entered this except code because
@@ -1087,210 +1134,24 @@ class Throttle:
                 # self.logger.debug(f"sched 2: {request_item=}")
                 try:
                     request_item.request_func(*request_item.args, **request_item.kwargs)
+                    self.processing_request = False
                 except Exception as e:
+                    self.processing_request = False
                     self.logger.debug(
                         f"throttle {self.t_name} schedule_requests unhandled exception "
                         f"in request: {e}"
                     )
                     raise
 
-    ########################################################################
-    # shutdown_throttle_funcs
-    ########################################################################
-    def shutdown_throttle_funcs(
-            # *args: _FuncWithThrottleAttr[Callable[..., Any]],
-            *args: Callable[..., Any],
-            shutdown_type: int = 1,  # Throttle.SHUTDOWN_SOFT,
-            timeout: OptIntFloat = None,
-    ) -> bool:
-        """Shutdown the throttle request scheduling for decorated functions.
-
-        The shutdown_throttle_funcs function is used to shutdown one or more
-        functions that were decorated with the throttle. The arguments apply
-        to each of the functions that are specified to be shutdown. If
-        timeout is specified, then True is returned if all functions
-        were shutdown within the timeout number of seconds specified.
-
-        Args:
-            args: one or more functions to be shutdown
-            shutdown_type: specifies whether to do a soft or a hard
-                             shutdown:
-
-                             * A soft shutdown
-                               (Throttle.SHUTDOWN_SOFT), the
-                               default, stops any additional requests from
-                               being queued and cleans up the request queue
-                               by scheduling any remaining requests at the
-                               normal interval as calculated by the seconds
-                               and requests that were specified during
-                               instantiation.
-                             * A hard shutdown
-                               (Throttle.SHUTDOWN_HARD) stops any
-                               additional requests from being queued and
-                               cleans up the request queue by quickly
-                               removing any remaining requests without
-                               executing them.
-            timeout: number of seconds to allow for shutdown to complete for
-                       all functions specified to be shutdown.
-                       Note that a *timeout* of zero or less is equivalent
-                       to a *timeout* of None, meaning start_shutdown will
-                       return when the shutdown is complete without a
-                       timeout.
-
-        .. # noqa: DAR101
-
-        Returns:
-            * ``True`` if *timeout* was not specified, or if it was
-              specified and all specified functions completed
-              shutdown within the specified number of seconds. Also, if the
-              list of funcs to shutdown is empty, True is returned.
-            * ``False`` if *timeout* was specified and at least one of the
-              functions specified to shutdown did not complete within the
-              specified number of seconds.
-
-        """
-        funcs = [func for func in args]
-        timer = Timer(timeout=timeout)
-        ####################################################################
-        # In the following code we loop until we all funcs are shutdown or
-        # until we time out when timeout is specified. We call shutdown for
-        # each func with a very short timeout value. The first attempt for
-        # each func will get its shutdown started and very likely result in
-        # a timeout retcode. This is OK since we suppress the timeout log
-        # message. Even though the timeout happens, the shutdown, once
-        # started, will continue processing. Each subsequent attempt will
-        # either timeout again or come back with a completed retcode. We
-        # remove each completed func from the list and keep trying the
-        # remining funcs.
-        ####################################################################
-        while funcs:
-            funcs_remaining = [func for func in funcs]
-            for func in funcs_remaining:
-                if Throttle.RC_SHUTDOWN_TIMED_OUT != func._self_wrapper._start_shutdown(
-                        shutdown_type=shutdown_type, timeout=0.01, suppress_timeout_msg=True
-                ):
-                    funcs.remove(func)
-
-            if timer.is_expired() and funcs:
-                for func in funcs:
-                    func._self_wrapper.logger.debug(
-                        f"Throttle {func._self_wrapper.t_name} shutdown_throttle_funcs request "
-                        f"timed out with {timeout=:.4f}"
-                    )
-                return False  # we timed out
-
-            time.sleep(0.1)  # allow shutdowns to progress
-
-        # if here, all funcs successfully shutdown
-        return True
-
-    ####################################################################
-    # start_shutdown
-    ####################################################################
-    @staticmethod
-    def start_shutdown(
-            func: Callable[..., Any],
-            # shutdown_type: int = Throttle.SHUTDOWN_SOFT,
-            shutdown_type: int = 1,
-            timeout: OptIntFloat = None,
-            suppress_timeout_msg: bool = False,
-    ) -> int:
-        """Shutdown the async throttle request scheduling.
-
-        Shutdown is used to stop and clean up any pending requests on
-        the async request queue. This should be done during normal
-        application shutdown or when an error occurs. Once the throttle
-        has completed shutdown it can no longer be used. If a throttle
-        is once again needed after shutdown, a new one will need to be
-        instantiated to replace the old one.
-
-        Note that a soft shutdown can be started and eventually be
-        followed by a hard shutdown to force shutdown to complete
-        quickly. A hard shutdown, however, can not be followed by a
-        soft shutdown since there is no way to retrieve and run any
-        of the requests that were already removed and tossed by the
-        hard shutdown.
-
-        Args:
-            shutdown_type: specifies whether to do a soft or a hard
-                shutdown:
-
-                     * A soft shutdown
-                       (Throttle.SHUTDOWN_SOFT),
-                       the default, stops any additional
-                       requests from being queued and cleans up
-                       the request queue by scheduling any
-                       remaining requests at the normal interval
-                       as calculated by the *seconds* and
-                       *requests* arguments specified during
-                       throttle instantiation.
-                     * A hard shutdown
-                       (Throttle.SHUTDOWN_HARD) stops
-                       any additional requests from being queued
-                       and cleans up the request queue by
-                       quickly removing any remaining requests
-                       without executing them.
-
-            timeout: number of seconds to allow for shutdown to
-                       complete. If the shutdown times out, control is
-                       returned with a return value of False. The
-                       shutdown will continue and a subsequent call to
-                       start_shutdown, with or without a timeout value,
-                       may eventually return control with a return value
-                       of True to indicate that the shutdown has
-                       completed. Note that a *timeout* value of zero or
-                       less is handled as if shutdown None was
-                       specified, whether explicitly or by default, in
-                       which case the shutdown will not timeout and will
-                       control will be returned if and when the shutdown
-                       completes. A very small value, such as 0.001,
-                       can be used to start the shutdown and then get
-                       back control to allow other cleanup activities
-                       to be performed and eventually issue a second
-                       shutdown request to ensure that it is completed.
-            suppress_timeout_msg: used by shutdown_throttle_funcs to
-                       prevent the timeout log message since it will
-                       issue its own log message
-
-        .. # noqa: DAR101
-
-        Returns: One of the following return codes is returned:
-
-            * RC_SHUTDOWN_SOFT_COMPLETED_OK (0): the
-              ``start_shutdown()`` request either completed a soft
-              shutdown or detected that a previous soft shutdown
-              request had been completed.
-            * RC_SHUTDOWN_HARD_COMPLETED_OK (4): the
-              ``start_shutdown()`` request either completed a hard
-              shutdown or detected that a previous hard shutdown
-              request had been completed.
-            * RC_SHUTDOWN_TIMED_OUT (8): the ``start_shutdown()``
-              request with a non-zero positive *timeout* value was
-              specified and did not complete within the specified
-              number of seconds
-
-        Raises:
-            IncorrectShutdownTypeSpecified: For start_shutdown,
-            shutdownType must be specified as either
-            Throttle.SHUTDOWN_SOFT or
-            Throttle.SHUTDOWN_HARD
-
-        """
-        print(f"\n ********  start_shutdown entered {func=}\n")
-        return func.decorator_instance._start_shutdown(
-            shutdown_type=shutdown_type,
-            timeout=timeout,
-            suppress_timeout_msg=suppress_timeout_msg)
-
     ####################################################################
     # _start_shutdown
     ####################################################################
-    def _start_shutdown(
-            self,
-            # shutdown_type: int = Throttle.SHUTDOWN_SOFT,
-            shutdown_type: int = 1,
-            timeout: OptIntFloat = None,
-            suppress_timeout_msg: bool = False,
+    def start_shutdown(
+        self,
+        # shutdown_type: int = Throttle.SHUTDOWN_SOFT,
+        shutdown_type: int = 1,
+        timeout: OptIntFloat = None,
+        suppress_timeout_msg: bool = False,
     ) -> int:
         """Shutdown the async throttle request scheduling.
 
@@ -1384,8 +1245,8 @@ class Throttle:
             raise InvalidShutdownRequested(error_msg)
 
         if (
-                shutdown_type != Throttle.SHUTDOWN_SOFT
-                and shutdown_type != Throttle.SHUTDOWN_HARD
+            shutdown_type != Throttle.SHUTDOWN_SOFT
+            and shutdown_type != Throttle.SHUTDOWN_HARD
         ):
             error_msg = (
                 "For start_shutdown, shutdownType must be specified as "
@@ -1443,8 +1304,8 @@ class Throttle:
                 # shutdown is now being requested, we need to shift to a
                 # hard shutdown
                 if (
-                        self.throttle_state == Throttle._SOFT_SHUTDOWN_STARTED
-                        and shutdown_type == Throttle.SHUTDOWN_HARD
+                    self.throttle_state == Throttle._SOFT_SHUTDOWN_STARTED
+                    and shutdown_type == Throttle.SHUTDOWN_HARD
                 ):
                     self.throttle_state = Throttle._HARD_SHUTDOWN_STARTED
 
@@ -1484,7 +1345,7 @@ class Throttle:
             if completion_log_msg_needed:
                 # add 0.0001 so we don't get a zero elapsed time
                 self.shutdown_elapsed_time = (
-                        time.time() - self.shutdown_start_time + 0.0001
+                    time.time() - self.shutdown_start_time + 0.0001
                 )
                 self.logger.info(
                     f"throttle {self.t_name} start_shutdown request successfully "
@@ -1495,197 +1356,3 @@ class Throttle:
                 return Throttle.RC_SHUTDOWN_SOFT_COMPLETED_OK
             else:
                 return Throttle.RC_SHUTDOWN_HARD_COMPLETED_OK
-
-
-########################################################################
-# _FuncWithThrottleAttr class
-########################################################################
-class _FuncWithThrottleAttr(Protocol[F]):
-    """Class to allow type checking on function with attribute."""
-
-    throttle: Throttle
-    __call__: F
-
-
-def _add_throttle_attr(func: F) -> _FuncWithThrottleAttr[F]:
-    """Wrapper to add throttle attribute to function.
-
-    Args:
-        func: function that has the attribute added
-
-    Returns:
-        input function with throttle attached as attribute
-
-    """
-    return cast(_FuncWithThrottleAttr[F], func)
-
-
-########################################################################
-# @throttle
-########################################################################
-@overload
-def throttle(
-        _wrapped: F,
-        *,
-        reqs_per_sec: IntFloat,
-        bucket_size: IntFloat = 1,
-        throttle_mode: Throttle.ThrottleMode = Throttle.ThrottleMode.SYNC,
-        async_q_size: Optional[int] = None,
-        name: Optional[str] = None,
-) -> _FuncWithThrottleAttr[F]:
-    pass
-
-
-@overload
-def throttle(
-        *,
-        reqs_per_sec: IntFloat,
-        bucket_size: IntFloat = 1,
-        throttle_mode: Throttle.ThrottleMode = Throttle.ThrottleMode.SYNC,
-        async_q_size: Optional[int] = None,
-        name: Optional[str] = None,
-) -> Callable[[F], _FuncWithThrottleAttr[F]]:
-    pass
-
-
-def throttle(
-        _wrapped: Optional[F] = None,
-        *,
-        reqs_per_sec: IntFloat,
-        bucket_size: IntFloat = 1,
-        throttle_mode: Throttle.ThrottleMode = Throttle.ThrottleMode.SYNC,
-        async_q_size: Optional[int] = None,
-        name: Optional[str] = None,
-) -> Union[F, _FuncWithThrottleAttr[F]]:
-    """Decorator to wrap a function in a throttle.
-
-    The throttle wraps code around a function to limit the rate that it
-    can be called.
-
-    Args:
-        reqs_per_sec: The number of requests that can be made in
-                      one second.
-        bucket_size: Specifies the number of requests that can be
-                     conceptually placed into the bucket for the
-                     leaky bucket algorithm. As requests arrive,
-                     the bucket is checked to determine if it has
-                     room for the request. If so, it is placed into
-                     the bucket and sent without delay. If not, the
-                     request is delayed until enough time has
-                     elapsed for the bucket to leak out enough to
-                     allow the request to fit. A specification of
-                     one for the bucket_size will effectively
-                     cause non-leaky bucket behavior, meaning that
-                     each request that arrives before the previous
-                     request interval has elapsed will be delayed.
-                     The bucket_size must be greater than or equal
-                     to 1.
-        throttle_mode: If ThrottleMode.ASYNC, the throttle is
-                asynchronous. If ThrottleeMode.SYNC, the default, the
-                throttle is synchronous.
-        async_q_size: Specifies the size of the request
-                      queue for async requests. When the request
-                      queue is totally populated, any additional
-                      calls to send_request will be delayed
-                      until queued requests are removed and
-                      scheduled. The default is 4096 requests.
-        name: The name used to identify the throttle in log messages
-            issued by the throttle. The default name is
-            the python id of the Throttle class instance.
-
-    Returns:
-        A callable function that delays the request as needed in
-        accordance with the specified limits.
-
-    :Example 10: wrap a function with a throttle for 1 request
-                  per second
-
-    .. code-block:: python
-
-        from scottbrian_throttle.throttle import throttle
-        @throttle(reqs_per_sec=1)
-        def f1() -> None:
-            print('example 1 request function')
-
-
-    """
-    # ==================================================================
-    #  The following code covers cases where throttle is used with or
-    #  without the pie character, where the decorated function has or
-    #  does not have parameters.
-    #
-    #     Here's an example of throttle with a function that has no
-    #         args:
-    #         @throttle(reqs_per_sec=1)
-    #         def a_func():
-    #             print('42')
-    #
-    #     This is what essentially happens under the covers:
-    #         def a_func():
-    #             print('42')
-    #         aFunc = throttle(reqs_per_sec=1)(a_func)
-    #
-    #     The call to throttle results in a function being returned that
-    #     takes as its first argument the a_func specification that we
-    #     see in parens immediately following the throttle call.
-    #
-    #     Note that we can also code the above as shown and get the same
-    #     result:
-    #         def a_func():
-    #             print('42')
-    #         a_func = throttle(a_func, reqs_per_sec=1)
-    #
-    #     What happens is throttle gets control and tests whether a_func
-    #     was specified, and if not returns a call to functools.partial
-    #     which is the function that accepts the a_func
-    #     specification and then calls throttle with a_func as the first
-    #     argument with the other arg for reqs_per_sec.
-    #
-    #     One other complication is that we are also using the
-    #     wrapt.decorator for the inner wrapper function which helps to
-    #     ensure introspection will work as expected.
-    # ==================================================================
-
-    if _wrapped is None:
-        return cast(
-            _FuncWithThrottleAttr[F],
-            functools.partial(
-                throttle,
-                reqs_per_sec=reqs_per_sec,
-                bucket_size=bucket_size,
-                throttle_mode=throttle_mode,
-                async_q_size=async_q_size,
-                name=name,
-            ),
-        )
-
-    if name is None:
-        name = _wrapped.__name__
-
-    a_throttle = Throttle(
-        reqs_per_sec=reqs_per_sec,
-        bucket_size=bucket_size,
-        throttle_mode=throttle_mode,
-        async_q_size=async_q_size,
-        name=name,
-    )
-
-    @decorator  # type: ignore
-    def wrapper(
-            func_to_wrap: F,
-            instance: Optional[Any],
-            args: tuple[Any, ...],
-            kwargs2: dict[str, Any],
-    ) -> Any:
-
-        return a_throttle.send_request(func_to_wrap, *args, **kwargs2)
-
-    wrapper = wrapper(_wrapped)
-
-    wrapper = _add_throttle_attr(wrapper)
-    wrapper.throttle = a_throttle
-
-    return cast(_FuncWithThrottleAttr[F], wrapper)
-
-
-throttle.mode = Throttle.ThrottleMode
