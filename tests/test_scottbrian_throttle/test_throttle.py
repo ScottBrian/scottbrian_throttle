@@ -34,15 +34,12 @@ from typing_extensions import TypeAlias
 # Local
 ########################################################################
 from scottbrian_throttle.throttle import (
-    throttle,
-    _FuncWithThrottleAttr,
     IncorrectReqsPerSecSpecified,
     IncorrectAsyncQSizeSpecified,
     IncorrectBucketSizeSpecified,
     IncorrectShutdownTypeSpecified,
     InvalidAsyncQSizeSpecified,
     InvalidShutdownRequested,
-    # shutdown_throttle_funcs,
     Throttle,
 )
 
@@ -4609,21 +4606,24 @@ class TestThrottleDocstrings:
             capsys: pytest fixture to capture print output
 
         """
-        hdr_str = ":Example 1: Wrapping a function with the **@Throttle** decorator"
+        hdr_str = ":Example 1: Throttle at 1 requests per second:"
         flowers(hdr_str)
 
+        from scottbrian_throttle.throttle import Throttle
         import time
 
-        @Throttle(reqs_per_sec=2)
-        def func1(request_number: int, time_of_start: float) -> None:
-            print(
+        @Throttle()
+        def func1(request_number, time_of_start):
+            ret_value = (
                 f"request {request_number} sent at elapsed time: "
                 f"{time.time() - time_of_start:0.1f}"
             )
+            return ret_value
 
         start_time = time.time()
         for idx in range(10):
-            func1(idx, start_time)
+            ret_val = func1(idx, start_time)
+            print(ret_val)
 
         flower_str = ("*" * (len(hdr_str) + 4)) + "\n"
 
@@ -4631,15 +4631,15 @@ class TestThrottleDocstrings:
         expected_result += f"* {hdr_str} *\n"
         expected_result += flower_str
         expected_result += "request 0 sent at elapsed time: 0.0\n"
-        expected_result += "request 1 sent at elapsed time: 0.5\n"
-        expected_result += "request 2 sent at elapsed time: 1.0\n"
-        expected_result += "request 3 sent at elapsed time: 1.5\n"
-        expected_result += "request 4 sent at elapsed time: 2.0\n"
-        expected_result += "request 5 sent at elapsed time: 2.5\n"
-        expected_result += "request 6 sent at elapsed time: 3.0\n"
-        expected_result += "request 7 sent at elapsed time: 3.5\n"
-        expected_result += "request 8 sent at elapsed time: 4.0\n"
-        expected_result += "request 9 sent at elapsed time: 4.5\n"
+        expected_result += "request 1 sent at elapsed time: 1.0\n"
+        expected_result += "request 2 sent at elapsed time: 2.0\n"
+        expected_result += "request 3 sent at elapsed time: 3.0\n"
+        expected_result += "request 4 sent at elapsed time: 4.0\n"
+        expected_result += "request 5 sent at elapsed time: 5.0\n"
+        expected_result += "request 6 sent at elapsed time: 6.0\n"
+        expected_result += "request 7 sent at elapsed time: 7.0\n"
+        expected_result += "request 8 sent at elapsed time: 8.0\n"
+        expected_result += "request 9 sent at elapsed time: 9.0\n"
 
         captured = capsys.readouterr().out
 
@@ -4656,29 +4656,24 @@ class TestThrottleDocstrings:
 
         """
 
-        hdr_str = (
-            ":Example 2: Wrapping a function with the **@Throttle** decorator for async"
-        )
+        hdr_str = ":Example 2: Throttle at 2 requests per second:"
         flowers(hdr_str)
 
         from scottbrian_throttle.throttle import Throttle
-        import time, sys
+        import time
 
-        @Throttle(reqs_per_sec=0.5, throttle_mode=Throttle.ThrottleMode.ASYNC)
-        def func2(request_number: int, time_of_start: float):  # type: ignore
-            sys.stdout.flush()
-            time.sleep(0.01)
-            print(
+        @Throttle(reqs_per_sec=2)
+        def func2(request_number, time_of_start):
+            ret_value = (
                 f"request {request_number} sent at elapsed time: "
                 f"{time.time() - time_of_start:0.1f}"
             )
+            return ret_value
 
-        time.sleep(2)
         start_time = time.time()
         for idx in range(10):
-            func2(idx, start_time)
-
-        Throttle.start_shutdown(func2)
+            ret_val = func2(idx, start_time)
+            print(ret_val)
 
         flower_str = ("*" * (len(hdr_str) + 4)) + "\n"
 
@@ -4686,15 +4681,15 @@ class TestThrottleDocstrings:
         expected_result += f"* {hdr_str} *\n"
         expected_result += flower_str
         expected_result += "request 0 sent at elapsed time: 0.0\n"
-        expected_result += "request 1 sent at elapsed time: 2.0\n"
-        expected_result += "request 2 sent at elapsed time: 4.0\n"
-        expected_result += "request 3 sent at elapsed time: 6.0\n"
-        expected_result += "request 4 sent at elapsed time: 8.0\n"
-        expected_result += "request 5 sent at elapsed time: 10.0\n"
-        expected_result += "request 6 sent at elapsed time: 12.0\n"
-        expected_result += "request 7 sent at elapsed time: 14.0\n"
-        expected_result += "request 8 sent at elapsed time: 16.0\n"
-        expected_result += "request 9 sent at elapsed time: 18.0\n"
+        expected_result += "request 1 sent at elapsed time: 0.5\n"
+        expected_result += "request 2 sent at elapsed time: 1.0\n"
+        expected_result += "request 3 sent at elapsed time: 1.5\n"
+        expected_result += "request 4 sent at elapsed time: 2.0\n"
+        expected_result += "request 5 sent at elapsed time: 2.5\n"
+        expected_result += "request 6 sent at elapsed time: 3.0\n"
+        expected_result += "request 7 sent at elapsed time: 3.5\n"
+        expected_result += "request 8 sent at elapsed time: 4.0\n"
+        expected_result += "request 9 sent at elapsed time: 4.5\n"
 
         time.sleep(1)
         captured = capsys.readouterr().out
@@ -4712,19 +4707,14 @@ class TestThrottleDocstrings:
 
         """
 
-        hdr_str = (
-            ":Example 3: Wrapping a function with the **@throttle** decorator for "
-            "async with leaky bucket"
-        )
+        hdr_str = ":Example 3: asynchronous throttle:"
         flowers(hdr_str)
 
         from scottbrian_throttle.throttle import Throttle
         import time, sys
 
-        @Throttle(
-            reqs_per_sec=1, bucket_size=5, throttle_mode=Throttle.ThrottleMode.ASYNC
-        )
-        def func3(request_number: int, time_of_start: float) -> None:
+        @Throttle(reqs_per_sec=2, throttle_mode=Throttle.ThrottleMode.ASYNC)
+        def func3(request_number, time_of_start):
             if request_number == 0:
                 sys.stdout.flush()
                 time.sleep(0.02)
@@ -4733,12 +4723,10 @@ class TestThrottleDocstrings:
                 f"{time.time() - time_of_start:0.1f}"
             )
 
-        time.sleep(2)
         start_time = time.time()
         for idx in range(10):
             func3(idx, start_time)
-        # do other processing since not waiting for return from throttle
-        # after other processing, do a shutdown of the throttle
+
         func3.throttle.start_shutdown()
 
         flower_str = ("*" * (len(hdr_str) + 4)) + "\n"
@@ -4747,15 +4735,15 @@ class TestThrottleDocstrings:
         expected_result += f"* {hdr_str} *\n"
         expected_result += flower_str
         expected_result += "request 0 sent at elapsed time: 0.0\n"
-        expected_result += "request 1 sent at elapsed time: 0.0\n"
-        expected_result += "request 2 sent at elapsed time: 0.0\n"
-        expected_result += "request 3 sent at elapsed time: 0.0\n"
-        expected_result += "request 4 sent at elapsed time: 0.0\n"
-        expected_result += "request 5 sent at elapsed time: 1.0\n"
-        expected_result += "request 6 sent at elapsed time: 2.0\n"
-        expected_result += "request 7 sent at elapsed time: 3.0\n"
+        expected_result += "request 1 sent at elapsed time: 0.5\n"
+        expected_result += "request 2 sent at elapsed time: 1.0\n"
+        expected_result += "request 3 sent at elapsed time: 1.5\n"
+        expected_result += "request 4 sent at elapsed time: 2.0\n"
+        expected_result += "request 5 sent at elapsed time: 2.5\n"
+        expected_result += "request 6 sent at elapsed time: 3.0\n"
+        expected_result += "request 7 sent at elapsed time: 3.5\n"
         expected_result += "request 8 sent at elapsed time: 4.0\n"
-        expected_result += "request 9 sent at elapsed time: 5.0\n"
+        expected_result += "request 9 sent at elapsed time: 4.5\n"
 
         time.sleep(1)
         captured = capsys.readouterr().out
@@ -4763,315 +4751,24 @@ class TestThrottleDocstrings:
         assert captured == expected_result
 
     ####################################################################
-    # test_throttle_example_8
+    # test_throttle_example_4
     ####################################################################
-    def test_throttle_example_8(self, capsys: Any) -> None:
-        """Method test_throttle_example_8.
+    def test_throttle_example_4(self, capsys: Any) -> None:
+        """Method test_throttle_example_4.
 
         Args:
             capsys: pytest fixture to capture print output
 
         """
 
-        hdr_str = ":Example 8: instantiate a throttle for 1 requests every 2 seconds "
-        flowers(hdr_str)
-
-        from scottbrian_throttle.throttle import Throttle
-
-        request_throttle = Throttle(reqs_per_sec=0.5)
-        repr(request_throttle)
-
-        flower_str = ("*" * (len(hdr_str) + 4)) + "\n"
-
-        expected_result = "\n" + flower_str
-        expected_result += f"* {hdr_str} *\n"
-        expected_result += flower_str
-
-        captured = capsys.readouterr().out
-
-        assert captured == expected_result
-
-    ####################################################################
-    # test_throttle_example_9
-    ####################################################################
-    def test_throttle_example_9(self, capsys: Any) -> None:
-        """Method test_throttle_example_9.
-
-        Args:
-            capsys: pytest fixture to capture print output
-
-        """
-
-        hdr_str = (
-            ":Example 9: instantiate an asynchronous throttle for 1 request per second"
-        )
+        hdr_str = ":Example 4: Throttle with a *bucket_size* of 3:"
         flowers(hdr_str)
 
         from scottbrian_throttle.throttle import Throttle
         import time
 
-        def my_request(idx: int) -> None:
-            pass
-
-        request_throttle = Throttle(reqs_per_sec=1, throttle_mode=ThrottleMode.ASYNC)
-        for idx in range(3):  # quickly queue up 3 items
-            _ = request_throttle._send_request(my_request, idx)
-        time.sleep(0.5)  # allow first two requests to be dequeued
-        num_on_q = len(request_throttle)
-        print(f"{num_on_q=}")
-
-        request_throttle.start_shutdown()
-
-        flower_str = ("*" * (len(hdr_str) + 4)) + "\n"
-
-        expected_result = "\n" + flower_str
-        expected_result += f"* {hdr_str} *\n"
-        expected_result += flower_str
-        expected_result += "num_on_q=1\n"
-
-        captured = capsys.readouterr().out
-
-        assert captured == expected_result
-
-    ####################################################################
-    # test_throttle_readme_example_1
-    ####################################################################
-    def test_throttle_readme_example_1(self, capsys: Any) -> None:
-        """Method test_throttle_readme_example_1.
-
-        Args:
-            capsys: pytest fixture to capture print output
-
-        """
-
-        hdr_str = ":Example 1: Instantiate a throttle and send some requests:"
-        flowers(hdr_str)
-
-        from scottbrian_throttle.throttle import Throttle
-        import time
-
-        throttle_1 = Throttle(reqs_per_sec=2)
-
-        def target_rtn1(request_number: int, time_of_start: float) -> str:
-            ret_value = (
-                f"request {request_number} sent at elapsed time: "
-                f"{time.time() - time_of_start:0.1f}"
-            )
-            return ret_value
-
-        start_time = time.time()
-        for idx in range(10):
-            ret_val = throttle_1._send_request(target_rtn1, idx, start_time)
-            print(ret_val)
-
-        flower_str = ("*" * (len(hdr_str) + 4)) + "\n"
-
-        expected_result = "\n" + flower_str
-        expected_result += f"* {hdr_str} *\n"
-        expected_result += flower_str
-        expected_result += "request 0 sent at elapsed time: 0.0\n"
-        expected_result += "request 1 sent at elapsed time: 0.5\n"
-        expected_result += "request 2 sent at elapsed time: 1.0\n"
-        expected_result += "request 3 sent at elapsed time: 1.5\n"
-        expected_result += "request 4 sent at elapsed time: 2.0\n"
-        expected_result += "request 5 sent at elapsed time: 2.5\n"
-        expected_result += "request 6 sent at elapsed time: 3.0\n"
-        expected_result += "request 7 sent at elapsed time: 3.5\n"
-        expected_result += "request 8 sent at elapsed time: 4.0\n"
-        expected_result += "request 9 sent at elapsed time: 4.5\n"
-
-        captured = capsys.readouterr().out
-
-        assert captured == expected_result
-
-    ####################################################################
-    # test_throttle_readme_example_2
-    ####################################################################
-    def test_throttle_readme_example_2(self, capsys: Any) -> None:
-        """Method test_throttle_readme_example_2.
-
-        Args:
-            capsys: pytest fixture to capture print output
-
-        """
-
-        hdr_str = (
-            ":Example 2: Decorate a function with the throttle and call it a "
-            "few times:"
-        )
-        flowers(hdr_str)
-
-        import time
-
-        @throttle(reqs_per_sec=2)
-        def target_rtn2(request_number: int, time_of_start: float) -> str:
-            ret_value = (
-                f"request {request_number} sent at elapsed time: "
-                f"{time.time() - time_of_start:0.1f}"
-            )
-            return ret_value
-
-        start_time = time.time()
-        for idx in range(10):
-            ret_val = target_rtn2(idx, start_time)
-            print(ret_val)
-
-        flower_str = ("*" * (len(hdr_str) + 4)) + "\n"
-
-        expected_result = "\n" + flower_str
-        expected_result += f"* {hdr_str} *\n"
-        expected_result += flower_str
-        expected_result += "request 0 sent at elapsed time: 0.0\n"
-        expected_result += "request 1 sent at elapsed time: 0.5\n"
-        expected_result += "request 2 sent at elapsed time: 1.0\n"
-        expected_result += "request 3 sent at elapsed time: 1.5\n"
-        expected_result += "request 4 sent at elapsed time: 2.0\n"
-        expected_result += "request 5 sent at elapsed time: 2.5\n"
-        expected_result += "request 6 sent at elapsed time: 3.0\n"
-        expected_result += "request 7 sent at elapsed time: 3.5\n"
-        expected_result += "request 8 sent at elapsed time: 4.0\n"
-        expected_result += "request 9 sent at elapsed time: 4.5\n"
-
-        captured = capsys.readouterr().out
-
-        assert captured == expected_result
-
-    ####################################################################
-    # test_throttle_readme_example_3
-    ####################################################################
-    def test_throttle_readme_example_3(self, capsys: Any) -> None:
-        """Method test_throttle_readme_example_3.
-
-        Args:
-            capsys: pytest fixture to capture print output
-
-        """
-
-        hdr_str = (
-            ":Example 3: Instantiate an asynchronous throttle and send some "
-            "requests:"
-        )
-
-        flowers(hdr_str)
-
-        from scottbrian_throttle.throttle import Throttle
-        import time, sys
-
-        throttle_3 = Throttle(reqs_per_sec=2, throttle_mode=ThrottleMode.ASYNC)
-
-        def target_rtn3(request_number: int, time_of_start: float) -> None:
-            if request_number == 0:
-                sys.stdout.flush()
-                time.sleep(0.02)
-            print(
-                f"request {request_number} sent at elapsed time: "
-                f"{time.time() - time_of_start:0.1f}"
-            )
-
-        time.sleep(2)
-        start_time = time.time()
-        for idx in range(10):
-            throttle_3._send_request(target_rtn3, idx, start_time)
-        throttle_3.start_shutdown()
-
-        flower_str = ("*" * (len(hdr_str) + 4)) + "\n"
-
-        expected_result = "\n" + flower_str
-        expected_result += f"* {hdr_str} *\n"
-        expected_result += flower_str
-        expected_result += "request 0 sent at elapsed time: 0.0\n"
-        expected_result += "request 1 sent at elapsed time: 0.5\n"
-        expected_result += "request 2 sent at elapsed time: 1.0\n"
-        expected_result += "request 3 sent at elapsed time: 1.5\n"
-        expected_result += "request 4 sent at elapsed time: 2.0\n"
-        expected_result += "request 5 sent at elapsed time: 2.5\n"
-        expected_result += "request 6 sent at elapsed time: 3.0\n"
-        expected_result += "request 7 sent at elapsed time: 3.5\n"
-        expected_result += "request 8 sent at elapsed time: 4.0\n"
-        expected_result += "request 9 sent at elapsed time: 4.5\n"
-
-        captured = capsys.readouterr().out
-
-        assert captured == expected_result
-
-    ####################################################################
-    # test_throttle_readme_example_4
-    ####################################################################
-    def test_throttle_readme_example_4(self, capsys: Any) -> None:
-        """Method test_throttle_readme_example_4.
-
-        Args:
-            capsys: pytest fixture to capture print output
-
-        """
-
-        hdr_str = (
-            ":Example 4: Decorate a function with an asynchronous throttle and "
-            "call it a few times:"
-        )
-
-        flowers(hdr_str)
-
-        import time, sys
-
-        @throttle(reqs_per_sec=2, throttle_mode=throttle.mode.ThrottleMode.ASYNC)
-        def target_rtn4(request_number: int, time_of_start: float) -> None:
-            if request_number == 0:
-                sys.stdout.flush()
-                time.sleep(0.02)
-            print(
-                f"request {request_number} sent at elapsed time: "
-                f"{time.time() - time_of_start:0.1f}"
-            )
-
-        time.sleep(2)
-        start_time = time.time()
-        for idx in range(10):
-            target_rtn4(idx, start_time)
-        target_rtn4.throttle.start_shutdown()
-
-        flower_str = ("*" * (len(hdr_str) + 4)) + "\n"
-
-        expected_result = "\n" + flower_str
-        expected_result += f"* {hdr_str} *\n"
-        expected_result += flower_str
-        expected_result += "request 0 sent at elapsed time: 0.0\n"
-        expected_result += "request 1 sent at elapsed time: 0.5\n"
-        expected_result += "request 2 sent at elapsed time: 1.0\n"
-        expected_result += "request 3 sent at elapsed time: 1.5\n"
-        expected_result += "request 4 sent at elapsed time: 2.0\n"
-        expected_result += "request 5 sent at elapsed time: 2.5\n"
-        expected_result += "request 6 sent at elapsed time: 3.0\n"
-        expected_result += "request 7 sent at elapsed time: 3.5\n"
-        expected_result += "request 8 sent at elapsed time: 4.0\n"
-        expected_result += "request 9 sent at elapsed time: 4.5\n"
-
-        captured = capsys.readouterr().out
-
-        assert captured == expected_result
-
-    ####################################################################
-    # test_throttle_readme_example_5
-    ####################################################################
-    def test_throttle_readme_example_5(self, capsys: Any) -> None:
-        """Method test_throttle_readme_example_5.
-
-        Args:
-            capsys: pytest fixture to capture print output
-
-        """
-
-        hdr_str = (
-            ":Example 5: Instantiate a leaky bucket throttle and send some " "requests:"
-        )
-        flowers(hdr_str)
-
-        from scottbrian_throttle.throttle import Throttle
-        import time
-
-        throttle_5 = Throttle(reqs_per_sec=2, bucket_size=3)
-
-        def target_rtn5(request_number: int, time_of_start: float) -> None:
+        @Throttle(reqs_per_sec=2, bucket_size=3)
+        def func4(request_number, time_of_start):
             print(
                 f"request {request_number} sent at elapsed time: "
                 f"{time.time() - time_of_start:0.1f}"
@@ -5079,57 +4776,7 @@ class TestThrottleDocstrings:
 
         start_time = time.time()
         for idx in range(10):
-            throttle_5._send_request(target_rtn5, idx, start_time)
-
-        flower_str = ("*" * (len(hdr_str) + 4)) + "\n"
-
-        expected_result = "\n" + flower_str
-        expected_result += f"* {hdr_str} *\n"
-        expected_result += flower_str
-        expected_result += "request 0 sent at elapsed time: 0.0\n"
-        expected_result += "request 1 sent at elapsed time: 0.0\n"
-        expected_result += "request 2 sent at elapsed time: 0.0\n"
-        expected_result += "request 3 sent at elapsed time: 0.5\n"
-        expected_result += "request 4 sent at elapsed time: 1.0\n"
-        expected_result += "request 5 sent at elapsed time: 1.5\n"
-        expected_result += "request 6 sent at elapsed time: 2.0\n"
-        expected_result += "request 7 sent at elapsed time: 2.5\n"
-        expected_result += "request 8 sent at elapsed time: 3.0\n"
-        expected_result += "request 9 sent at elapsed time: 3.5\n"
-
-        captured = capsys.readouterr().out
-
-        assert captured == expected_result
-
-    ####################################################################
-    # test_throttle_readme_example_6
-    ####################################################################
-    def test_throttle_readme_example_6(self, capsys: Any) -> None:
-        """Method test_throttle_readme_example_6.
-
-        Args:
-            capsys: pytest fixture to capture print output
-
-        """
-
-        hdr_str = (
-            ":Example 6: Decorate a function with a leaky bucket throttle and call "
-            "it a few times:"
-        )
-        flowers(hdr_str)
-
-        import time
-
-        @throttle(reqs_per_sec=2, bucket_size=3)
-        def target_rtn6(request_number: int, time_of_start: float) -> None:
-            print(
-                f"request {request_number} sent at elapsed time: "
-                f"{time.time() - time_of_start:0.1f}"
-            )
-
-        start_time = time.time()
-        for idx in range(10):
-            target_rtn6(idx, start_time)
+            func4(idx, start_time)
 
         flower_str = ("*" * (len(hdr_str) + 4)) + "\n"
 

@@ -7,37 +7,20 @@ Throttle
 The Throttle allows you to limit the rate at which a function is
 called. An internet service, for example, might have a limit for the
 number of requests you can send in a given interval - using the
-throttle will help you stay within that limit.
+Throttle will help you stay within that limit.
 
-You decorate your function with the Throttle and optionally specify the
-required interval between calls with the *reqs_per_sec* parameter. The
-default is *reqs_per_sec=1*. When you call your function, the Throttle
-checks to see whether the request interval has elapsed since the last
-call was made and adds a delay if needed to stay within the limit.
+The Throttle is a decorator that wraps your function with code that
+keeps track of the intervals between each invocation. The Throttle will
+delay the running of your function to stay within the limit. By default,
+the Throttle maintains a limit of 1 call per second.
 
-The interval is calculated as 1/*reqs_per_sec*. For example,
-*reqs_per_sec=1* will be an interval of 1 second, while
-*reqs_per_sec=0.5* will be an interval of 2 seconds, and
-*reqs_per_sec=2* will be an interval of 1/2 seconds.
-
-By default, the Throttle is synchronous - when you call your function
-you will not get back control until your function has completed. This
-means you will observe any delay imposed by the Throttle. The Throttle
-also provides an asynchronous mode that queues your function to a queue
-to be run from a separate thread. Note that a synchronous Throttle
-allows your function to return a value while an asynchronous throttle
-does not.
-
-Using a synchronous Throttle
-==============================
-
-:Example 1: a synchronous throttle at 1 requests per second:
+:Example 1: Throttle at 1 requests per second:
 
 .. code-block:: python
 
     from scottbrian_throttle.throttle import Throttle
 
-    @Throttle
+    @Throttle()
     def func1(request_number, time_of_start):
         ret_value = (f'request {request_number} sent at elapsed time: '
                      f'{time.time() - time_of_start:0.1f}')
@@ -45,29 +28,36 @@ Using a synchronous Throttle
 
     start_time = time.time()
     for idx in range(10):
-        func1(idx, start_time)
+        ret_val = func1(idx, start_time)
         print(ret_val)
 
 
-Expected output for Example 1::
+    Expected output for Example 1::
 
-    request 0 sent at elapsed time: 0.0
-    request 1 sent at elapsed time: 1.0
-    request 2 sent at elapsed time: 2.0
-    request 3 sent at elapsed time: 3.0
-    request 4 sent at elapsed time: 4.0
-    request 5 sent at elapsed time: 5.0
-    request 6 sent at elapsed time: 6.0
-    request 7 sent at elapsed time: 7.0
-    request 8 sent at elapsed time: 8.0
-    request 9 sent at elapsed time: 9.0
+        request 0 sent at elapsed time: 0.0
+        request 1 sent at elapsed time: 1.0
+        request 2 sent at elapsed time: 2.0
+        request 3 sent at elapsed time: 3.0
+        request 4 sent at elapsed time: 4.0
+        request 5 sent at elapsed time: 5.0
+        request 6 sent at elapsed time: 6.0
+        request 7 sent at elapsed time: 7.0
+        request 8 sent at elapsed time: 8.0
+        request 9 sent at elapsed time: 9.0
 
 
-:Example 2: a synchronous throttle at 2 requests per second:
+You can specify the limit with the *reqs_per_sec* parameter. The
+interval is calculated as 1/*reqs_per_sec*. For example,
+*reqs_per_sec=1* will be an interval of 1 second, while
+*reqs_per_sec=0.5* will be an interval of 2 seconds, and
+*reqs_per_sec=2* will be an interval of 1/2 seconds.
+
+:Example 2: Throttle at 2 requests per second:
 
 .. code-block:: python
 
     from scottbrian_throttle.throttle import Throttle
+    import time
 
     @Throttle(reqs_per_sec=2)
     def func2(request_number, time_of_start):
@@ -77,231 +67,138 @@ Expected output for Example 1::
 
     start_time = time.time()
     for idx in range(10):
-        func2(idx, start_time)
+        ret_val = func2(idx, start_time)
         print(ret_val)
 
 
-Expected output for Example 1::
+    Expected output for Example 1::
 
-    request 0 sent at elapsed time: 0.0
-    request 1 sent at elapsed time: 0.5
-    request 2 sent at elapsed time: 1.0
-    request 3 sent at elapsed time: 1.5
-    request 4 sent at elapsed time: 2.0
-    request 5 sent at elapsed time: 2.5
-    request 6 sent at elapsed time: 3.0
-    request 7 sent at elapsed time: 3.5
-    request 8 sent at elapsed time: 4.0
-    request 9 sent at elapsed time: 4.5
+        request 0 sent at elapsed time: 0.0
+        request 1 sent at elapsed time: 0.5
+        request 2 sent at elapsed time: 1.0
+        request 3 sent at elapsed time: 1.5
+        request 4 sent at elapsed time: 2.0
+        request 5 sent at elapsed time: 2.5
+        request 6 sent at elapsed time: 3.0
+        request 7 sent at elapsed time: 3.5
+        request 8 sent at elapsed time: 4.0
+        request 9 sent at elapsed time: 4.5
 
 
-Using an asynchronous throttle:
-================================
+Using an asynchronous Throttle
+==============================
+
+By default, the Throttle is synchronous - when you call your function
+you will not get back control until your function has completed. This
+means you will observe any delay imposed by the Throttle. The Throttle
+also provides an asynchronous mode that queues your function to a queue
+to be run from a separate thread. This frees up your application to
+perform other work while the throttled functions are being delayed.
+
+:Example 3: asynchronous throttle:
+
+.. code-block:: python
+
+    from scottbrian_throttle.throttle import Throttle
+    import time
+
+    @Throttle(reqs_per_sec=2, throttle_mode=ThrottleMode.ASYNC)
+    def func3(request_number, time_of_start):
+        print(f'request {request_number} sent at elapsed time: '
+              f'{time.time() - time_of_start:0.1f}')
+
+    start_time = time.time()
+    for idx in range(10):
+        func3(idx, start_time)
+
+    Expected output for Example 3::
+
+        request 0 sent at elapsed time: 0.0
+        request 1 sent at elapsed time: 0.5
+        request 2 sent at elapsed time: 1.0
+        request 3 sent at elapsed time: 1.5
+        request 4 sent at elapsed time: 2.0
+        request 5 sent at elapsed time: 2.5
+        request 6 sent at elapsed time: 3.0
+        request 7 sent at elapsed time: 3.5
+        request 8 sent at elapsed time: 4.0
+        request 9 sent at elapsed time: 4.5
+
+
 
 Note that since an asynchronous Throttle queues your function to a
 separate thread, that thread will need to be ended when your program
 ends. To do this, you will need to call the *start_shutdown* method.
 When your function is decorated with the Throttle, the Throttle will
-attach its instance to your function as a function attribute. This is
-then used for the call to *start_shutdown* as shown in the following
-examples.
-
-:Example 3: send requests through asynchronous throttle:
+attach its instance to your function as a function attribute named
+'throttle'. This is then used for the call to *start_shutdown* as shown
+here:
 
 .. code-block:: python
 
-    from scottbrian_throttle.throttle import Throttle
-import time
-
-@Throttle(reqs_per_sec=2, throttle_mode=ThrottleMode.ASYNC)
-def func3(request_number, time_of_start):
-    print(f'request {request_number} sent at elapsed time: '
-          f'{time.time() - time_of_start:0.1f}')
-
-start_time = time.time()
-for idx in range(10):
-    func3(idx, start_time)
-func3.throttle.start_shutdown()
+    func3.throttle.start_shutdown()
 
 
-Expected output for Example 3::
-
-    request 0 sent at elapsed time: 0.0
-    request 1 sent at elapsed time: 0.5
-    request 2 sent at elapsed time: 1.0
-    request 3 sent at elapsed time: 1.5
-    request 4 sent at elapsed time: 2.0
-    request 5 sent at elapsed time: 2.5
-    request 6 sent at elapsed time: 3.0
-    request 7 sent at elapsed time: 3.5
-    request 8 sent at elapsed time: 4.0
-    request 9 sent at elapsed time: 4.5
+An additional note about asynchronous mode is that the decorated
+function cannot pass back a return value as we saw for the synchronous
+mode Throttle.
 
 
 The throttle as leaky bucket:
 =============================
 
-The throttle also provides a leaky bucket implementation, configured by
-setting the *bucket_size* to a value greater than 1. In this case, some
-number of requests can be sent immediately. Each request is
-conceptually placed into a bucket that has with a hole in the bottom.
-The bucket leaks out at the request interval rate. The idea is that once
-the bucket is full, the throttle delays any addition requests until the
-bucket has leaked enough to fit a new request. At that point, the next
-request is placed into the bucket and sent. If no new requests arrive
-for an extended interval, the bucket becomes empty, and the next set of
-requests can be placed into the bucket and immediately sent. The
-throttle acts like a shock absorber, allowing small bursts of requests
-to be sent without delay, with the limiting action kicking in as
-additional requests continue to rapidly arrive. The average request
-interval will decrease as the size of the bucket increases. Note that a
-*bucket_size* of 1 will effectively result in normal non-leaky bucket
-behavior. Note also that an asynchronous leaky bucket throttle can be
-configured by specifying a *bucket_size* greater than 1 and
-*throttle_mode=ThrottleMode.ASYNC*.
+The throttle is implemented as a leaky bucket. Each call to your
+Throttle decorated function is represented as an interval of time that
+is conceptually placed into the bucket. The bucket has a hole in the
+bottom that leaks out at the interval rate. The bucket starts out empty.
+The first call to your function is "placed" into the empty bucket and
+allowed to run without delay. On each subsequent call, if the
+bucket still has the previous call leaking out, the new call is delayed
+until the bucket has room for it.
 
-:Example 4: instantiate a leaky bucket throttle and send some requests:
+You can also specify a larger bucket with the *bucket_size* parameter.
+Setting *bucket_size=2*, for example, will allow the first two calls to
+run immediately. Subsequent calls will be delayed unless and until the
+bucket has leaked out enough to fit each new call. If no calls are made
+for some time, the bucket will become empty and allow the next two calls
+to again run immediately.
 
-.. code-block:: python
+A Throttle configured as large bucket will act like a shock absorber,
+allowing small bursts of function calls to run without delay. The
+limiting action kicks in as additional calls continue to rapidly
+arrive. Note that the average request interval will decrease as
+the size of the bucket increases.
 
-    from scottbrian_throttle.throttle import Throttle
-import time
-
-lb_throttle = Throttle(reqs_per_sec=2, name="t1", bucket_size=3)
-
-
-def target_rtn3(request_number, time_of_start):
-    print(f'request {request_number} sent at elapsed time: '
-          f'{time.time() - time_of_start:0.1f}')
-
-
-start_time = time.time()
-for idx in range(10):
-    lb_throttle._send_request(target_rtn3, idx, start_time)
-
-
-Expected output for Example 4::
-
-    request 0 sent at elapsed time: 0.0
-    request 1 sent at elapsed time: 0.0
-    request 2 sent at elapsed time: 0.0
-    request 3 sent at elapsed time: 0.5
-    request 4 sent at elapsed time: 1.0
-    request 5 sent at elapsed time: 1.5
-    request 6 sent at elapsed time: 2.0
-    request 7 sent at elapsed time: 2.5
-    request 8 sent at elapsed time: 3.0
-    request 9 sent at elapsed time: 3.5
-
-
-
-Using the throttle decorator:
-=============================
-
-:Example 5: Wrapping a function with the **@throttle** decorator
-
-.. code-block:: python
-
-    from scottbrian_throttle.throttle import throttle
-import time
-
-
-@throttle(reqs_per_sec=2)
-def func1(request_number, time_of_start):
-    print(f'request {request_number} sent at elapsed time: '
-          f'{time.time() - time_of_start:0.1f}')
-
-
-start_time = time.time()
-for idx in range(10):
-    func1(idx, start_time)
-
-
-Expected output for Example 5::
-
-    request 0 sent at elapsed time: 0.0
-    request 1 sent at elapsed time: 0.5
-    request 2 sent at elapsed time: 1.0
-    request 3 sent at elapsed time: 1.5
-    request 4 sent at elapsed time: 2.0
-    request 5 sent at elapsed time: 2.5
-    request 6 sent at elapsed time: 3.0
-    request 7 sent at elapsed time: 3.5
-    request 8 sent at elapsed time: 4.0
-    request 9 sent at elapsed time: 4.5
-
-
-:Example 6: Wrapping a function with the **@throttle** decorator for
-            async mode
+:Example 4: Throttle with a *bucket_size* of 3:
 
 .. code-block:: python
 
     from scottbrian_throttle.throttle import Throttle
-import time
+    import time
+
+    @Throttle(reqs_per_sec=2, bucket_size=3)
+    def func4(request_number, time_of_start):
+        print(f'request {request_number} sent at elapsed time: '
+              f'{time.time() - time_of_start:0.1f}')
+    start_time = time.time()
+    for idx in range(10):
+        func4(idx, start_time)
 
 
-@throttle(reqs_per_sec=0.5, throttle_mode=ThrottleMode.ASYNC)
-def func2(request_number, time_of_start):
-    print(f'request {request_number} sent at elapsed time: '
-          f'{time.time() - time_of_start:0.1f}')
+    Expected output for Example 4::
+
+        request 0 sent at elapsed time: 0.0
+        request 1 sent at elapsed time: 0.0
+        request 2 sent at elapsed time: 0.0
+        request 3 sent at elapsed time: 0.5
+        request 4 sent at elapsed time: 1.0
+        request 5 sent at elapsed time: 1.5
+        request 6 sent at elapsed time: 2.0
+        request 7 sent at elapsed time: 2.5
+        request 8 sent at elapsed time: 3.0
+        request 9 sent at elapsed time: 3.5
 
 
-start_time = time.time()
-for idx in range(10):
-    _ = func2(idx, start_time)
-func2.throttle.start_shutdown()
-
-Expected output for Example 6::
-
-    request 0 sent at elapsed time: 0.0
-    request 1 sent at elapsed time: 2.0
-    request 2 sent at elapsed time: 4.0
-    request 3 sent at elapsed time: 6.5
-    request 4 sent at elapsed time: 8.0
-    request 5 sent at elapsed time: 10.0
-    request 6 sent at elapsed time: 12.0
-    request 7 sent at elapsed time: 14.0
-    request 8 sent at elapsed time: 16.0
-    request 9 sent at elapsed time: 18.0
-
-
-:Example 7: Wrapping a function with the **@throttle** decorator for
-            async with leaky bucket
-
-.. code-block:: python
-
-    from scottbrian_throttle.throttle import Throttle, throttle
-import time
-
-
-@throttle(reqs_per_sec=2,
-          bucket_size=3,
-          throttle_mode=ThrottleMode.ASYNC)
-def func3(request_number, time_of_start):
-    print(f'request {request_number} sent at elapsed time: '
-          f'{time.time() - time_of_start:0.1f}')
-    return 0
-
-
-time.sleep(1)
-start_time = time.time()
-for idx in range(10):
-    _ = func3(idx, start_time)
-func3.throttle.start_shutdown()
-
-
-Expected output for Example 7::
-
-    request 0 sent at elapsed time: 0.0
-    request 1 sent at elapsed time: 0.0
-    request 2 sent at elapsed time: 0.0
-    request 3 sent at elapsed time: 0.5
-    request 4 sent at elapsed time: 1.0
-    request 5 sent at elapsed time: 1.5
-    request 6 sent at elapsed time: 2.0
-    request 7 sent at elapsed time: 2.5
-    request 8 sent at elapsed time: 3.0
-    request 9 sent at elapsed time: 3.5
 
 """
 
@@ -481,7 +378,7 @@ class Throttle:
     def __init__(
         self,
         *,
-        reqs_per_sec: IntFloat,
+        reqs_per_sec: IntFloat = 1,
         bucket_size: IntFloat = 1,
         throttle_mode: ThrottleMode = ThrottleMode.SYNC,
         async_q_size: Optional[int] = None,
@@ -533,6 +430,7 @@ class Throttle:
         # reqs_per_sec
         ################################################################
         self.logger = logging.getLogger(__name__)
+
         if isinstance(reqs_per_sec, int | float) and (0 < reqs_per_sec):
             self.reqs_per_sec = reqs_per_sec
         else:
