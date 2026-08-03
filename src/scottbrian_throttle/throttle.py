@@ -102,7 +102,7 @@ perform other work while the throttled functions are being delayed.
     from scottbrian_throttle.throttle import Throttle
     import time
 
-    @Throttle(reqs_per_sec=2, throttle_mode=ThrottleMode.ASYNC)
+    @Throttle(reqs_per_sec=2, throttle_mode=Mode.ASYNC)
     def func3(request_number, time_of_start):
         print(f'request {request_number} sent at elapsed time: '
               f'{time.time() - time_of_start:0.1f}')
@@ -304,7 +304,7 @@ class Throttle:
     DEFAULT_ASYNC_Q_SIZE: Final[int] = 4096
     MAX_PAUSE_NS: Final[int] = 1000000000
 
-    class ThrottleMode(Enum):
+    class Mode(Enum):
         SYNC = auto()
         ASYNC = auto()
 
@@ -380,7 +380,7 @@ class Throttle:
         *,
         reqs_per_sec: IntFloat = 1,
         bucket_size: IntFloat = 1,
-        throttle_mode: ThrottleMode = ThrottleMode.SYNC,
+        throttle_mode: Mode = Mode.SYNC,
         async_q_size: Optional[int] = None,
         name: Optional[str] = None,
     ) -> None:
@@ -404,8 +404,8 @@ class Throttle:
                          request interval has elapsed will be delayed.
                          The bucket_size must be greater than or equal
                          to 1.
-            throttle_mode: If ThrottleMode.ASYNC, the throttle is
-                    asynchronous. If ThrottleMode.SYNC, the default,
+            throttle_mode: If Mode.ASYNC, the throttle is
+                    asynchronous. If Mode.SYNC, the default,
                     the throttle is synchronous.
             async_q_size: Specifies the size of the request
                           queue for async requests. When the request
@@ -490,7 +490,7 @@ class Throttle:
         ################################################################
         self.throttle_mode = throttle_mode
 
-        if self.throttle_mode == Throttle.ThrottleMode.ASYNC:
+        if self.throttle_mode == Throttle.Mode.ASYNC:
             if async_q_size is not None:
                 if isinstance(async_q_size, int) and (0 < async_q_size):
                     self.async_q_size = async_q_size
@@ -507,7 +507,7 @@ class Throttle:
             if async_q_size is not None and async_q_size != 0:
                 error_msg = (
                     "a non_zero async_q_size is not allowed when throttle_mode is "
-                    "ThrottleMode.SYNC. "
+                    "Mode.SYNC. "
                     f"Request call sequence: {call_seq(latest=1, depth=2)}"
                 )
                 self.logger.error(error_msg)
@@ -555,7 +555,7 @@ class Throttle:
 
         self.processing_request = False
 
-        if self.throttle_mode == Throttle.ThrottleMode.ASYNC:
+        if self.throttle_mode == Throttle.Mode.ASYNC:
             ############################################################
             # Set remainder of async vars
             ############################################################
@@ -625,9 +625,9 @@ class Throttle:
 
         Returns:
               The return value from the request function. For
-              throttle_mode = ThrottleMode.SYNC, the return value may
+              throttle_mode = Mode.SYNC, the return value may
               be any value or None. For throttle_mode =
-              ThrottleMode.ASYNC, the return value will be
+              Mode.ASYNC, the return value will be
               Throttle.RC_OK or Throttle.RC_THROTTLE_IS_SHUTDOWN.
 
         """
@@ -642,19 +642,23 @@ class Throttle:
         Returns:
             The representation as how the class is instantiated
 
-        :Example 8: instantiate a throttle for 1 request every 2 seconds
+        :Example 5: call __repr__ for Throttle
 
         .. code-block:: python
 
             from scottbrian_throttle.throttle import Throttle
-            request_throttle = Throttle(reqs_per_sec=0.5, name="t1")
-            repr(request_throttle)
 
-        Expected output for Example 8::
+            @Throttle(reqs_per_sec=0.5, name="t6")
+            def func5(request_number, time_of_start):
+                pass
+
+            print(repr(func5.throttle))
+
+            Expected output for Example 5::
 
             ('Throttle(reqs_per_sec=0.5, bucket_size=1, '
-             'throttle_mode=ThrottleMode.SYNC, async_q_size=0, '
-             'name=t1)')
+             'throttle_mode=Mode.SYNC, async_q_size=0, '
+             'name=t6)')
 
 
 
@@ -688,36 +692,34 @@ class Throttle:
         Note that the returned queue size is the approximate size as
         described in the documentation for the python threading queue.
 
-        :Example 9: instantiate an asynchronous throttle for 1 request
-                    per second
+        :Example 6: get length for an asynchronous throttle
 
         .. code-block:: python
 
             from scottbrian_throttle.throttle import Throttle
-        import time
+            import time
+
+            @Throttle(throttle_mode=Throttle.Mode.ASYNC)
+            def func6():
+                pass
+
+            for i in range(3):  # quickly queue up 3 items
+                func6()
+
+            time.sleep(0.5)  # allow first request to be processed
+            print(len(func6.throttle))
+
+            func6.throttle.start_shutdown()
 
 
-        def my_request():
-            pass
+            Expected output for Example 6::
+
+                2
 
 
-        request_throttle = Throttle(reqs_per_sec=1,
-                                    throttle_mode=ThrottleMode.ASYNC
-                                    )
-        for i in range(3):  # quickly queue up 3 items
-            _ = request_throttle._send_request(my_request)
-        time.sleep(0.5)  # allow first request to be processed
-        print(len(request_throttle))
-
-
-                Expected output for Example 9::
-
-                    2
-
-                >>> request_throttle.start_shutdown()
 
         """
-        if self.throttle_mode == Throttle.ThrottleMode.ASYNC:
+        if self.throttle_mode == Throttle.Mode.ASYNC:
             num_reqs_pending = self.async_q.qsize()
             if self.processing_request:
                 num_reqs_pending += 1
@@ -822,9 +824,9 @@ class Throttle:
 
         Returns:
               The return value from the request function. For
-              throttle_mode = ThrottleMode.SYNC, the return value may
+              throttle_mode = Mode.SYNC, the return value may
               be any value or None. For throttle_mode =
-              ThrottleMode.ASYNC, the return value will be
+              Mode.ASYNC, the return value will be
               Throttle.RC_OK or Throttle.RC_THROTTLE_IS_SHUTDOWN.
 
         Raises:
@@ -832,7 +834,7 @@ class Throttle:
                 will be logged and re-raised.
 
         """
-        if self.throttle_mode == Throttle.ThrottleMode.ASYNC:
+        if self.throttle_mode == Throttle.Mode.ASYNC:
             # if self.throttle_state != Throttle._ACTIVE:
             #     return Throttle.RC_THROTTLE_IS_SHUTDOWN
 
@@ -1132,11 +1134,11 @@ class Throttle:
             Throttle.SHUTDOWN_HARD
 
         """
-        if self.throttle_mode != Throttle.ThrottleMode.ASYNC:
+        if self.throttle_mode != Throttle.Mode.ASYNC:
             error_msg = (
                 "A shutdown was requested for a synchronous throttle. "
                 "Shutdown can only be requested for a throttle that is "
-                "created with a throttle_mode of ThrottleMode.ASYNC. "
+                "created with a throttle_mode of Mode.ASYNC. "
                 f"Request call sequence: {call_seq(latest=1, depth=2)}"
             )
             self.logger.error(error_msg)
