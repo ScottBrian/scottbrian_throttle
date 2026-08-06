@@ -202,6 +202,7 @@ the size of the bucket increases.
 
 """
 
+import functools
 import logging
 import queue
 import threading
@@ -213,9 +214,12 @@ from enum import Enum, auto
 from typing import (
     Any,
     Callable,
+    cast,
     Final,
     NamedTuple,
     Optional,
+    overload,
+    Protocol,
     TYPE_CHECKING,
     Type,
     TypeVar,
@@ -353,6 +357,7 @@ class Throttle:
         "_wait_time_ns",
         "async_q",
         "async_q_size",
+        "call_count",
         "throttle_mode",
         "bucket_size",
         "lb_adjustment",
@@ -554,6 +559,8 @@ class Throttle:
         self.throttle_state = Throttle._ACTIVE
 
         self.processing_request = False
+
+        self.call_count = 0
 
         if self.throttle_mode == Throttle.Mode.ASYNC:
             ############################################################
@@ -834,6 +841,7 @@ class Throttle:
                 will be logged and re-raised.
 
         """
+        self.call_count += 1
         if self.throttle_mode == Throttle.Mode.ASYNC:
             # if self.throttle_state != Throttle._ACTIVE:
             #     return Throttle.RC_THROTTLE_IS_SHUTDOWN
@@ -1256,3 +1264,223 @@ class Throttle:
                 return Throttle.RC_SHUTDOWN_SOFT_COMPLETED_OK
             else:
                 return Throttle.RC_SHUTDOWN_HARD_COMPLETED_OK
+
+
+########################################################################
+
+########################################################################
+# Pie Throttle Decorator
+########################################################################
+F = TypeVar("F", bound=Callable[..., Any])
+
+
+########################################################################
+# _FuncWithThrottleAttr class
+########################################################################
+class _FuncWithThrottleAttr(Protocol[F]):
+    """Class to allow type checking on function with attribute."""
+
+    throttle2: Throttle
+    __call__: F
+
+
+def _add_throttle_attr(func: F) -> _FuncWithThrottleAttr[F]:
+    """Wrapper to add throttle attribute to function.
+
+    Args:
+        func: function that has the attribute added
+
+    Returns:
+        input function with throttle attached as attribute
+
+    """
+    return cast(_FuncWithThrottleAttr[F], func)
+
+
+########################################################################
+# @throttle
+########################################################################
+@overload
+def throttle(
+    _wrapped: F,
+    *,
+    reqs_per_sec: IntFloat,
+    bucket_size: IntFloat = 1,
+    throttle_mode: Throttle.Mode = Throttle.Mode.SYNC,
+    async_q_size: Optional[int] = None,
+    name: Optional[str] = None,
+) -> _FuncWithThrottleAttr[F]:
+    pass
+
+
+@overload
+def throttle(
+    *,
+    reqs_per_sec: IntFloat,
+    bucket_size: IntFloat = 1,
+    throttle_mode: Throttle.Mode = Throttle.Mode.SYNC,
+    async_q_size: Optional[int] = None,
+    name: Optional[str] = None,
+) -> Callable[[F], _FuncWithThrottleAttr[F]]:
+    pass
+
+
+def throttle(
+    _wrapped: Optional[F] = None,
+    *,
+    reqs_per_sec: IntFloat,
+    bucket_size: IntFloat = 1,
+    throttle_mode: Throttle.Mode = Throttle.Mode.SYNC,
+    async_q_size: Optional[int] = None,
+    name: Optional[str] = None,
+) -> Union[F, _FuncWithThrottleAttr[F]]:
+    """Decorator to wrap a function in a throttle.
+
+    The throttle wraps code around a function to limit the rate that it
+    can be called.
+
+    Args:
+        _wrapped: the function
+        reqs_per_sec: The number of requests that can be made in
+                      one second.
+        bucket_size: Specifies the number of requests that can be
+                     conceptually placed into the bucket for the
+                     leaky bucket algorithm. As requests arrive,
+                     the bucket is checked to determine if it has
+                     room for the request. If so, it is placed into
+                     the bucket and sent without delay. If not, the
+                     request is delayed until enough time has
+                     elapsed for the bucket to leak out enough to
+                     allow the request to fit. A specification of
+                     one for the bucket_size will effectively
+                     cause non-leaky bucket behavior, meaning that
+                     each request that arrives before the previous
+                     request interval has elapsed will be delayed.
+                     The bucket_size must be greater than or equal
+                     to 1.
+        throttle_mode: If Throttle.MODE_ASYNC, the throttle is
+                asynchronous. If ThrottleeMode.SYNC, the default, the
+                throttle is synchronous.
+        async_q_size: Specifies the size of the request
+                      queue for async requests. When the request
+                      queue is totally populated, any additional
+                      calls to send_request will be delayed
+                      until queued requests are removed and
+                      scheduled. The default is 4096 requests.
+        name: The name used to identify the throttle in log messages
+            issued by the throttle. The default name is
+            the python id of the Throttle class instance.
+
+    Returns:
+        A callable function that delays the request as needed in
+        accordance with the specified limits.
+
+    :Example 10: wrap a function with a throttle for 1 request
+                  per second
+
+    .. code-block:: python
+
+        from scottbrian_throttle.throttle import throttle
+        @throttle(reqs_per_sec=1)
+        def f1() -> None:
+            print('example 1 request function')
+
+
+    """
+    # ==================================================================
+    #  The following code covers cases where throttle is used with or
+    #  without the pie character, where the decorated function has or
+    #  does not have parameters.
+    #
+    #     Here's an example of throttle with a function that has no
+    #         args:
+    #         @throttle(reqs_per_sec=1)
+    #         def a_func():
+    #             print('42')
+    #
+    #     This is what essentially happens under the covers:
+    #         def a_func():
+    #             print('42')
+    #         aFunc = throttle(reqs_per_sec=1)(a_func)
+    #
+    #     The call to throttle results in a function being returned that
+    #     takes as its first argument the a_func specification that we
+    #     see in parens immediately following the throttle call.
+    #
+    #     Note that we can also code the above as shown and get the same
+    #     result:
+    #         def a_func():
+    #             print('42')
+    #         a_func = throttle(a_func, reqs_per_sec=1)
+    #
+    #     What happens is throttle gets control and tests whether a_func
+    #     was specified, and if not returns a call to functools.partial
+    #     which is the function that accepts the a_func
+    #     specification and then calls throttle with a_func as the first
+    #     argument with the other arg for reqs_per_sec.
+    #
+    #     One other complication is that we are also using the
+    #     wrapt.decorator for the inner wrapper function which helps to
+    #     ensure introspection will work as expected.
+    # ==================================================================
+
+    if _wrapped is None:
+        return cast(
+            _FuncWithThrottleAttr[F],
+            functools.partial(
+                throttle,
+                reqs_per_sec=reqs_per_sec,
+                bucket_size=bucket_size,
+                throttle_mode=throttle_mode,
+                async_q_size=async_q_size,
+                name=name,
+            ),
+        )
+
+    if name is None:
+        name = _wrapped.__name__
+    # a_throttle = Throttle(
+    #     reqs_per_sec=reqs_per_sec,
+    #     bucket_size=bucket_size,
+    #     throttle_mode=throttle_mode,
+    #     async_q_size=async_q_size,
+    #     name=name,
+    # )
+
+    # @wrapt.bind_state_to_wrapper(name="throttle")
+    @decorator  # type: ignore
+    def wrapper(
+        func_to_wrap: F,
+        instance: Optional[Any],
+        args: tuple[Any, ...],
+        kwargs2: dict[str, Any],
+    ) -> Any:
+
+        # return a_throttle._send_request(func_to_wrap, *args, **kwargs2)
+        return pre_send_request(func_to_wrap, instance, args, kwargs2)
+
+    wrapper = wrapper(_wrapped)
+
+    # wrapper = _add_throttle_attr(wrapper)
+    # wrapper.throttle2 = a_throttle
+
+    return cast(_FuncWithThrottleAttr[F], wrapper)
+
+
+def pre_send_request(
+    wrapped: F,
+    instance: Optional[Any],
+    args: tuple[Any, ...],
+    kwargs2: dict[str, Any],
+) -> Any:
+    if instance is None:
+        return wrapped(*args, **kwargs2)
+
+    state_attr_name = f"_decorator_state_{wrapped.__name__}"
+    if not hasattr(instance, state_attr_name):
+        setattr(instance, state_attr_name, {"throttle1": Throttle()})
+    state = getattr(instance, state_attr_name)
+    a_throttle = state["throttle1"]
+    print(f"{wrapped.__name__} with {a_throttle.call_count=}")
+
+    return a_throttle._send_request(wrapped, *args, **kwargs2)

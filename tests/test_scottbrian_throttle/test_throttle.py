@@ -4907,3 +4907,103 @@ class TestThrottleDocstrings:
         captured = capsys.readouterr().out
 
         assert captured == expected_result
+
+    ####################################################################
+    # test_throttle_example_7
+    ####################################################################
+    def test_throttle_example_7(self, capsys: Any) -> None:
+        """Method test_throttle_example_7.
+
+        Args:
+            capsys: pytest fixture to capture print output
+
+        """
+
+        hdr_str = ":Example 7: get length for an asynchronous throttle"
+        flowers(hdr_str)
+
+        from scottbrian_throttle.throttle import Throttle
+
+        class Funky:
+            def __init__(self, a_var: int):
+                self.funky_var = a_var
+
+            @Throttle()
+            def func7a(self):
+                self.funky_var += 1
+
+            @Throttle(reqs_per_sec=2)
+            def func7b(self):
+                self.funky_var += 10
+
+        funky1 = Funky(a_var=2)
+        funky2 = Funky(a_var=102)
+
+        funky1.func7a()
+        # funky1.func7b()
+        funky2.func7a()
+        funky2.func7b()
+
+        print(
+            f"\n{funky1.func7a.throttle.reqs_per_sec=}, {funky1.func7a.throttle.call_count=}, {funky1.funky_var=}, {id(funky1.func7a.throttle)=}\n"
+        )
+        print(
+            f"\n{funky1.func7b.throttle.reqs_per_sec=}, {funky1.func7b.throttle.call_count=}, {funky1.funky_var=}, {id(funky1.func7b.throttle)=}\n"
+        )
+
+        print(
+            f"\n{funky2.func7a.throttle.reqs_per_sec=}, {funky2.func7a.throttle.call_count=}, {funky2.funky_var=}, {id(funky2.func7a.throttle)=}\n"
+        )
+        print(
+            f"\n{funky2.func7b.throttle.reqs_per_sec=}, {funky2.func7b.throttle.call_count=}, {funky2.funky_var=}, {id(funky2.func7b.throttle)=}\n"
+        )
+
+    ####################################################################
+    # test_throttle_example_8
+    ####################################################################
+    def test_throttle_example_8(self, capsys: Any) -> None:
+        """Method test_throttle_example_8.
+
+        Args:
+            capsys: pytest fixture to capture print output
+
+        """
+
+        hdr_str = ":Example 8: try two throttle"
+        flowers(hdr_str)
+
+        from scottbrian_throttle.throttle import throttle
+
+        class Funky:
+            def __init__(self, a_var: int):
+                self.funky_var = a_var
+
+            @throttle(reqs_per_sec=1)
+            def func7a(self):
+                self.funky_var += 1
+
+            @throttle(reqs_per_sec=2)
+            def func7b(self):
+                self.funky_var += 10
+
+        funky1 = Funky(a_var=2)
+        funky2 = Funky(a_var=102)
+
+        funky1.func7a()
+        # funky1.func7b()
+        funky2.func7a()
+        funky2.func7b()
+
+        print(
+            f"\n{funky1.func7a.throttle2.reqs_per_sec=}, {funky1.func7a.throttle2.call_count=}, {funky1.funky_var=}, {id(funky1.func7a.throttle2)=}\n"
+        )
+        print(
+            f"\n{funky1.func7b.throttle2.reqs_per_sec=}, {funky1.func7b.throttle2.call_count=}, {funky1.funky_var=}, {id(funky1.func7b.throttle2)=}\n"
+        )
+
+        print(
+            f"\n{funky2.func7a.throttle2.reqs_per_sec=}, {funky2.func7a.throttle2.call_count=}, {funky2.funky_var=}, {id(funky2.func7a.throttle2)=}\n"
+        )
+        print(
+            f"\n{funky2.func7b.throttle2.reqs_per_sec=}, {funky2.func7b.throttle2.call_count=}, {funky2.funky_var=}, {id(funky2.func7b.throttle2)=}\n"
+        )
