@@ -1451,36 +1451,42 @@ def throttle(
     @decorator  # type: ignore
     def wrapper(
         func_to_wrap: F,
-        instance: Optional[Any],
-        args: tuple[Any, ...],
-        kwargs2: dict[str, Any],
+        instance: Optional[Any] = None,
+        args: Optional[tuple[Any, ...]] = None,
+        kwargs2: Optional[dict[str, Any]] = None,
     ) -> Any:
+        print("#######  entered wrapper")
+        if instance is None:
+            if not hasattr(func_to_wrap, "throttle"):
+                func_to_wrap.throttle = Throttle()
+            return func_to_wrap(*args, **kwargs2)
+
+        bound_method = getattr(instance, func_to_wrap.__name__)
+
+        if not hasattr(bound_method, "count"):
+            # bound_method.throttle = Throttle()
+            bound_method.count = 0
+
+        state_attr_name = f"_decorator_state_{func_to_wrap.__name__}"
+        if not hasattr(instance, state_attr_name):
+            a_throttle = Throttle()
+            setattr(instance, state_attr_name, {"throttle1": a_throttle})
+            # func_to_wrap.throttle2 = a_throttle
+        state = getattr(instance, state_attr_name)
+        a_throttle = state["throttle1"]
+        print(f"{func_to_wrap.__name__} with {bound_method.throttle.call_count=}")
+
+        print(f"about to call send_request for {instance=} {func_to_wrap.__name__=}")
+        # return bound_method.throttle._send_request(func_to_wrap, *args, **kwargs2)
+        return a_throttle._send_request(func_to_wrap, *args, **kwargs2)
 
         # return a_throttle._send_request(func_to_wrap, *args, **kwargs2)
-        return pre_send_request(func_to_wrap, instance, args, kwargs2)
 
+    print(f"calling wrapper(_wrapped_) {wrapper=}, {_wrapped=}  ")
     wrapper = wrapper(_wrapped)
+    print(f"back from calling wrapper(_wrapped_) {wrapper=}, {_wrapped=}  ")
 
-    # wrapper = _add_throttle_attr(wrapper)
+    wrapper = _add_throttle_attr(wrapper)
     # wrapper.throttle2 = a_throttle
 
     return cast(_FuncWithThrottleAttr[F], wrapper)
-
-
-def pre_send_request(
-    wrapped: F,
-    instance: Optional[Any],
-    args: tuple[Any, ...],
-    kwargs2: dict[str, Any],
-) -> Any:
-    if instance is None:
-        return wrapped(*args, **kwargs2)
-
-    state_attr_name = f"_decorator_state_{wrapped.__name__}"
-    if not hasattr(instance, state_attr_name):
-        setattr(instance, state_attr_name, {"throttle1": Throttle()})
-    state = getattr(instance, state_attr_name)
-    a_throttle = state["throttle1"]
-    print(f"{wrapped.__name__} with {a_throttle.call_count=}")
-
-    return a_throttle._send_request(wrapped, *args, **kwargs2)
