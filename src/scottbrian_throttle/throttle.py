@@ -202,26 +202,16 @@ the size of the bucket increases.
 
 """
 
-import functools
-import logging
-import queue
-import threading
-import time
 ########################################################################
 # Standard Library
 ########################################################################
-from enum import Enum, auto
 from typing import (
     Any,
     Callable,
     cast,
-    Final,
-    NamedTuple,
     Optional,
     overload,
     Protocol,
-    TYPE_CHECKING,
-    Type,
     TypeVar,
     Union,
 )
@@ -231,9 +221,6 @@ from typing import (
 ########################################################################
 import scottbrian_locking.se_lock as selk  # noqa F401
 import wrapt
-from scottbrian_utils.diag_msg import get_formatted_call_sequence as call_seq
-from scottbrian_utils.pauser import Pauser
-from scottbrian_utils.timer import Timer
 from typing_extensions import TypeAlias
 from wrapt.decorators import decorator  # type: ignore
 
@@ -300,970 +287,180 @@ F = TypeVar("F", bound=Callable[..., Any])
 
 
 ########################################################################
-# Throttle class
+# start of experiment1
 ########################################################################
-class Throttle:
-    """Throttle class."""
+@wrapt.decorator
+def track_state(wrapped, instance, args, kwargs):
+    # 1. Check if the decorator is being used on an instance method
+    if instance is not None:
+        # 2. Define a unique attribute name for this decorator's state
+        state_attr = f"_state_{wrapped.__name__}"
 
-    DEFAULT_ASYNC_Q_SIZE: Final[int] = 4096
-    MAX_PAUSE_NS: Final[int] = 1000000000
+        # 3. Initialize the state on the instance if it does not exist
+        if not hasattr(instance, state_attr):
+            setattr(instance, state_attr, {"call_count": 0})
 
-    class Mode(Enum):
-        SYNC = auto()
-        ASYNC = auto()
-
-    SHUTDOWN_SOFT: Final[int] = 1
-    SHUTDOWN_HARD: Final[int] = 2
-
-    ####################################################################
-    # start_shutdown return code constants
-    ####################################################################
-    RC_SHUTDOWN_SOFT_COMPLETED_OK: Final[int] = 0
-    RC_SHUTDOWN_HARD_COMPLETED_OK: Final[int] = 4
-    RC_SHUTDOWN_TIMED_OUT: Final[int] = 8
-
-    ####################################################################
-    # throttle state constants
-    ####################################################################
-    _ACTIVE: Final[int] = 0
-    _SOFT_SHUTDOWN_STARTED: Final[int] = 1
-    _HARD_SHUTDOWN_STARTED: Final[int] = 2
-    _SOFT_SHUTDOWN_COMPLETED: Final[int] = 3
-    _HARD_SHUTDOWN_COMPLETED: Final[int] = 4
-
-    ####################################################################
-    # send_request return codes
-    ####################################################################
-    RC_OK: Final[int] = 0
-    RC_THROTTLE_IS_SHUTDOWN: Final[int] = 4
-
-    class Request(NamedTuple):
-        """NamedTuple for the request queue item."""
-
-        request_func: Callable[..., Any]
-        args: tuple[Any, ...]
-        kwargs: dict[str, Any]
-        arrival_time: float
-
-    SECS_2_NS: Final[int] = 1000000000
-    NS_2_SECS: Final[float] = 0.000000001
-
-    __slots__ = (
-        "_arrival_time_ns",
-        "_next_target_time_ns",
-        "_target_interval",
-        "_target_interval_ns",
-        "_throttle_shutdown_started",
-        "_wait_time_ns",
-        "async_q",
-        "async_q_size",
-        "call_count",
-        "throttle_mode",
-        "bucket_size",
-        "lb_adjustment",
-        "lb_adjustment_ns",
-        "lb_with_one_request",
-        "logger",
-        "pauser",
-        "processing_request",
-        "reqs_per_sec",
-        "request_scheduler_thread",
-        "sent_time_ns",
-        "shutdown_elapsed_time",
-        "shutdown_lock",
-        "shutdown_start_time",
-        "sync_lock",
-        "t_name",
-        "throttle_state",
-    )
-
-    ####################################################################
-    # __init__
-    ####################################################################
-    def __init__(
-        self,
-        *,
-        reqs_per_sec: IntFloat = 1,
-        bucket_size: IntFloat = 1,
-        throttle_mode: Mode = Mode.SYNC,
-        async_q_size: Optional[int] = None,
-        name: Optional[str] = None,
-    ) -> None:
-        """Initialize an instance of the Throttle class.
-
-        Args:
-            reqs_per_sec: The number of requests that can be made in
-                          one second.
-            bucket_size: Specifies the number of requests that can be
-                         conceptually placed into the bucket for the
-                         leaky bucket algorithm. As requests arrive,
-                         the bucket is checked to determine if it has
-                         room for the request. If so, it is placed into
-                         the bucket and sent without delay. If not, the
-                         request is delayed until enough time has
-                         elapsed for the bucket to leak out enough to
-                         allow the request to fit. A specification of
-                         one for the bucket_size will effectively
-                         cause non-leaky bucket behavior, meaning that
-                         each request that arrives before the previous
-                         request interval has elapsed will be delayed.
-                         The bucket_size must be greater than or equal
-                         to 1.
-            throttle_mode: If Mode.ASYNC, the throttle is
-                    asynchronous. If Mode.SYNC, the default,
-                    the throttle is synchronous.
-            async_q_size: Specifies the size of the request
-                          queue for async requests. When the request
-                          queue is totally populated, any additional
-                          calls to send_request will be delayed
-                          until queued requests are removed and
-                          scheduled. The default is 4096 requests.
-            name: The name used to identify the throttle in log messages
-                issued by the throttle. The default name is
-                the python id of the Throttle class instance.
-
-
-        Raises:
-            IncorrectReqsPerSecSpecified: The *reqs_per_sec*
-                specification must be a positive int or float greater
-                than zero.
-            IncorrectAsyncQSizeSpecified: *async_q_size* must be an
-                integer greater than zero.
-
-        """
-        ################################################################
-        # reqs_per_sec
-        ################################################################
-        self.logger = logging.getLogger(__name__)
-
-        if isinstance(reqs_per_sec, int | float) and (0 < reqs_per_sec):
-            self.reqs_per_sec = reqs_per_sec
-        else:
-            error_msg = (
-                "The reqs_per_sec specification must be a positive "
-                "int or float greater than zero. "
-                f"Request call sequence: {call_seq(latest=1, depth=2)}"
-            )
-            self.logger.error(error_msg)
-            raise IncorrectReqsPerSecSpecified(error_msg)
-
-        ################################################################
-        # bucket_size
-        ################################################################
-        if isinstance(bucket_size, int | float) and (1 <= bucket_size):
-            self.bucket_size = bucket_size
-        else:
-            error_msg = (
-                "The bucket_size specification must be a positive "
-                "int or float greater than or equal to 1. "
-                f"Request call sequence: {call_seq(latest=1, depth=2)}"
-            )
-            self.logger.error(error_msg)
-            raise IncorrectBucketSizeSpecified(error_msg)
-
-        ################################################################
-        # async_throttle
-        ################################################################
-        ################################################################
-        # States and processing for Throttle:
-        #
-        #     The Throttle is initialized with an empty async_q and the
-        #     scheduler thread is started and ready to receive work. The
-        #     starting state is 'active'.
-        #
-        #     1) state: active
-        #        a) send_request called (directly or via decorated func
-        #           call):
-        #           1) request is queued to the async_q
-        #           2) state remains 'active'
-        #        b) start_shutdown called:
-        #           1) state is changed to 'shutdown'
-        #           2) Any new requests are rejected. For "soft"
-        #           shutdown, scheduler schedules the remaining requests
-        #           currently queued on the async_q with the normal
-        #           interval. With "hard" shutdown, the scheduler
-        #           removes and discards the requests on the async_q.
-        #           3) scheduler exits
-        #           4) control returns after scheduler thread returns
-        #     2) state: shutdown
-        #        a) send_request called (directly or via decorated func
-        #           call):
-        #           1) request is ignored  (i.e, not queued to async_q)
-        #        b) start_shutdown called (non-decorator only):
-        #           1) state remains 'shutdown'
-        #           2) control returns immediately
-        ################################################################
-        self.throttle_mode = throttle_mode
-
-        if self.throttle_mode == Throttle.Mode.ASYNC:
-            if async_q_size is not None:
-                if isinstance(async_q_size, int) and (0 < async_q_size):
-                    self.async_q_size = async_q_size
-                else:
-                    error_msg = (
-                        "async_q_size must be an integer greater than zero. "
-                        f"Request call sequence: {call_seq(latest=1, depth=2)}"
-                    )
-                    self.logger.error(error_msg)
-                    raise IncorrectAsyncQSizeSpecified(error_msg)
-            else:
-                self.async_q_size = Throttle.DEFAULT_ASYNC_Q_SIZE
-        else:
-            if async_q_size is not None and async_q_size != 0:
-                error_msg = (
-                    "a non_zero async_q_size is not allowed when throttle_mode is "
-                    "Mode.SYNC. "
-                    f"Request call sequence: {call_seq(latest=1, depth=2)}"
-                )
-                self.logger.error(error_msg)
-                raise InvalidAsyncQSizeSpecified(error_msg)
-
-            self.async_q_size = 0
-
-        ################################################################
-        # name
-        ################################################################
-        # if name is None:
-        #     self.t_name = str(id(self))
-        # else:
-        #     self.t_name = name
-        self.t_name = name or str(id(self))
-
-        ################################################################
-        # Set remainder of vars
-        ################################################################
-        self._target_interval = 1 / reqs_per_sec
-        self._target_interval_ns: float = self._target_interval * Throttle.SECS_2_NS
-        self.sync_lock = threading.Lock()
-        self._arrival_time_ns = 0.0
-        self.sent_time_ns = time.perf_counter_ns()
-        self._wait_time_ns: float = 0.0
-        self.logger = logging.getLogger(__name__)
-        self.pauser = Pauser()
-
-        # self.pauser.pause_ns(3000000000)
-
-        ################################################################
-        # Set leaky bucket vars
-        ################################################################
-        self.lb_adjustment: float = max(
-            0.0, (self._target_interval * self.bucket_size) - self._target_interval
-        )
-        self.lb_adjustment_ns: float = self.lb_adjustment * Throttle.SECS_2_NS
-
-        self.lb_with_one_request = -self.lb_adjustment_ns + self._target_interval_ns
-
-        # adjust _next_target_time_ns for normal or lb algo
-        self._next_target_time_ns = time.perf_counter_ns() - self.lb_adjustment_ns
-
-        self.throttle_state = Throttle._ACTIVE
-
-        self.processing_request = False
-
-        self.call_count = 0
-
-        if self.throttle_mode == Throttle.Mode.ASYNC:
-            ############################################################
-            # Set remainder of async vars
-            ############################################################
-            ############################################################
-            # States and processing for Throttle in ASYNC mode:
-            #
-            #     The Throttle is initialized with an empty async_q and
-            #     the scheduler thread is started and ready to receive
-            #     work. The starting state is 'active'.
-            #
-            #     1) state: active
-            #        a) send_request called (directly or via decorated
-            #           func call):
-            #           1) request is queued to the async_q
-            #           2) state remains 'active'
-            #        b) start_shutdown called:
-            #           1) state is changed to 'shutdown'
-            #           2) Any new requests are rejected. For "soft"
-            #              shutdown, scheduler schedules the remaining
-            #              requests currently queued on the async_q with
-            #              the normal interval. With "hard" shutdown,
-            #              the scheduler removes and discards the
-            #              requests on the async_q.
-            #           3) scheduler exits
-            #           4) control returns after scheduler thread
-            #              returns
-            #     2) state: shutdown
-            #        a) send_request called (directly or via decorated
-            #           func call):
-            #           1) request is ignored  (i.e, not queued to
-            #              async_q)
-            #        b) start_shutdown called (non-decorator only):
-            #           1) state remains 'shutdown'
-            #           2) control returns immediately
-            ############################################################
-            self.shutdown_lock = selk.SELock()
-            self._throttle_shutdown_started = False
-            self.shutdown_start_time = 0.0
-            self.shutdown_elapsed_time = 0.0
-            self.async_q: queue.Queue[Throttle.Request] = queue.Queue(
-                maxsize=self.async_q_size
-            )
-            self.request_scheduler_thread: threading.Thread = threading.Thread(
-                target=self._schedule_requests
-            )
-            self.request_scheduler_thread.start()
-
-    ####################################################################
-    # __call__
-    ####################################################################
-    @wrapt.bind_state_to_wrapper(name="throttle")
-    @wrapt.decorator
-    def __call__(
-        self,
-        wrapped: Callable[..., Any],
-        instance: Throttle | None,
-        args: Any,
-        kwargs: Any,
-    ) -> Any:
-        """Call the class for decorated function.
-
-        Args:
-            wrapped: the decorated function to be run
-            instance: the Throttle instance
-            args: the decorated function positional arguments
-            kwargs: the decorated function keyword arguments
-
-        Returns:
-              The return value from the request function. For
-              throttle_mode = Mode.SYNC, the return value may
-              be any value or None. For throttle_mode =
-              Mode.ASYNC, the return value will be
-              Throttle.RC_OK or Throttle.RC_THROTTLE_IS_SHUTDOWN.
-
-        """
-        return self._send_request(wrapped, *args, **kwargs)
-
-    ####################################################################
-    # repr
-    ####################################################################
-    def __repr__(self) -> str:
-        """Return a representation of the class.
-
-        Returns:
-            The representation as how the class is instantiated
-
-        :Example 5: call __repr__ for Throttle
-
-        .. code-block:: python
-
-            from scottbrian_throttle.throttle import Throttle
-
-            @Throttle(reqs_per_sec=0.5, name="t6")
-            def func5(request_number, time_of_start):
-                pass
-
-            print(repr(func5.throttle))
-
-            Expected output for Example 5::
-
-            ('Throttle(reqs_per_sec=0.5, bucket_size=1, '
-             'throttle_mode=Mode.SYNC, async_q_size=0, '
-             'name=t6)')
-
-
-
-        """
-        if TYPE_CHECKING:
-            __class__: Type[Throttle]  # noqa: F842
-        classname = self.__class__.__name__
-        parms = (
-            f"reqs_per_sec={self.reqs_per_sec}, "
-            f"bucket_size={self.bucket_size}, "
-            f"throttle_mode={str(self.throttle_mode)}, "
-            f"async_q_size={self.async_q_size}, "
-            f"name={self.t_name}"
+        # 4. Access and mutate the instance-specific state
+        state = getattr(instance, state_attr)
+        state["call_count"] += 1
+        print(
+            f"[Log] {wrapped.__name__} called {state['call_count']} time(s) for {instance}"
         )
 
-        return f"{classname}({parms})"
-
-    ####################################################################
-    # len
-    ####################################################################
-    def __len__(self) -> int:
-        """Return the number of pending asynchronous items.
-
-        Returns:
-            The number of entries in the async_q as an integer
-
-        For an asynchronous throttle, calls to the send_request add
-        request items to the async_q. The request items are eventually
-        removed and scheduled. The len of Throttle is the number of
-        request items on the async_q when the len function is called.
-        Note that the returned queue size is the approximate size as
-        described in the documentation for the python threading queue.
-
-        :Example 6: get length for an asynchronous throttle
-
-        .. code-block:: python
-
-            from scottbrian_throttle.throttle import Throttle
-            import time
-
-            @Throttle(throttle_mode=Throttle.Mode.ASYNC)
-            def func6():
-                pass
-
-            for i in range(3):  # quickly queue up 3 items
-                func6()
-
-            time.sleep(0.5)  # allow first request to be processed
-            print(len(func6.throttle))
-
-            func6.throttle.start_shutdown()
+    # 5. Execute the original method
+    return wrapped(*args, **kwargs)
 
 
-            Expected output for Example 6::
+class MethodStateProxy(wrapt.BaseObjectProxy):
+    """A proxy wrapper that allows setting custom attributes on a bound method."""
 
-                2
+    def __init__(self, wrapped_method):
+        super().__init__(wrapped_method)
+        self.__self_dict__ = {}
 
-
-
-        """
-        if self.throttle_mode == Throttle.Mode.ASYNC:
-            num_reqs_pending = self.async_q.qsize()
-            if self.processing_request:
-                num_reqs_pending += 1
-            return num_reqs_pending
-        else:
-            return 0
-
-    ####################################################################
-    # get_interval
-    ####################################################################
-    def get_interval_secs(self) -> float:
-        """Calculate the interval between requests in seconds.
-
-        Returns:
-            The target interval in seconds.
-        """
-        return self._target_interval
-
-    ####################################################################
-    # get_interval
-    ####################################################################
-    def get_interval_ns(self) -> float:
-        """Calculate the interval between requests in nanoseconds.
-
-        Returns:
-            The target interval in nanoseconds.
-
-        """
-        return self._target_interval_ns
-
-    ####################################################################
-    # get_completion_time_secs
-    ####################################################################
-    def get_completion_time_secs(self, num_requests: int, from_start: bool) -> IntFloat:
-        """Calculate completion time secs for given number requests.
-
-        Args:
-            num_requests: number of requests to do
-            from_start: specifies whether the calculation should be done
-                          for a series that is starting fresh where the
-                          first request has no delay
-
-        Returns:
-            The estimated number of elapsed seconds for the number
-            of requests specified
-
-        """
-        if from_start:
-            return (num_requests - 1) * self._target_interval
-        else:
-            return num_requests * self._target_interval
-
-    ####################################################################
-    # get_completion_time_ns
-    ####################################################################
-    def get_completion_time_ns(self, num_requests: int, from_start: bool) -> IntFloat:
-        """Calculate completion time ns for given number requests.
-
-        Args:
-            num_requests: number of requests to do
-            from_start: specifies whether the calculation should be done
-                          for a series that is starting fresh where the
-                          first request has no delay
-
-        Returns:
-            The estimated number of elapsed seconds for the number
-            of requests specified
-
-        """
-        if from_start:
-            return (num_requests - 1) * self._target_interval_ns
-        else:
-            return num_requests * self._target_interval_ns
-
-    ####################################################################
-    # get_expected_num_completed_reqs
-    ####################################################################
-    def get_expected_num_completed_reqs(self, interval: IntFloat) -> int:
-        """Calculate number of requests that completed.
-
-        Args:
-            interval: number of elapsed seconds that requests were being
-              processed
-
-        Returns:
-            The estimated number of requests that were processed during
-            the given interval
-
-        """
-        return int(interval / self._target_interval) + 1
-
-    ####################################################################
-    # send_request
-    ####################################################################
-    def _send_request(self, func: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
-        """Send the request.
-
-        Args:
-            func: the request function to be run
-            args: the request function positional arguments
-            kwargs: the request function keyword arguments
-
-        Returns:
-              The return value from the request function. For
-              throttle_mode = Mode.SYNC, the return value may
-              be any value or None. For throttle_mode =
-              Mode.ASYNC, the return value will be
-              Throttle.RC_OK or Throttle.RC_THROTTLE_IS_SHUTDOWN.
-
-        Raises:
-            Exception: An exception occurred in the request target. It
-                will be logged and re-raised.
-
-        """
-        self.call_count += 1
-        if self.throttle_mode == Throttle.Mode.ASYNC:
-            # if self.throttle_state != Throttle._ACTIVE:
-            #     return Throttle.RC_THROTTLE_IS_SHUTDOWN
-
-            # We obtain the shutdown lock to protect against the
-            # following scenario:
-            # 1) send_request is entered for async throttle_mode and
-            #    sees at the while statement that we are *not* in
-            #    shutdown
-            # 2) send_request proceeds to the try statement just
-            #    before the request will be queued to the async_q
-            # 2) shutdown is requested and is detected by
-            #    schedule_requests
-            # 3) schedule_requests cleans up the async_q end exits
-            # 4) back here in send_request, we put our request on the
-            #    async_q - this request will never be processed
-
-            with selk.SELockShare(self.shutdown_lock):
-                request_item = Throttle.Request(
-                    func, args, kwargs, time.perf_counter_ns()
-                )
-                # self.logger.debug(f"send: {request_item=}")
-                # start_shutdown will set _throttle_shutdown_started to
-                # tell us to abandon our attempts to get a request on a
-                # full async_q so that we give up the lock to allow
-                # start_shutdown to proceed
-                while not self._throttle_shutdown_started:
-                    try:
-                        self.async_q.put(request_item, block=True, timeout=0.5)
-                        return Throttle.RC_OK
-                    except queue.Full:
-                        continue  # no need to wait since we already did
-                return Throttle.RC_THROTTLE_IS_SHUTDOWN
-        else:
-            ############################################################
-            # SYNC mode
-            ############################################################
-            with self.sync_lock:
-                self._perform_throttle()
-
-                ########################################################
-                # Call the request function and return with the request
-                # return value. We use try/except to log and re-raise
-                # any unhandled errors.
-                ########################################################
-                try:
-                    return func(*args, **kwargs)
-                except Exception as e:
-                    self.logger.debug(
-                        f"throttle {self.t_name} send_request unhandled exception in "
-                        f"request: {e}"
-                    )
-                    raise
-
-    ####################################################################
-    # perform_throttle
-    ####################################################################
-    def _perform_throttle(self) -> None:
-        """Calculate next target time and wait if needed."""
-
-        ################################################################
-        # The leaky bucket algorith uses a virtual bucket into which
-        # arriving requests are placed. As time progresses, the bucket
-        # leaks the requests out at the rate of the target interval. If
-        # the bucket has room for an arriving request, the request is
-        # placed into the bucket and is sent immediately. If, instead,
-        # the bucket does not have room for the request, the request is
-        # delayed until the bucket has leaked enough of the preceding
-        # requests such that the new request can fit and be sent. The
-        # effect of the bucket is to allow a burst of requests to be
-        # sent immediately at a faster rate than the target interval,
-        # acting as a shock absorber to the flow of traffic. The number
-        # of requests allowed to go immediately is controlled by the
-        # size of the bucket which in turn is specified by the
-        # bucket_size argument when the throttle is instantiated. Note
-        # that a bucket_size of 1 means there will never be enough room
-        # in the bucket for more than 1 request at a time.
-        #
-        # Note that by allowing short bursts to go immediately, the
-        # overall effect is that the average interval will be less than
-        # the target interval.
-        #
-        # The actual implementation does not employ a bucket, but
-        # instead sets a target time for the next request by adding the
-        # target interval and subtracting the size of the bucket. This
-        # has the effect of making it appear as if requests are arriving
-        # after the target time and are thus in compliance with the
-        # target interval. The next target time will eventually exceed
-        # the size of the bucket, and requests will get delayed to
-        # allow the target time to catch up.
-        ################################################################
-
-        ################################################################
-        # In the following code we handle three cases:
-        # 1) The current request arrives well beyond the last request
-        #    such that the bucket is completely empty. We need to start
-        #    a new bucket relative to the current arrival time.
-        # 2) The current request arrives rapidly on the heels of the
-        #    previous request such that the bucket is full enough that
-        #    it does not contain enough room to add a new entry. We need
-        #    to delay this current reques until there is room enough in
-        #    the bucket to add this one entry.
-        # 3) The current request arrives when the bucket has one or more
-        #    previous requests still leaking out, but there is still
-        #    enough room in the bucket to add another request without
-        #    delay.
-        #
-        # Note that we update the bucket (i.e., target time) before we
-        # call the requested function instead of updating the target
-        # time after control returns from the requested function. This
-        # means we face a possible scenario where we encounter a delay
-        # during the call to the requested function, and upon return we
-        # receive the next request which, because of the prior delay,
-        # appears ok to send immediately. But this new request might
-        # appear early as observed by the called service (i.e.,
-        # requested function). If instead we were to update the target
-        # time after getting back control from the requested function,
-        # we avoid the "too early" scenario. But we would then be adding
-        # in the request processing time to the throttle delay with the
-        # undesirable effect that all requests will now be throttled
-        # more than they need to be. The "too early" scenario seemed
-        # less problematic compared to the "extra throttling" effect,
-        # so the design choice was made to update the target time before
-        # calling the requested function.
-        ################################################################
-        self._arrival_time_ns = time.perf_counter_ns()
-        self._wait_time_ns = max(0.0, self._next_target_time_ns - self._arrival_time_ns)
-        if self._next_target_time_ns + self.lb_adjustment_ns < self._arrival_time_ns:
-            # we are well beyond the target time - we need to start
-            # a new bucket with the first send entry added
-            self._next_target_time_ns = self._arrival_time_ns + self.lb_with_one_request
-
-        else:  # still in the range of the bucket
-            ############################################################
-            # wait (i.e., throttle)
-            # Note that the wait time could be anywhere from a fraction
-            # of a second to several seconds. We want to be responsive
-            # in case we need to bail for shutdown, so we wait in 1
-            # second or fewer increments and bail if we detect shutdown.
-            ############################################################
-            # Sleep, if needed, until we have room in the bucket for one
-            # entry.
-            sleep_ns = self._next_target_time_ns - time.perf_counter_ns()
-            while (sleep_ns > 0) and (
-                self.throttle_state != Throttle._HARD_SHUTDOWN_STARTED
-            ):
-                # Use min to ensure we don't sleep too long and appear
-                # slow to respond to a shutdown request
-                self.pauser.pause_ns(min(Throttle.MAX_PAUSE_NS, sleep_ns))
-                sleep_ns = self._next_target_time_ns - time.perf_counter_ns()
-
-            # add one entry to the bucket
-            self._next_target_time_ns += self._target_interval_ns
-
-        self.sent_time_ns = time.perf_counter_ns()
-
-    ####################################################################
-    # schedule_requests
-    ####################################################################
-    def _schedule_requests(self) -> None:
-        """Get tasks from queue and run them.
-
-        Raises:
-            Exception: re-raise any throttle schedule_requests unhandled
-                         exception in request
-
-        """
-        # Requests will be scheduled from the async_q at the interval
-        # calculated from the reqs_per_sec argument when the throttle
-        # was instantiated. If shutdown is indicated, the async_q will
-        # be cleaned up with any remaining requests either processed
-        # (Throttle.SHUTDOWN_SOFT) or dropped
-        # (Throttle.SHUTDOWN_HARD). Note that async_q.get will only
-        # wait for a second to allow us to detect shutdown in a timely
-        # fashion.
-        while True:
-            try:
-                request_item = self.async_q.get(block=True, timeout=1)
-                self.processing_request = True
-
-            except queue.Empty:
-                # Even though we just entered this except code because
-                # the queue is empty, we still need to check after we
-                # check for shutdown because a new request could have
-                # been just placed on the queue and then shutdown was
-                # just started in this very tiny window
-                if self.throttle_state != Throttle._ACTIVE and self.async_q.empty():
-                    return
-                continue  # no need to wait since we already did
-            ############################################################
-            # Call the request function.
-            # We use try/except to log and re-raise any unhandled
-            # errors. Note that a hard shutdown will cause the requests
-            # to be dequeued and tossed
-            ############################################################
-            if self.throttle_state != Throttle._HARD_SHUTDOWN_STARTED:
-                self._perform_throttle()
-                # self.logger.debug(f"sched 2: {request_item=}")
-                try:
-                    request_item.request_func(*request_item.args, **request_item.kwargs)
-                    self.processing_request = False
-                except Exception as e:
-                    self.processing_request = False
-                    self.logger.debug(
-                        f"throttle {self.t_name} schedule_requests unhandled exception "
-                        f"in request: {e}"
-                    )
-                    raise
-
-    ####################################################################
-    # _start_shutdown
-    ####################################################################
-    def start_shutdown(
-        self,
-        # shutdown_type: int = Throttle.SHUTDOWN_SOFT,
-        shutdown_type: int = 1,
-        timeout: OptIntFloat = None,
-        suppress_timeout_msg: bool = False,
-    ) -> int:
-        """Shutdown the async throttle request scheduling.
-
-        Shutdown is used to stop and clean up any pending requests on
-        the async request queue. This should be done during normal
-        application shutdown or when an error occurs. Once the throttle
-        has completed shutdown it can no longer be used. If a throttle
-        is once again needed after shutdown, a new one will need to be
-        instantiated to replace the old one.
-
-        Note that a soft shutdown can be started and eventually be
-        followed by a hard shutdown to force shutdown to complete
-        quickly. A hard shutdown, however, can not be followed by a
-        soft shutdown since there is no way to retrieve and run any
-        of the requests that were already removed and tossed by the
-        hard shutdown.
-
-        Args:
-            shutdown_type: specifies whether to do a soft or a hard
-                shutdown:
-
-                     * A soft shutdown
-                       (Throttle.SHUTDOWN_SOFT),
-                       the default, stops any additional
-                       requests from being queued and cleans up
-                       the request queue by scheduling any
-                       remaining requests at the normal interval
-                       as calculated by the *seconds* and
-                       *requests* arguments specified during
-                       throttle instantiation.
-                     * A hard shutdown
-                       (Throttle.SHUTDOWN_HARD) stops
-                       any additional requests from being queued
-                       and cleans up the request queue by
-                       quickly removing any remaining requests
-                       without executing them.
-
-            timeout: number of seconds to allow for shutdown to
-                       complete. If the shutdown times out, control is
-                       returned with a return value of False. The
-                       shutdown will continue and a subsequent call to
-                       start_shutdown, with or without a timeout value,
-                       may eventually return control with a return value
-                       of True to indicate that the shutdown has
-                       completed. Note that a *timeout* value of zero or
-                       less is handled as if shutdown None was
-                       specified, whether explicitly or by default, in
-                       which case the shutdown will not timeout and will
-                       control will be returned if and when the shutdown
-                       completes. A very small value, such as 0.001,
-                       can be used to start the shutdown and then get
-                       back control to allow other cleanup activities
-                       to be performed and eventually issue a second
-                       shutdown request to ensure that it is completed.
-            suppress_timeout_msg: used by shutdown_throttle_funcs to
-                       prevent the timeout log message since it will
-                       issue its own log message
-
-        .. # noqa: DAR101
-
-        Returns: One of the following return codes is returned:
-
-            * RC_SHUTDOWN_SOFT_COMPLETED_OK (0): the
-              ``start_shutdown()`` request either completed a soft
-              shutdown or detected that a previous soft shutdown
-              request had been completed.
-            * RC_SHUTDOWN_HARD_COMPLETED_OK (4): the
-              ``start_shutdown()`` request either completed a hard
-              shutdown or detected that a previous hard shutdown
-              request had been completed.
-            * RC_SHUTDOWN_TIMED_OUT (8): the ``start_shutdown()``
-              request with a non-zero positive *timeout* value was
-              specified and did not complete within the specified
-              number of seconds
-
-        Raises:
-            IncorrectShutdownTypeSpecified: For start_shutdown,
-            shutdownType must be specified as either
-            Throttle.SHUTDOWN_SOFT or
-            Throttle.SHUTDOWN_HARD
-
-        """
-        if self.throttle_mode != Throttle.Mode.ASYNC:
-            error_msg = (
-                "A shutdown was requested for a synchronous throttle. "
-                "Shutdown can only be requested for a throttle that is "
-                "created with a throttle_mode of Mode.ASYNC. "
-                f"Request call sequence: {call_seq(latest=1, depth=2)}"
+    def __getattr__(self, name):
+        try:
+            print(
+                f"\n ************** __getattr__ about to try to return super().__getattr__(name) for {name=}"
             )
-            self.logger.error(error_msg)
-            raise InvalidShutdownRequested(error_msg)
-
-        if (
-            shutdown_type != Throttle.SHUTDOWN_SOFT
-            and shutdown_type != Throttle.SHUTDOWN_HARD
-        ):
-            error_msg = (
-                "For start_shutdown, shutdownType must be specified as "
-                "either Throttle.SHUTDOWN_SOFT or "
-                "Throttle.SHUTDOWN_HARD. "
-                f"Request call sequence: {call_seq(latest=1, depth=2)}"
+            return super().__getattr__(name)
+        except AttributeError:
+            # return self.__dict__[name]
+            print(
+                f"\n ************** __getattr__ did not find in super, about see if {name=} is in self.__self_dict__"
             )
-            self.logger.error(error_msg)
-            raise IncorrectShutdownTypeSpecified(error_msg)
-
-        ################################################################
-        # We are good to go for shutdown
-        ################################################################
-        # The shutdown started flag is initialized to False and once
-        # set to True is never changed back to False. We set it here
-        # when we are about to start shutdown to tell send_request to
-        # exit immediately rather that continuing to loop trying to get
-        # a request on a full async_q
-
-        self._throttle_shutdown_started = True
-
-        # We use the shutdown lock to block us until any in progress
-        # send_requests are complete, and to block other shutdown
-        # requests while the variables are been checked and set.
-        with selk.SELockExcl(self.shutdown_lock):
-
-            # Soft shutdown finishes the queued requests while also
-            # doing the throttling, meaning that a soft shutdown
-            # is done when the queued requests are important and must be
-            # done.
-            # Hard shutdown is done to toss any queued requests and
-            # quickly bring the throttle to the shutdown state.
-            # A hard shutdown request can be done while a soft shutdown
-            # is in progress - this will simply cause the requests to
-            # be tossed and the shutdown will complete more quickly.
-            # Request a soft shutdown after a hard shutdown has been
-            # initiated is OK, but the shutdown will not be changed to
-            # a soft shutdown. The return codes will tell either type
-            # of request how the throttle was shutdown.
-
-            if self.throttle_state == Throttle._ACTIVE:
-                # We will set the start time only when the first
-                # shutdown request is made. More than one shutdown
-                # request can be made. Whichever request first detects
-                # the completion of the shutdown will calculate the
-                # elapsed time.
-                self.shutdown_start_time = time.time()
-
-                if shutdown_type == Throttle.SHUTDOWN_SOFT:
-                    self.throttle_state = Throttle._SOFT_SHUTDOWN_STARTED
-                else:
-                    self.throttle_state = Throttle._HARD_SHUTDOWN_STARTED
-            else:  # shutdown already started or has already completed
-                # if currently processing a soft shutdown and a hard
-                # shutdown is now being requested, we need to shift to a
-                # hard shutdown
-                if (
-                    self.throttle_state == Throttle._SOFT_SHUTDOWN_STARTED
-                    and shutdown_type == Throttle.SHUTDOWN_HARD
-                ):
-                    self.throttle_state = Throttle._HARD_SHUTDOWN_STARTED
-
-        ################################################################
-        # join the schedule_requests thread to wait for the shutdown
-        ################################################################
-        timer = Timer(timeout=timeout)
-        if timeout and timeout > 0:
-            join_timeout = min(0.1, timeout)
-        else:
-            join_timeout = 0.1
-
-        while self.request_scheduler_thread.is_alive() and not timer.is_expired():
-            self.request_scheduler_thread.join(timeout=join_timeout)
-
-        ################################################################
-        # determine results
-        ################################################################
-        with selk.SELockExcl(self.shutdown_lock):
-            if self.request_scheduler_thread.is_alive():
-                if not suppress_timeout_msg:
-                    self.logger.debug(
-                        f"throttle {self.t_name} start_shutdown request timed out with "
-                        f"{timeout=:.4f}"
-                    )
-                return Throttle.RC_SHUTDOWN_TIMED_OUT
-
-            # if here, throttle is shutdown
-            completion_log_msg_needed = False
-            if self.throttle_state == Throttle._SOFT_SHUTDOWN_STARTED:
-                self.throttle_state = Throttle._SOFT_SHUTDOWN_COMPLETED
-                completion_log_msg_needed = True
-            elif self.throttle_state == Throttle._HARD_SHUTDOWN_STARTED:
-                self.throttle_state = Throttle._HARD_SHUTDOWN_COMPLETED
-                completion_log_msg_needed = True
-
-            if completion_log_msg_needed:
-                # add 0.0001 so we don't get a zero elapsed time
-                self.shutdown_elapsed_time = (
-                    time.time() - self.shutdown_start_time + 0.0001
+            if name in self.__self_dict__:
+                print(
+                    f"\n ******************** __getattr__ found name is in self.__self_dict__ for {name=}"
                 )
-                self.logger.info(
-                    f"throttle {self.t_name} start_shutdown request successfully "
-                    f"completed in {self.shutdown_elapsed_time:.4f} seconds"
-                )
+                return self.__self_dict__[name]
+            print(
+                f"\n ************** __getattr__ did not find {name=} in self.__self_dict__ will now raise AttributeError "
+            )
+            raise AttributeError(
+                f"'{type(self).__name__}' object has no attribute '{name}'"
+            )
 
-            if self.throttle_state == Throttle._SOFT_SHUTDOWN_COMPLETED:
-                return Throttle.RC_SHUTDOWN_SOFT_COMPLETED_OK
+    def __setattr__(self, name, value):
+        # Allow setting custom attributes locally on this specific bound proxy
+        print(
+            f"\n ******************** __set_attr__ setting {value=} for attribute {name=}"
+        )
+        self.__self_dict__[name] = value
+
+    def __delattr__(self, name):
+        # 1. Try to delete from the proxy's local dictionary first
+        if name in self.__self_dict__:
+            del self.__self_dict__[name]
+            return
+
+        try:
+            # 2. If not local, try to delete from the wrapped method
+            super().__delattr__(name)
+        except AttributeError:
+            # 3. Raise a clean AttributeError if it doesn't exist anywhere
+            raise AttributeError(
+                f"'{type(self).__name__}' object has no attribute '{name}'"
+            )
+
+
+# class TrackState:
+#     def __init__(self, val1: int = 3):
+#         # Maps (instance_id, method_name) -> MethodStateProxy instance
+#         print(f"\n ######## entered TrackState __init__ with {self=}")
+#         self.val1 = val1
+#         self._proxies = {}
+#
+#     # def __call__(self, wrapped, instance, args, kwargs):
+#     # def __call__(self, func):
+#     @wrapt.decorator
+#     def __call__(self, wrapped, instance, args, kwargs):
+#
+#         def wrapper(wrapped, instance, args, kwargs):
+#             print(
+#                 f"\n ######## entered TrackState __call__ with {wrapped=} , {instance=}, {args=}, {kwargs=}"
+#             )
+#             # def call_dec()
+#             # Fallback for plain functions/staticmethods
+#             if instance is None:
+#                 if not hasattr(wrapped, "throttle"):
+#                     wrapped.throttle = Throttle()
+#                 return wrapped.throttle.send_request(wrapped, *args, **kwargs)
+#
+#             # Retrieve or create a unique method proxy for this specific class instance
+#             proxy_key = (id(instance), wrapped.__name__)
+#             if proxy_key not in self._proxies:
+#                 # Recreate the native bound method, then wrap it in our proxy
+#                 bound_method = getattr(instance, wrapped.__name__)
+#                 self._proxies[proxy_key] = MethodStateProxy(bound_method)
+#
+#             # Increment the state on the proxy object
+#             proxy = self._proxies[proxy_key]
+#             print(f"\n ######## TrackState now has {proxy=}")
+#             if not hasattr(proxy, "throttle"):
+#                 print(f"\n ########TrackState about to set the throttle into proxy")
+#                 proxy.throttle = Throttle()
+#                 print(f"\n*************  TrackState after assignment {proxy.throttle=}")
+#                 # wrapped.throttle = proxy.throttle
+#                 # print(f"\n*************  TrackState after assignment {wrapped.throttle=}")
+#             else:
+#                 print(f"\n ########TrackState already has throttle in proxy")
+#
+#             return proxy.throttle.send_request(wrapped, *args, **kwargs)
+#
+#         # wrapped_func = wrapper(func)
+#         # wrapped_func.throttle =
+#         return wrapper
+
+
+class TrackState:
+    def __init__(self, val1: int = 3):
+        # Maps (instance_id, method_name) -> MethodStateProxy instance
+        print(f"\n ######## entered TrackState __init__ with {self=}")
+        self.val1 = val1
+        self._proxies = {}
+
+    # def __call__(self, wrapped, instance, args, kwargs):
+    # def __call__(self, func):
+
+    def __call__(self, args, kwargs):
+
+        @wrapt.decorator
+        def wrapper(wrapped, instance, args, kwargs):
+            print(
+                f"\n ######## entered TrackState __call__ with {wrapped=} , {instance=}, {args=}, {kwargs=}"
+            )
+            # def call_dec()
+            # Fallback for plain functions/staticmethods
+            if instance is None:
+                if not hasattr(wrapped, "throttle"):
+                    wrapped.throttle = Throttle()
+                return wrapped.throttle.send_request(wrapped, *args, **kwargs)
+
+            # Retrieve or create a unique method proxy for this specific class instance
+            proxy_key = (id(instance), wrapped.__name__)
+            if proxy_key not in self._proxies:
+                # Recreate the native bound method, then wrap it in our proxy
+                bound_method = getattr(instance, wrapped.__name__)
+                self._proxies[proxy_key] = MethodStateProxy(bound_method)
+
+            # Increment the state on the proxy object
+            proxy = self._proxies[proxy_key]
+            print(f"\n ######## TrackState now has {proxy=}")
+            if not hasattr(proxy, "throttle"):
+                print(f"\n ########TrackState about to set the throttle into proxy")
+                proxy.throttle = Throttle()
+                print(f"\n*************  TrackState after assignment {proxy.throttle=}")
+                # wrapped.throttle = proxy.throttle
+                # print(f"\n*************  TrackState after assignment {wrapped.throttle=}")
             else:
-                return Throttle.RC_SHUTDOWN_HARD_COMPLETED_OK
+                print(f"\n ########TrackState already has throttle in proxy")
+
+            return proxy.throttle.send_request(wrapped, *args, **kwargs)
+
+        # wrapped_func = wrapper(func)
+        # wrapped_func.throttle =
+        return wrapper
 
 
 ########################################################################
@@ -1424,17 +621,27 @@ def throttle(
     #     ensure introspection will work as expected.
     # ==================================================================
 
+    # if _wrapped is None:
+    #     return cast(
+    #         _FuncWithThrottleAttr[F],
+    #         functools.partial(
+    #             throttle,
+    #             reqs_per_sec=reqs_per_sec,
+    #             bucket_size=bucket_size,
+    #             throttle_mode=throttle_mode,
+    #             async_q_size=async_q_size,
+    #             name=name,
+    #         ),
+    #     )
+
     if _wrapped is None:
-        return cast(
-            _FuncWithThrottleAttr[F],
-            functools.partial(
-                throttle,
-                reqs_per_sec=reqs_per_sec,
-                bucket_size=bucket_size,
-                throttle_mode=throttle_mode,
-                async_q_size=async_q_size,
-                name=name,
-            ),
+        return wrapt.PartialCallableObjectProxy(
+            throttle,
+            reqs_per_sec=reqs_per_sec,
+            bucket_size=bucket_size,
+            throttle_mode=throttle_mode,
+            async_q_size=async_q_size,
+            name=name,
         )
 
     if name is None:
@@ -1478,7 +685,7 @@ def throttle(
 
         print(f"about to call send_request for {instance=} {func_to_wrap.__name__=}")
         # return bound_method.throttle._send_request(func_to_wrap, *args, **kwargs2)
-        return a_throttle._send_request(func_to_wrap, *args, **kwargs2)
+        return a_throttle.send_request(func_to_wrap, *args, **kwargs2)
 
         # return a_throttle._send_request(func_to_wrap, *args, **kwargs2)
 

@@ -502,7 +502,7 @@ class TestThrottleBasic:
         event = threading.Event()
 
         for i in range(num_reqs_to_send_arg):
-            a_throttle._send_request(dummy_func, event)
+            a_throttle.send_request(dummy_func, event)
 
         event.wait()
 
@@ -538,7 +538,7 @@ class TestThrottleBasic:
         event = threading.Event()
 
         for i in range(num_reqs_to_send_arg):
-            a_throttle._send_request(dummy_func, event, i)
+            a_throttle.send_request(dummy_func, event, i)
 
         logger.debug("mainline waiting on event")
         event.wait()
@@ -1036,7 +1036,7 @@ class TestThrottleBasic:
         )
 
         for _ in range(5):
-            a_throttle._send_request(f1)
+            a_throttle.send_request(f1)
 
         a_throttle.start_shutdown()
 
@@ -1078,7 +1078,7 @@ class TestThrottleBasic:
             if idx == 3:  # we queued 3 so far (i.e., idx 0, 1, 2)
                 ml_event1.set()
                 ml_event2.wait()
-            a_throttle._send_request(f1, idx, f1_count=ml_count)
+            a_throttle.send_request(f1, idx, f1_count=ml_count)
 
         a_throttle.start_shutdown()
 
@@ -2013,7 +2013,7 @@ class TestThrottle:
             if s_interval > 0.0:
                 pauser.pause(s_interval)
             request_item.send_time_ns = perf_counter_ns()
-            _ = a_throttle._send_request(
+            _ = a_throttle.send_request(
                 request_validator.request0c, request_item=request_item
             )
             request_item.return_time_ns = perf_counter_ns()
@@ -2716,7 +2716,7 @@ class TestThrottleShutdownErrors:
 
         num_requests_a = 4
         for i in range(num_requests_a):
-            a_throttle1._send_request(f1, a_req_time)
+            a_throttle1.send_request(f1, a_req_time)
 
         assert a_req_time.num_reqs == num_requests_a
 
@@ -2742,7 +2742,7 @@ class TestThrottleShutdownErrors:
         # the following requests should not get ignored
         num_requests_b = 6
         for i in range(num_requests_b):
-            a_throttle1._send_request(f1, a_req_time)
+            a_throttle1.send_request(f1, a_req_time)
 
         # the count should now reflect the additional requests
         assert a_req_time.num_reqs == num_requests_a + num_requests_b
@@ -2800,7 +2800,7 @@ class TestThrottleShutdownErrors:
 
         num_requests_a = 4
         for i in range(num_requests_a):
-            a_throttle1._send_request(f1, a_req_time)
+            a_throttle1.send_request(f1, a_req_time)
 
         completion_time = a_throttle1.get_completion_time_secs(
             num_requests_a, from_start=True
@@ -2831,7 +2831,7 @@ class TestThrottleShutdownErrors:
         # the following requests should not get ignored
         num_requests_b = 6
         for i in range(num_requests_b):
-            a_throttle1._send_request(f1, a_req_time)
+            a_throttle1.send_request(f1, a_req_time)
 
         completion_time = a_throttle1.get_completion_time_secs(
             num_requests_b, from_start=True
@@ -2944,7 +2944,7 @@ def queue_first_batch_requests(
     )
 
     for _ in range(num_reqs):
-        assert Throttle.RC_OK == throttle._send_request(f2_target, a_req_time, log_ver)
+        assert Throttle.RC_OK == throttle.send_request(f2_target, a_req_time, log_ver)
 
     log_ver.test_msg(
         f"{num_reqs} requests added, elapsed time = {time.time() - start_time} seconds"
@@ -2982,7 +2982,7 @@ def queue_more_requests(
     """
     start_time = time.time()
     for _ in range(num_reqs):
-        assert Throttle.RC_OK == throttle._send_request(f2_target, req_time, log_ver)
+        assert Throttle.RC_OK == throttle.send_request(f2_target, req_time, log_ver)
 
     log_ver.test_msg(
         f"{num_reqs} requests added, elapsed time = {time.time() - start_time} seconds"
@@ -3015,7 +3015,7 @@ def final_shutdown_and_verification(
     ############################################################
     issue_remaining_requests_log_entry(throttle=throttle, log_ver=log_ver)
 
-    assert Throttle.RC_THROTTLE_IS_SHUTDOWN == throttle._send_request(
+    assert Throttle.RC_THROTTLE_IS_SHUTDOWN == throttle.send_request(
         f2_target, req_time, log_ver
     )
 
@@ -4784,6 +4784,65 @@ class TestThrottleDocstrings:
         assert captured == expected_result
 
     ####################################################################
+    # test_throttle_example_3b
+    ####################################################################
+    def test_throttle_example_3b(self, capsys: Any) -> None:
+        """Method test_throttle_example_3b.
+
+        Args:
+            capsys: pytest fixture to capture print output
+
+        """
+
+        hdr_str = ":Example 3b: asynchronous throttle:"
+        flowers(hdr_str)
+
+        from scottbrian_throttle.throttle import Throttle
+        import time, sys
+
+        class Test3b:
+            def __init__(self):
+                var1 = 1
+
+            @Throttle(reqs_per_sec=2, throttle_mode=Throttle.Mode.ASYNC)
+            def func3(self, request_number, time_of_start):
+                if request_number == 0:
+                    sys.stdout.flush()
+                    time.sleep(0.02)
+                print(
+                    f"request {request_number} sent at elapsed time: "
+                    f"{time.time() - time_of_start:0.1f}"
+                )
+
+        test3b = Test3b()
+        start_time = time.time()
+        for idx in range(10):
+            test3b.func3(idx, start_time)
+
+        test3b.func3.throttle.start_shutdown()
+
+        flower_str = ("*" * (len(hdr_str) + 4)) + "\n"
+
+        expected_result = "\n" + flower_str
+        expected_result += f"* {hdr_str} *\n"
+        expected_result += flower_str
+        expected_result += "request 0 sent at elapsed time: 0.0\n"
+        expected_result += "request 1 sent at elapsed time: 0.5\n"
+        expected_result += "request 2 sent at elapsed time: 1.0\n"
+        expected_result += "request 3 sent at elapsed time: 1.5\n"
+        expected_result += "request 4 sent at elapsed time: 2.0\n"
+        expected_result += "request 5 sent at elapsed time: 2.5\n"
+        expected_result += "request 6 sent at elapsed time: 3.0\n"
+        expected_result += "request 7 sent at elapsed time: 3.5\n"
+        expected_result += "request 8 sent at elapsed time: 4.0\n"
+        expected_result += "request 9 sent at elapsed time: 4.5\n"
+
+        time.sleep(1)
+        captured = capsys.readouterr().out
+
+        assert captured == expected_result
+
+    ####################################################################
     # test_throttle_example_4
     ####################################################################
     def test_throttle_example_4(self, capsys: Any) -> None:
@@ -4922,17 +4981,19 @@ class TestThrottleDocstrings:
         hdr_str = ":Example 7: get length for an asynchronous throttle"
         flowers(hdr_str)
 
-        from scottbrian_throttle.throttle import Throttle
+        from scottbrian_throttle.throttle import track_state
+
+        # track_state = wrapt.decorator(TrackState())
 
         class Funky:
             def __init__(self, a_var: int):
                 self.funky_var = a_var
 
-            @Throttle()
+            @track_state
             def func7a(self):
                 self.funky_var += 1
 
-            @Throttle(reqs_per_sec=2)
+            @track_state
             def func7b(self):
                 self.funky_var += 10
 
@@ -4978,7 +5039,7 @@ class TestThrottleDocstrings:
             def __init__(self, a_var: int):
                 self.funky_var = a_var
 
-            @throttle(reqs_per_sec=1)
+            @Throttle(reqs_per_sec=1)
             def func7a(self):
                 self.funky_var += 1
 
@@ -5007,3 +5068,131 @@ class TestThrottleDocstrings:
         print(
             f"\n{funky2.func7b.throttle2.reqs_per_sec=}, {funky2.func7b.throttle2.call_count=}, {funky2.funky_var=}, {id(funky2.func7b.throttle2)=}\n"
         )
+
+    ####################################################################################################################
+    # test_experiment1
+    ####################################################################################################################
+    def test_experiment1(self, capsys: Any) -> None:
+
+        os.environ["WRAPT_DISABLE_EXTENSIONS"] = "true"
+        from wrapt.wrappers import FunctionWrapper as FW
+
+        # class MethodStateWrapper(wrapt.FunctionWrapper):
+        class MethodStateWrapper(FW):
+            """A custom wrapt wrapper that exposes instance-specific state."""
+
+            def __init__(self, wrapped, instance, wrapper, state_attr):
+                # super().__init__(wrapped, wrapper, instance)
+                super(MethodStateWrapper, self).__init__(wrapped, wrapper)
+                self._state_attr = state_attr
+
+            # def __call__(self, *args, **kwargs):
+            #     return super(MethodStateWrapper, self).__call__(*args, **kwargs)
+
+            @property
+            def call_count(self):
+                # Look up the state on the bound instance via wrapt's __self__
+                if self.__self__ is not None:
+                    return getattr(self.__self__, self._state_attr, 0)
+                return 0
+
+        class track_state:
+            def __init__(self, wrapped):
+                self.wrapped = wrapped
+                self.state_attr = f"_state_{wrapped.__name__}"
+                print(f'\n &&&& {hasattr(wrapped, "__self__")=}')
+
+            def __get__(self, instance, owner):
+                # Handle class-level access (e.g., MyClass.my_method)
+                if instance is None:
+                    return self
+
+                # This inner function handles the actual execution logic
+                def _execution_wrapper(wrapped, instance, args, kwargs):
+                    current_count = getattr(instance, self.state_attr, 0)
+                    print(
+                        f"in _execution_wrapper: {instance=}, {self.state_attr=}, {current_count=} "
+                    )
+                    setattr(instance, self.state_attr, current_count + 1)
+                    return wrapped(*args, **kwargs)
+
+                # Return our custom wrapt proxy instead of Python's built-in 'method'
+                print(f"in __get__ about to return: {instance=} ")
+                return MethodStateWrapper(
+                    wrapped=self.wrapped,
+                    instance=instance,
+                    wrapper=_execution_wrapper,
+                    state_attr=self.state_attr,
+                )
+
+        class MyClass:
+            @track_state
+            def my_method(self):
+                return "Executed"
+
+        obj1 = MyClass()
+        obj2 = MyClass()
+
+        # Execute calls to update instance counters
+        print(f'\n $$$$$$ {hasattr(obj1.my_method, "__self__")=}')
+        obj1.my_method()
+        obj1.my_method()
+        obj2.my_method()
+
+        # Read the state safely from the outside
+        print(obj1.my_method.call_count)  # Prints: 2
+        print(obj2.my_method.call_count)  # Prints: 1
+
+    ####################################################################
+    # test_throttle_example_9
+    ####################################################################
+    def test_throttle_example_9(self, capsys: Any) -> None:
+        """Method test_throttle_example_9.
+
+        Args:
+            capsys: pytest fixture to capture print output
+
+        """
+
+        hdr_str = ":Example 7: get length for an asynchronous throttle"
+        flowers(hdr_str)
+
+        from scottbrian_throttle.throttle import TrackState
+
+        # track_state = wrapt.decorator(TrackState())
+
+        class Funky:
+            def __init__(self, a_var: int):
+                self.funky_var = a_var
+
+            @TrackState()
+            def func7a(self):
+                self.funky_var += 1
+
+            @TrackState()
+            def func7b(self):
+                self.funky_var += 10
+
+        funky1 = Funky(a_var=2)
+        funky2 = Funky(a_var=102)
+
+        funky1.func7a()
+        # funky1.func7b()
+        funky2.func7a()
+        funky2.func7b()
+
+        print(f"\n {type(funky1.func7a)=}")
+
+        # print(
+        #     f"\n{funky1.func7a.throttle.reqs_per_sec=}, {funky1.func7a.throttle.call_count=}, {funky1.funky_var=}, {id(funky1.func7a.throttle)=}\n"
+        # )
+        # print(
+        #     f"\n{funky1.func7b.throttle.reqs_per_sec=}, {funky1.func7b.throttle.call_count=}, {funky1.funky_var=}, {id(funky1.func7b.throttle)=}\n"
+        # )
+        #
+        # print(
+        #     f"\n{funky2.func7a.throttle.reqs_per_sec=}, {funky2.func7a.throttle.call_count=}, {funky2.funky_var=}, {id(funky2.func7a.throttle)=}\n"
+        # )
+        # print(
+        #     f"\n{funky2.func7b.throttle.reqs_per_sec=}, {funky2.func7b.throttle.call_count=}, {funky2.funky_var=}, {id(funky2.func7b.throttle)=}\n"
+        # )
