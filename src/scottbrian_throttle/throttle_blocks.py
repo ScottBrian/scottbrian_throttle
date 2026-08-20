@@ -20,7 +20,6 @@ from typing import (
     Any,
     Callable,
     Final,
-    NamedTuple,
     Optional,
     TYPE_CHECKING,
     Type,
@@ -56,12 +55,6 @@ class ThrottleError(Exception):
     pass
 
 
-class IncorrectAsyncQSizeSpecified(ThrottleError):
-    """Throttle exception for incorrect async_q_size specification."""
-
-    pass
-
-
 class IncorrectReqsPerSecSpecified(ThrottleError):
     """Throttle exception for incorrect reqs_per_sec specification."""
 
@@ -74,22 +67,9 @@ class IncorrectBucketSizeSpecified(ThrottleError):
     pass
 
 
-class IncorrectShutdownTypeSpecified(ThrottleError):
-    """Throttle exception for incorrect shutdown_type specification."""
-
-    pass
-
-
-class InvalidAsyncQSizeSpecified(ThrottleError):
-    """Throttle exception for invalid asynjc_q_size specification."""
-
-
-class InvalidShutdownRequested(ThrottleError):
-    """Throttle exception for invalid shutdown request."""
-
-
 class InvalidArgs(ThrottleError):
     """Throttle exception for invalid args."""
+    pass
 
 
 ########################################################################
@@ -102,18 +82,6 @@ class Throttle:
         SYNC = auto()
         ASYNC = auto()
 
-    ####################################################################
-    # send_request return codes
-    ####################################################################
-
-    class Request(NamedTuple):
-        """NamedTuple for the request queue item."""
-
-        request_func: Callable[..., Any]
-        args: tuple[Any, ...]
-        kwargs: dict[str, Any]
-        arrival_time: float
-
     SECS_2_NS: Final[int] = 1000000000
     NS_2_SECS: Final[float] = 0.000000001
 
@@ -122,7 +90,6 @@ class Throttle:
         "_next_target_time_ns",
         "_target_interval",
         "_target_interval_ns",
-        "_throttle_shutdown_started",
         "_wait_time_ns",
         "call_count",
         "throttle_mode",
@@ -132,16 +99,10 @@ class Throttle:
         "lb_with_one_request",
         "logger",
         "pauser",
-        "processing_request",
         "reqs_per_sec",
-        "request_scheduler_thread",
         "sent_time_ns",
-        "shutdown_elapsed_time",
-        "shutdown_lock",
-        "shutdown_start_time",
         "sync_lock",
         "t_name",
-        "throttle_state",
     )
 
     ####################################################################
@@ -153,7 +114,6 @@ class Throttle:
         reqs_per_sec: IntFloat = 1,
         bucket_size: IntFloat = 1,
         throttle_mode: Mode = Mode.SYNC,
-        async_q_size: Optional[int] = None,
         name: Optional[str] = None,
     ) -> None:
         """Initialize an instance of the Throttle class.
@@ -179,12 +139,6 @@ class Throttle:
             throttle_mode: If Mode.ASYNC, the throttle is
                     asynchronous. If Mode.SYNC, the default,
                     the throttle is synchronous.
-            async_q_size: Specifies the size of the request
-                          queue for async requests. When the request
-                          queue is totally populated, any additional
-                          calls to send_request will be delayed
-                          until queued requests are removed and
-                          scheduled. The default is 4096 requests.
             name: The name used to identify the throttle in log messages
                 issued by the throttle. The default name is
                 the python id of the Throttle class instance.
@@ -194,8 +148,6 @@ class Throttle:
             IncorrectReqsPerSecSpecified: The *reqs_per_sec*
                 specification must be a positive int or float greater
                 than zero.
-            IncorrectAsyncQSizeSpecified: *async_q_size* must be an
-                integer greater than zero.
 
         """
         ################################################################
@@ -228,47 +180,11 @@ class Throttle:
             self.logger.error(error_msg)
             raise IncorrectBucketSizeSpecified(error_msg)
 
-        ################################################################
-        # async_throttle
-        ################################################################
-        ################################################################
-        # States and processing for Throttle:
-        #
-        #     The Throttle is initialized with an empty async_q and the
-        #     scheduler thread is started and ready to receive work. The
-        #     starting state is 'active'.
-        #
-        #     1) state: active
-        #        a) send_request called (directly or via decorated func
-        #           call):
-        #           1) request is queued to the async_q
-        #           2) state remains 'active'
-        #        b) start_shutdown called:
-        #           1) state is changed to 'shutdown'
-        #           2) Any new requests are rejected. For "soft"
-        #           shutdown, scheduler schedules the remaining requests
-        #           currently queued on the async_q with the normal
-        #           interval. With "hard" shutdown, the scheduler
-        #           removes and discards the requests on the async_q.
-        #           3) scheduler exits
-        #           4) control returns after scheduler thread returns
-        #     2) state: shutdown
-        #        a) send_request called (directly or via decorated func
-        #           call):
-        #           1) request is ignored  (i.e, not queued to async_q)
-        #        b) start_shutdown called (non-decorator only):
-        #           1) state remains 'shutdown'
-        #           2) control returns immediately
-        ################################################################
         self.throttle_mode = throttle_mode
 
         ################################################################
         # name
         ################################################################
-        # if name is None:
-        #     self.t_name = str(id(self))
-        # else:
-        #     self.t_name = name
         self.t_name = name or str(id(self))
 
         ################################################################
@@ -283,8 +199,6 @@ class Throttle:
         self.logger = logging.getLogger(__name__)
         self.pauser = Pauser()
 
-        # self.pauser.pause_ns(3000000000)
-
         ################################################################
         # Set leaky bucket vars
         ################################################################
@@ -297,8 +211,6 @@ class Throttle:
 
         # adjust _next_target_time_ns for normal or lb algo
         self._next_target_time_ns = time.perf_counter_ns() - self.lb_adjustment_ns
-
-        self.processing_request = False
 
         self.call_count = 0
 
@@ -326,7 +238,7 @@ class Throttle:
             Expected output for Example 5::
 
             ('Throttle(reqs_per_sec=0.5, bucket_size=1, '
-             'throttle_mode=Mode.SYNC, async_q_size=0, '
+             'throttle_mode=Mode.SYNC, '
              'name=t6)')
 
 
@@ -339,7 +251,6 @@ class Throttle:
             f"reqs_per_sec={self.reqs_per_sec}, "
             f"bucket_size={self.bucket_size}, "
             f"throttle_mode={str(self.throttle_mode)}, "
-            f"async_q_size={self.async_q_size}, "
             f"name={self.t_name}"
         )
 
@@ -516,7 +427,7 @@ class Throttle:
         # 2) The current request arrives rapidly on the heels of the
         #    previous request such that the bucket is full enough that
         #    it does not contain enough room to add a new entry. We need
-        #    to delay this current reques until there is room enough in
+        #    to delay this current request until there is room enough in
         #    the bucket to add this one entry.
         # 3) The current request arrives when the bucket has one or more
         #    previous requests still leaking out, but there is still
@@ -549,18 +460,10 @@ class Throttle:
             self._next_target_time_ns = self._arrival_time_ns + self.lb_with_one_request
 
         else:  # still in the range of the bucket
-            ############################################################
-            # wait (i.e., throttle)
-            # Note that the wait time could be anywhere from a fraction
-            # of a second to several seconds. We want to be responsive
-            # in case we need to bail for shutdown, so we wait in 1
-            # second or fewer increments and bail if we detect shutdown.
-            ############################################################
             # Sleep, if needed, until we have room in the bucket for one
             # entry.
-            sleep_ns = self._next_target_time_ns - time.perf_counter_ns()
-            if sleep_ns > 0:
-                self.pauser.pause_ns(sleep_ns)
+            if self._wait_time_ns > 0:
+                self.pauser.pause_ns(self._wait_time_ns)
 
             # add one entry to the bucket
             self._next_target_time_ns += self._target_interval_ns
@@ -569,6 +472,123 @@ class Throttle:
 
 
 ##### @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+
+# import asyncio
+# import contextvars  # Native context tracking
+# import functools
+# import inspect
+# import logging
+# import time
+# from typing import Literal, Optional
+#
+# logger = logging.getLogger("hybrid_decorator")
+#
+#
+# def hybrid_delayed_execution(
+#     delay: float, sync_action: Optional[Literal["keep_sync", "convert_to_async"]] = None
+# ):
+#     def decorator(func):
+#         is_async_func = inspect.iscoroutinefunction(func)
+#
+#         # ---- VALIDATION GATE ----
+#         if is_async_func and sync_action is not None:
+#             raise TypeError(
+#                 f"Cannot specify 'sync_action' on async function '{func.__name__}'."
+#             )
+#         if not is_async_func and sync_action is None:
+#             raise TypeError(
+#                 f"The function '{func.__name__}' is synchronous. Provide 'sync_action'."
+#             )
+#
+#         # Helper to safely log or tag errors for APM systems
+#         def capture_apm_error(e: Exception, context_name: str):
+#             # 1. Standard structured logging (parsed cleanly by Datadog/ELK)
+#             logger.error(
+#                 f"Exception in {context_name} for '{func.__name__}': {e}",
+#                 exc_info=True,
+#                 extra={"function_name": func.__name__, "decorator_delay": delay},
+#             )
+#
+#             # 2. Sentry Explicit Fallback (If the developer uses Sentry)
+#             # Many APMs capture unhandled exceptions automatically, but inside
+#             # background threads, explicit capture guarantees it isn't dropped.
+#             try:
+#                 import sentry_sdk
+#
+#                 sentry_sdk.capture_exception(e)
+#             except ImportError:
+#                 pass
+#
+#         # ---- EXECUTION PATHS ----
+#
+#         # PATH 1: Native Async Function
+#         if is_async_func:
+#
+#             @functools.wraps(func)
+#             async def async_wrapper(*args, **kwargs):
+#                 await asyncio.sleep(delay)
+#                 try:
+#                     return await func(*args, **kwargs)
+#                 except Exception as e:
+#                     capture_apm_error(e, "async context")
+#                     raise
+#
+#             return async_wrapper
+#
+#         # PATH 2: Sync Function -> Keep Sync (Option A)
+#         elif sync_action == "keep_sync":
+#
+#             @functools.wraps(func)
+#             def sync_blocking_wrapper(*args, **kwargs):
+#                 try:
+#                     asyncio.get_running_loop()
+#                     raise RuntimeError(
+#                         f"CRITICAL: Called 'keep_sync' function '{func.__name__}' directly on the main loop thread."
+#                     )
+#                 except RuntimeError as e:
+#                     if "CRITICAL" in str(e):
+#                         logger.critical(str(e))
+#                         raise e
+#
+#                 time.sleep(delay)
+#                 try:
+#                     return func(*args, **kwargs)
+#                 except Exception as e:
+#                     capture_apm_error(e, "pure sync context")
+#                     raise
+#
+#             return sync_blocking_wrapper
+#
+#         # PATH 3: Sync Function -> Convert to Async (Option B)
+#         elif sync_action == "convert_to_async":
+#
+#             @functools.wraps(func)
+#             async def sync_to_async_wrapper(*args, **kwargs):
+#                 await asyncio.sleep(delay)
+#
+#                 # We extract the current execution context explicitly.
+#                 # asyncio.to_thread handles this automatically, but doing it explicitly
+#                 # guarantees third-party custom tracing hooks remain flawlessly linked.
+#                 ctx = contextvars.copy_context()
+#
+#                 def worker_thread_target():
+#                     try:
+#                         return func(*args, **kwargs)
+#                     except Exception as e:
+#                         capture_apm_error(e, "worker thread")
+#                         raise
+#
+#                 # Run the worker thread using the captured main-thread context
+#                 return await asyncio.to_thread(lambda: ctx.run(worker_thread_target))
+#
+#             return sync_to_async_wrapper
+#
+#     return decorator
+
+
+##### @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+
+
 # import asyncio
 # import threading
 # from contextlib import contextmanager

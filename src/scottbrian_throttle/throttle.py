@@ -1,26 +1,27 @@
 """Module throttle.
 
 ========
-Throttle
+throttle
 ========
 
 The Throttle allows you to limit the rate at which a function is
 called. An internet service, for example, might have a limit for the
 number of requests you can send in a given interval - using the
-Throttle will help you stay within that limit.
+throttle will help you stay within that limit.
 
-The Throttle is a decorator that wraps your function with code that
-keeps track of the intervals between each invocation. The Throttle will
+The throttle is a decorator that wraps your function with code that
+keeps track of the intervals between each invocation. The throttle will
 delay the running of your function to stay within the limit. By default,
-the Throttle maintains a limit of 1 call per second.
+the throttle maintains a limit of 1 call per second.
 
-:Example 1: Throttle at 1 requests per second:
+:Example 1: throttle at 1 request per second:
 
 .. code-block:: python
 
-    from scottbrian_throttle.throttle import Throttle
+    from scottbrian_throttle.throttle import throttle
+    import time
 
-    @Throttle()
+    @throttle()
     def func1(request_number, time_of_start):
         ret_value = (f'request {request_number} sent at elapsed time: '
                      f'{time.time() - time_of_start:0.1f}')
@@ -52,14 +53,14 @@ interval is calculated as 1/*reqs_per_sec*. For example,
 *reqs_per_sec=0.5* will be an interval of 2 seconds, and
 *reqs_per_sec=2* will be an interval of 1/2 seconds.
 
-:Example 2: Throttle at 2 requests per second:
+:Example 2: throttle at 2 requests per second:
 
 .. code-block:: python
 
-    from scottbrian_throttle.throttle import Throttle
+    from scottbrian_throttle.throttle import throttle
     import time
 
-    @Throttle(reqs_per_sec=2)
+    @throttle(reqs_per_sec=2)
     def func2(request_number, time_of_start):
         ret_value = (f'request {request_number} sent at elapsed time: '
                      f'{time.time() - time_of_start:0.1f}')
@@ -85,10 +86,51 @@ interval is calculated as 1/*reqs_per_sec*. For example,
         request 9 sent at elapsed time: 4.5
 
 
-Using an asynchronous Throttle
-==============================
+Using the throttle in asyncio and non-asyncio environments
+==========================================================
 
-By default, the Throttle is synchronous - when you call your function
+The throttle will delay the function as needed to ensure the limit is not
+exceeded, and this delay will be done with either time.sleep or
+asyncio.sleep.
+
+When the throttle is used to decorate an async defined function, the
+caller is expected to be running in an asyncio environment and to invoke
+the function using the proper asyncio method, such as using await. For
+this scenario, the throttle will use asyncio.sleep to as needed to delay
+the function. If for some reason the caller is not running in an asyncio
+environment, calling an async defined function will fail, as expected.
+
+When the throttle is used to decorate a non-async defined function and
+the caller is not running in an asyncio environment, the caller can
+simply invoke the function in the usual fashion without needing to do
+anything special. For this scenario, the throttle will use time.sleep
+as needed to delay the function.
+
+When the throttle is used, however, to decorate a non-asyncio function
+and the caller is running in an asyncio environment, special care
+must be used when invoking the function to ensure that the event
+loop will not be blocked. There are two possible scenarios:
+    1) the caller can use asyncio.to_thread from the main loop to
+       run the function is a separate thread. In this scenario, the
+       throttle will use time.sleep as needed to delay the function.
+    2) *sync_action=conver_to_async* can be specified on throttle to
+       cause the wrapper to be defined as an async function. In this
+       scenario, the caller can invoke the function using the proper
+       asyncio method, such as using await. The throttle will use
+       asyncio.sleep to as needed to delay the function, and will use
+       asyncio.to_thread to run the function in a separate thread.
+
+
+
+
+
+
+     decorated function is defined as an
+asyncio function (i.e., async def func(...)). If so, asyncio.sleep will
+be used to perform any needed delay for the throttling. If the decorated
+function is not defined as async, time.sleep will be used instead. The
+throttle will also deted from the  *( the th n-asyncio
+If ,  the _n a non-asyncio By default, the Throttle is synchronous - when you call your function
 you will not get back control until your function has completed. This
 means you will observe any delay imposed by the Throttle. The Throttle
 also provides an asynchronous mode that queues your function to a queue
