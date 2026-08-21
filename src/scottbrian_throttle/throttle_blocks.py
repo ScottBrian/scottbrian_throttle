@@ -69,6 +69,7 @@ class IncorrectBucketSizeSpecified(ThrottleError):
 
 class InvalidArgs(ThrottleError):
     """Throttle exception for invalid args."""
+
     pass
 
 
@@ -92,7 +93,7 @@ class Throttle:
         "_target_interval_ns",
         "_wait_time_ns",
         "call_count",
-        "throttle_mode",
+        "convert_to_async",
         "bucket_size",
         "lb_adjustment",
         "lb_adjustment_ns",
@@ -113,7 +114,7 @@ class Throttle:
         *,
         reqs_per_sec: IntFloat = 1,
         bucket_size: IntFloat = 1,
-        throttle_mode: Mode = Mode.SYNC,
+        convert_to_async: bool = False,
         name: Optional[str] = None,
     ) -> None:
         """Initialize an instance of the Throttle class.
@@ -136,9 +137,11 @@ class Throttle:
                          request interval has elapsed will be delayed.
                          The bucket_size must be greater than or equal
                          to 1.
-            throttle_mode: If Mode.ASYNC, the throttle is
-                    asynchronous. If Mode.SYNC, the default,
-                    the throttle is synchronous.
+            convert_to_async: When True, convert a non-asyncio function to
+                          be defined as an async function. This will
+                          allow the caller to invoke the decorated
+                          function using a proper asyncio method such as
+                          *await*. The default is False.
             name: The name used to identify the throttle in log messages
                 issued by the throttle. The default name is
                 the python id of the Throttle class instance.
@@ -180,7 +183,7 @@ class Throttle:
             self.logger.error(error_msg)
             raise IncorrectBucketSizeSpecified(error_msg)
 
-        self.throttle_mode = throttle_mode
+        self.convert_to_async = convert_to_async
 
         ################################################################
         # name
@@ -229,7 +232,7 @@ class Throttle:
 
             from scottbrian_throttle.throttle import Throttle
 
-            @Throttle(reqs_per_sec=0.5, name="t6")
+            @Throttle(reqs_per_sec=0.5)
             def func5(request_number, time_of_start):
                 pass
 
@@ -237,9 +240,7 @@ class Throttle:
 
             Expected output for Example 5::
 
-            ('Throttle(reqs_per_sec=0.5, bucket_size=1, '
-             'throttle_mode=Mode.SYNC, '
-             'name=t6)')
+            'Throttle(reqs_per_sec=0.5, bucket_size=1, convert_to_async=False)'
 
 
 
@@ -250,7 +251,7 @@ class Throttle:
         parms = (
             f"reqs_per_sec={self.reqs_per_sec}, "
             f"bucket_size={self.bucket_size}, "
-            f"throttle_mode={str(self.throttle_mode)}, "
+            f"convert_to_async={str(self.convert_to_async)}, "
             f"name={self.t_name}"
         )
 

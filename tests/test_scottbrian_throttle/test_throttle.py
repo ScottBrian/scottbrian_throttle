@@ -33,13 +33,9 @@ from typing_extensions import TypeAlias
 ########################################################################
 # Local
 ########################################################################
-from scottbrian_throttle.throttle import (
+from scottbrian_throttle.throttle_blocks import (
     IncorrectReqsPerSecSpecified,
-    IncorrectAsyncQSizeSpecified,
     IncorrectBucketSizeSpecified,
-    IncorrectShutdownTypeSpecified,
-    InvalidAsyncQSizeSpecified,
-    InvalidShutdownRequested,
     Throttle,
 )
 
@@ -4642,10 +4638,10 @@ class TestThrottleDocstrings:
         hdr_str = ":Example 1: Throttle at 1 requests per second:"
         flowers(hdr_str)
 
-        from scottbrian_throttle.throttle import Throttle
+        from scottbrian_throttle.throttle import throttle
         import time
 
-        @Throttle()
+        @throttle(reqs_per_sec=1)
         def func1(request_number, time_of_start):
             ret_value = (
                 f"request {request_number} sent at elapsed time: "
