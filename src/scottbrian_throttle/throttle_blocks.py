@@ -9,12 +9,13 @@ decorator.
 
 """
 
-import logging
-import threading
-import time
 ########################################################################
 # Standard Library
 ########################################################################
+import asyncio
+import logging
+import threading
+import time
 from enum import Enum, auto
 from typing import (
     Any,
@@ -93,7 +94,7 @@ class Throttle:
         "_target_interval_ns",
         "_wait_time_ns",
         "call_count",
-        "convert_to_async",
+        "asyncio_env",
         "bucket_size",
         "lb_adjustment",
         "lb_adjustment_ns",
@@ -114,7 +115,7 @@ class Throttle:
         *,
         reqs_per_sec: IntFloat = 1,
         bucket_size: IntFloat = 1,
-        convert_to_async: bool = False,
+        asyncio_env: bool = False,
         name: Optional[str] = None,
     ) -> None:
         """Initialize an instance of the Throttle class.
@@ -137,11 +138,8 @@ class Throttle:
                          request interval has elapsed will be delayed.
                          The bucket_size must be greater than or equal
                          to 1.
-            convert_to_async: When True, convert a non-asyncio function to
-                          be defined as an async function. This will
-                          allow the caller to invoke the decorated
-                          function using a proper asyncio method such as
-                          *await*. The default is False.
+            asyncio_env: When True, use await and asyncio.sleep. The
+                         default is False.
             name: The name used to identify the throttle in log messages
                 issued by the throttle. The default name is
                 the python id of the Throttle class instance.
@@ -183,7 +181,7 @@ class Throttle:
             self.logger.error(error_msg)
             raise IncorrectBucketSizeSpecified(error_msg)
 
-        self.convert_to_async = convert_to_async
+        self.asyncio_env = asyncio_env
 
         ################################################################
         # name
@@ -226,19 +224,19 @@ class Throttle:
         Returns:
             The representation as how the class is instantiated
 
-        :Example 5: call __repr__ for Throttle
+        :Example 1: call __repr__ for Throttle
 
         .. code-block:: python
 
-            from scottbrian_throttle.throttle import Throttle
+            from scottbrian_throttle.throttle import throttle
 
-            @Throttle(reqs_per_sec=0.5)
-            def func5(request_number, time_of_start):
+            @throttle(reqs_per_sec=0.5)
+            def func1(request_number, time_of_start):
                 pass
 
-            print(repr(func5.throttle))
+            print(repr(func1.throttle))
 
-            Expected output for Example 5::
+            Expected output for Example 1::
 
             'Throttle(reqs_per_sec=0.5, bucket_size=1, convert_to_async=False)'
 
@@ -342,9 +340,11 @@ class Throttle:
         return int(interval / self._target_interval) + 1
 
     ####################################################################
-    # send_request
+    # sync_send_request
     ####################################################################
-    def send_request(self, func: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+    def sync_send_request(
+        self, func: Callable[..., Any], *args: Any, **kwargs: Any
+    ) -> Any:
         """Send the request.
 
         Args:
@@ -377,7 +377,50 @@ class Throttle:
                 return func(*args, **kwargs)
             except Exception as e:
                 self.logger.debug(
-                    f"throttle {self.t_name} send_request unhandled exception in "
+                    f"throttle {self.t_name} sync_send_request unhandled exception in "
+                    f"request: {e}"
+                )
+                raise
+
+    ####################################################################
+    # async_send_request
+    ####################################################################
+    async def async_send_request(
+        self, func: Callable[..., Any], *args: Any, **kwargs: Any
+    ) -> Any:
+        """Send the request.
+
+        Args:
+            func: the request function to be run
+            args: the request function positional arguments
+            kwargs: the request function keyword arguments
+
+        Returns:
+              The return value from the request function which may be
+              any value or None.
+        Raises:
+            Exception: An exception occurred in the request target. It
+                will be logged and re-raised.
+
+        """
+        self.call_count += 1
+
+        ############################################################
+        # SYNC mode
+        ############################################################
+        with self.sync_lock:
+            self._perform_throttle()
+
+            ########################################################
+            # Call the request function and return with the request
+            # return value. We use try/except to log and re-raise
+            # any unhandled errors.
+            ########################################################
+            try:
+                return await func(*args, **kwargs)
+            except Exception as e:
+                self.logger.debug(
+                    f"throttle {self.t_name} async_send_request unhandled exception in "
                     f"request: {e}"
                 )
                 raise
@@ -464,7 +507,10 @@ class Throttle:
             # Sleep, if needed, until we have room in the bucket for one
             # entry.
             if self._wait_time_ns > 0:
-                self.pauser.pause_ns(self._wait_time_ns)
+                if self.asyncio_env:
+                    asyncio.sleep(self._wait_time_ns)
+                else:
+                    self.pauser.pause_ns(self._wait_time_ns)
 
             # add one entry to the bucket
             self._next_target_time_ns += self._target_interval_ns

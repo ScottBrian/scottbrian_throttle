@@ -21,7 +21,7 @@ the throttle maintains a limit of 1 call per second.
     from scottbrian_throttle.throttle import throttle
     import time
 
-    @throttle()
+    @throttle
     def func1(request_number, time_of_start):
         ret_value = (f'request {request_number} sent at elapsed time: '
                      f'{time.time() - time_of_start:0.1f}')
@@ -72,7 +72,7 @@ interval is calculated as 1/*reqs_per_sec*. For example,
         print(ret_val)
 
 
-    Expected output for Example 1::
+    Expected output for Example 2::
 
         request 0 sent at elapsed time: 0.0
         request 1 sent at elapsed time: 0.5
@@ -137,7 +137,7 @@ loop will not be blocked. There are two possible scenarios:
         for idx in range(10):
             await func3(idx, start_time)
 
-    asyncio.run(main())
+    asyncio.run(main_loop())
 
     Expected output for Example 3::
 
@@ -172,9 +172,9 @@ loop will not be blocked. There are two possible scenarios:
         for idx in range(10):
             asyncio.to_thread(func4, idx, start_time)
 
-    asyncio.run(main())
+    asyncio.run(main_loop())
 
-    Expected output for Example 3::
+    Expected output for Example 4::
 
         request 0 sent at elapsed time: 0.0
         request 1 sent at elapsed time: 0.5
@@ -207,7 +207,7 @@ loop will not be blocked. There are two possible scenarios:
 
     asyncio.run(main())
 
-    Expected output for Example 3::
+    Expected output for Example 5::
 
         request 0 sent at elapsed time: 0.0
         request 1 sent at elapsed time: 0.5
@@ -252,7 +252,7 @@ bucket increases.
     from scottbrian_throttle.throttle import Throttle
     import time
 
-    @Throttle(reqs_per_sec=2, bucket_size=3)
+    @throttle(reqs_per_sec=2, bucket_size=3)
     def func6(request_number, time_of_start):
         print(f'request {request_number} sent at elapsed time: '
               f'{time.time() - time_of_start:0.1f}')
@@ -299,11 +299,18 @@ active_state_ctx = contextvars.ContextVar("active_state")
 ########################################################################
 # Third Party
 ########################################################################
+from wrapt.wrappers import ObjectProxy as BaseObjectProxy
+from wrapt.wrappers import FunctionWrapper as FW
+from wrapt.wrappers import BoundFunctionWrapper as BFW
 import scottbrian_locking.se_lock as selk  # noqa F401
 from scottbrian_throttle.throttle_blocks import Throttle
-import wrapt
+
+# from wrapt import FunctionWrapper as FW
+# from wrapt import BoundFunctionWrapper as BFW
 from typing_extensions import TypeAlias
 from wrapt.decorators import decorator  # type: ignore
+import functools
+import inspect
 
 ########################################################################
 # Local
@@ -526,7 +533,8 @@ def _add_throttle_attr(func: F) -> _FuncWithThrottleAttr[F]:
 
 
 # ---- Wrapt Descriptors (Preserved from yesterday) ----
-class StatefulBoundWrapper(wrapt.BoundFunctionWrapper):
+# class StatefulBoundWrapper(wrapt.BoundFunctionWrapper):
+class StatefulBoundWrapper(BFW):
     @property
     def throttle(self):
         try:
@@ -544,13 +552,14 @@ class StatefulBoundWrapper(wrapt.BoundFunctionWrapper):
                 Throttle(
                     reqs_per_sec=w._reqs_per_sec,
                     bucket_size=w._bucket_size,
-                    convert_to_async=w._convert_to_async,
+                    asyncio_env=w._asyncio_env,
                 ),
             )
         return getattr(inst, key)
 
 
-class StatefulFunctionWrapper(wrapt.FunctionWrapper):
+# class StatefulFunctionWrapper(wrapt.FunctionWrapper):
+class StatefulFunctionWrapper(FW):
     __bound_function_wrapper__ = StatefulBoundWrapper
 
     def __init__(
@@ -560,13 +569,13 @@ class StatefulFunctionWrapper(wrapt.FunctionWrapper):
         method_name,
         reqs_per_sec,
         bucket_size,
-        convert_to_async,
+        asyncio_env,
     ):
         super().__init__(wrapped, wrapper_func)
         self._method_name = method_name
         self._reqs_per_sec = reqs_per_sec
         self._bucket_size = bucket_size
-        self._convert_to_async = convert_to_async
+        self._asyncio_env = asyncio_env
 
     @property
     def throttle(self):
@@ -582,10 +591,14 @@ class StatefulFunctionWrapper(wrapt.FunctionWrapper):
                 Throttle(
                     reqs_per_sec=self._reqs_per_sec,
                     bucket_size=self._bucket_size,
-                    convert_to_async=self._convert_to_async,
+                    asyncio_env=self._asyncio_env,
                 ),
             )
         return getattr(self.__wrapped__, key)
+
+    # async def __call__(self, *args, **kwargs):
+    #     print(f"\n3333 StatefulFunctionWrapper __call__entered {args=}, {kwargs=}")
+    #     return await super().__call__(*args, **kwargs)
 
 
 ########################################################################
@@ -701,16 +714,16 @@ def throttle(
     #     and class methods.
     # ==================================================================
 
-    # if _wrapped is None:
-    #     return cast(
-    #         _FuncWithThrottleAttr[F],
-    #         functools.partial(
-    #             throttle,
-    #             reqs_per_sec=reqs_per_sec,
-    #             bucket_size=bucket_size,
-    #             convert_to_async=convert_to_async,
-    #         ),
-    #     )
+    if _wrapped is None:
+        return cast(
+            _FuncWithThrottleAttr[F],
+            functools.partial(
+                throttle,
+                reqs_per_sec=reqs_per_sec,
+                bucket_size=bucket_size,
+                convert_to_async=convert_to_async,
+            ),
+        )
 
     # if _wrapped is None:
     #     return wrapt.PartialCallableObjectProxy(
@@ -722,8 +735,9 @@ def throttle(
 
     def decorator(wrapped):
         method_name = wrapped.__name__
+        is_async_func = inspect.iscoroutinefunction(wrapped)
 
-        def _core_execution_logic(wrapped_func, instance, args, kwargs):
+        def sync__core_execution_logic(wrapped_func, instance, args, kwargs):
             # Resolve target mapping
             if instance is not None:
                 c_type = instance if isinstance(instance, type) else instance.__class__
@@ -740,7 +754,7 @@ def throttle(
                     Throttle(
                         reqs_per_sec=reqs_per_sec,
                         bucket_size=bucket_size,
-                        convert_to_async=convert_to_async,
+                        asyncio_env=is_async_func,
                     ),
                 )
             state = getattr(target, key)
@@ -767,30 +781,84 @@ def throttle(
             # -------------------------------------------------------------
             # ENVIRONMENT MODE 1: Synchronous Mode (Standard time.sleep Blocking)
             # -------------------------------------------------------------
-            if not convert_to_async:
-                # wait_time = state.get_wait_time()
-                # if wait_time > 0:
-                #     time.sleep(wait_time)
 
-                # state.call_count += 1
-                token = active_state_ctx.set(state)
-                try:
-                    # return wrapped_func(*args, **kwargs)
-                    return state.send_request(wrapped_func, *args, **kwargs)
-                finally:
-                    active_state_ctx.reset(token)
+            token = active_state_ctx.set(state)
+            try:
+                # return wrapped_func(*args, **kwargs)
+                return state.sync_send_request(wrapped_func, *args, **kwargs)
+            finally:
+                active_state_ctx.reset(token)
+
+        async def async__core_execution_logic(wrapped_func, instance, args, kwargs):
+            # Resolve target mapping
+            if instance is not None:
+                c_type = instance if isinstance(instance, type) else instance.__class__
+                key = f"_th_{method_name}_{c_type.__name__}_{id(proxy)}"
+                target = instance
+            else:
+                key = f"_th_{method_name}_static_{id(proxy)}"
+                target = wrapped_func
+
+            if not hasattr(target, key):
+                setattr(
+                    target,
+                    key,
+                    Throttle(
+                        reqs_per_sec=reqs_per_sec,
+                        bucket_size=bucket_size,
+                        asyncio_env=is_async_func,
+                    ),
+                )
+            state = getattr(target, key)
+
+            # -------------------------------------------------------------
+            # ENVIRONMENT MODE 3: Asyncio Mode (Non-blocking Cooperative Sleep)
+            # -------------------------------------------------------------
+            # elif mode == "asyncio":
+            #
+            #     async def async_exec():
+            #         wait_time = state.get_wait_time()
+            #         if wait_time > 0:
+            #             await asyncio.sleep(wait_time)
+            #
+            #         state.call_count += 1
+            #         token = active_state_ctx.set(state)
+            #         try:
+            #             return await wrapped_func(*args, **kwargs)
+            #         finally:
+            #             active_state_ctx.reset(token)
+            #
+            #     return async_exec()
+
+            # -------------------------------------------------------------
+            # ENVIRONMENT MODE 1: Synchronous Mode (Standard time.sleep Blocking)
+            # -------------------------------------------------------------
+            token = active_state_ctx.set(state)
+            try:
+                # return wrapped_func(*args, **kwargs)
+                return await state.async_send_request(wrapped_func, *args, **kwargs)
+            finally:
+                active_state_ctx.reset(token)
+
+        if is_async_func:
+            _core_execution_logic = async__core_execution_logic
+        else:
+            _core_execution_logic = sync__core_execution_logic
 
         proxy = StatefulFunctionWrapper(
-            wrapped,
+            _wrapped,
             _core_execution_logic,
             method_name,
             reqs_per_sec,
             bucket_size,
-            convert_to_async,
+            is_async_func,
         )
         return proxy
 
-    return decorator
+    # if _wrapped is None:
+    #     return decorator
+    # else:
+    return decorator(_wrapped)
 
 
 ############# @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
