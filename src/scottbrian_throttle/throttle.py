@@ -112,12 +112,13 @@ loop will not be blocked. There are two possible scenarios:
     1) the caller can use asyncio.to_thread from the main loop to
        run the function is a separate thread. In this scenario, the
        throttle will use time.sleep as needed to delay the function.
-    2) *sync_action=conver_to_async* can be specified on throttle to
-       cause the wrapper to be defined as an async function. In this
-       scenario, the caller can invoke the function using the proper
-       asyncio method, such as using await. The throttle will use
-       asyncio.sleep to as needed to delay the function, and will use
-       asyncio.to_thread to run the function in a separate thread.
+    2) the caller can specify *convert_to_async=True* as an argument to
+       the throttle to cause the wrapper to be defined as an async
+       function. In this scenario, the caller can invoke the function
+       using the proper asyncio method, such as using await. The
+       throttle will use asyncio.sleep as needed to delay the function,
+       and will use asyncio.to_thread to run the sync function in a
+       separate thread.
 
 :Example 3: throttle with async function in asyncio environment:
 
@@ -170,7 +171,7 @@ loop will not be blocked. There are two possible scenarios:
     async def main_loop():
         start_time = time.time()
         for idx in range(10):
-            asyncio.to_thread(func4, idx, start_time)
+            await asyncio.to_thread(func4, idx, start_time)
 
     asyncio.run(main_loop())
 
@@ -187,7 +188,7 @@ loop will not be blocked. There are two possible scenarios:
         request 8 sent at elapsed time: 4.0
         request 9 sent at elapsed time: 4.5
 
-:Example 5: throttle with non-async function in asyncio environment:
+:Example 5: throttle with convert_to_async in asyncio environment:
 
 .. code-block:: python
 
@@ -195,7 +196,7 @@ loop will not be blocked. There are two possible scenarios:
     import time
     import asyncio
 
-    @throttle(reqs_per_sec=2, sync_action=SyncAction.CONVERT_TO_ASYNC)
+    @throttle(reqs_per_sec=2, convert_to_async=True)
     def func5(request_number, time_of_start):
         print(f'request {request_number} sent at elapsed time: '
               f'{time.time() - time_of_start:0.1f}')
@@ -553,6 +554,8 @@ class StatefulBoundWrapper(BFW):
                     reqs_per_sec=w._reqs_per_sec,
                     bucket_size=w._bucket_size,
                     asyncio_env=w._asyncio_env,
+                    convert_to_async=w._convert_to_async,
+                    name=w._method_name,
                 ),
             )
         return getattr(inst, key)
@@ -570,12 +573,16 @@ class StatefulFunctionWrapper(FW):
         reqs_per_sec,
         bucket_size,
         asyncio_env,
+        convert_to_async,
+        name,
     ):
         super().__init__(wrapped, wrapper_func)
         self._method_name = method_name
         self._reqs_per_sec = reqs_per_sec
         self._bucket_size = bucket_size
         self._asyncio_env = asyncio_env
+        self._convert_to_async = convert_to_async
+        self.name = name
 
     @property
     def throttle(self):
@@ -592,6 +599,8 @@ class StatefulFunctionWrapper(FW):
                     reqs_per_sec=self._reqs_per_sec,
                     bucket_size=self._bucket_size,
                     asyncio_env=self._asyncio_env,
+                    convert_to_async=self._convert_to_async,
+                    name=self._method_name,
                 ),
             )
         return getattr(self.__wrapped__, key)
@@ -755,6 +764,8 @@ def throttle(
                         reqs_per_sec=reqs_per_sec,
                         bucket_size=bucket_size,
                         asyncio_env=is_async_func,
+                        convert_to_async=convert_to_async,
+                        name=method_name,
                     ),
                 )
             state = getattr(target, key)
@@ -807,6 +818,8 @@ def throttle(
                         reqs_per_sec=reqs_per_sec,
                         bucket_size=bucket_size,
                         asyncio_env=is_async_func,
+                        convert_to_async=convert_to_async,
+                        name=method_name,
                     ),
                 )
             state = getattr(target, key)
@@ -840,7 +853,7 @@ def throttle(
             finally:
                 active_state_ctx.reset(token)
 
-        if is_async_func:
+        if is_async_func or convert_to_async:
             _core_execution_logic = async__core_execution_logic
         else:
             _core_execution_logic = sync__core_execution_logic
@@ -852,6 +865,8 @@ def throttle(
             reqs_per_sec,
             bucket_size,
             is_async_func,
+            convert_to_async,
+            method_name,
         )
         return proxy
 

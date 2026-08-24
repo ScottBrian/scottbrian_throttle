@@ -4864,7 +4864,7 @@ class TestThrottleDocstrings:
         async def main_loop():
             start_time = time.time()
             for idx in range(10):
-                asyncio.to_thread(func4, idx, start_time)
+                await asyncio.to_thread(func4, idx, start_time)
 
         asyncio.run(main_loop())
 
@@ -4900,15 +4900,15 @@ class TestThrottleDocstrings:
 
         """
 
-        hdr_str = ":Example 5: throttle with non-async function in asyncio environment:"
+        hdr_str = ":Example 5: throttle with convert to async in asyncio environment:"
         flowers(hdr_str)
 
         from scottbrian_throttle.throttle import throttle
         import asyncio
         import time
 
-        @throttle(reqs_per_sec=2)
-        def func4(request_number: int, time_of_start: float):
+        @throttle(reqs_per_sec=2, convert_to_async=True)
+        def func5(request_number: int, time_of_start: float):
             print(
                 f"request {request_number} sent at elapsed time: "
                 f"{time.time() - time_of_start:0.1f}"
@@ -4917,7 +4917,7 @@ class TestThrottleDocstrings:
         async def main_loop():
             start_time = time.time()
             for idx in range(10):
-                asyncio.to_thread(func4, idx, start_time)
+                await func5(idx, start_time)
 
         asyncio.run(main_loop())
 
@@ -5017,9 +5017,7 @@ class TestThrottleDocstrings:
         expected_result = "\n" + flower_str
         expected_result += f"* {hdr_str} *\n"
         expected_result += flower_str
-        expected_result += (
-            "Throttle(reqs_per_sec=0.5, bucket_size=1, convert_to_async=False)"
-        )
+        expected_result += "Throttle(reqs_per_sec=0.5, bucket_size=1, convert_to_async=False, name=func1)\n"
 
         captured = capsys.readouterr().out
 
@@ -5045,11 +5043,11 @@ class TestThrottleDocstrings:
             def __init__(self, a_var: int):
                 self.funky_var = a_var
 
-            @throttle
+            @throttle(reqs_per_sec=2)
             def func7a(self):
                 self.funky_var += 1
 
-            @throttle
+            @throttle(reqs_per_sec=3)
             def func7b(self):
                 self.funky_var += 10
 
@@ -5057,8 +5055,17 @@ class TestThrottleDocstrings:
         funky2 = Funky(a_var=102)
 
         funky1.func7a()
+
         funky1.func7b()
+        funky1.func7b()
+
         funky2.func7a()
+        funky2.func7a()
+        funky2.func7a()
+
+        funky2.func7b()
+        funky2.func7b()
+        funky2.func7b()
         funky2.func7b()
 
         print(
