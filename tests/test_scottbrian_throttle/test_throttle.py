@@ -4626,64 +4626,6 @@ class TestThrottleDocstrings:
     """Class TestThrottleDocstrings."""
 
     ####################################################################
-    # test_throttle_example_1a
-    ####################################################################
-    def test_throttle_example_1a(self) -> None:
-        """Method test_throttle_example_1a.
-
-        Args:
-            capsys: pytest fixture to capture print output
-
-        """
-        hdr_str = ":Example 1: Throttle at 1 requests per second:"
-        flowers(hdr_str)
-
-        from scottbrian_throttle.throttle import throttle
-        import time
-        import asyncio
-
-        @throttle
-        async def func1(request_number: int, time_of_start: float):
-            # assert False
-            print(
-                f"request {request_number} sent at elapsed time: "
-                f"{time.time() - time_of_start:0.1f}"
-            )
-            # ret_value = (
-            #     f"request {request_number} sent at elapsed time: "
-            #     f"{time.time() - time_of_start:0.1f}"
-            # )
-            # return ret_value
-
-        async def main_loop():
-            start_time = time.time()
-            for idx in range(1):
-                await func1(idx, start_time)
-                # print(ret_val)
-
-        asyncio.run(main_loop())
-
-        flower_str = ("*" * (len(hdr_str) + 4)) + "\n"
-
-        expected_result = "\n" + flower_str
-        expected_result += f"* {hdr_str} *\n"
-        expected_result += flower_str
-        expected_result += "request 0 sent at elapsed time: 0.0\n"
-        expected_result += "request 1 sent at elapsed time: 1.0\n"
-        expected_result += "request 2 sent at elapsed time: 2.0\n"
-        expected_result += "request 3 sent at elapsed time: 3.0\n"
-        expected_result += "request 4 sent at elapsed time: 4.0\n"
-        expected_result += "request 5 sent at elapsed time: 5.0\n"
-        expected_result += "request 6 sent at elapsed time: 6.0\n"
-        expected_result += "request 7 sent at elapsed time: 7.0\n"
-        expected_result += "request 8 sent at elapsed time: 8.0\n"
-        expected_result += "request 9 sent at elapsed time: 9.0\n"
-
-        # captured = capsys.readouterr().out
-        #
-        # assert captured == expected_result
-
-    ####################################################################
     # test_throttle_example_1
     ####################################################################
     def test_throttle_example_1(self, capsys: Any) -> None:
