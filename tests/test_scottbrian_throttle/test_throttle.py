@@ -16,7 +16,7 @@ import time
 from collections import deque
 from dataclasses import dataclass, field
 from time import perf_counter_ns
-from typing import Any, Callable, Final, Optional, Union
+from typing import Any, Callable, Final, Optional, TypeAlias, Union
 
 ########################################################################
 # Third Party
@@ -28,7 +28,6 @@ from scottbrian_utils.flower_box import print_flower_box_msg as flowers
 from scottbrian_utils.log_verifier import LogVer
 from scottbrian_utils.pauser import Pauser
 from scottbrian_utils.testlib_verifier import verify_lib
-from typing_extensions import TypeAlias
 
 ########################################################################
 # Local
@@ -4959,7 +4958,7 @@ class TestThrottleDocstrings:
         expected_result = "\n" + flower_str
         expected_result += f"* {hdr_str} *\n"
         expected_result += flower_str
-        expected_result += "Throttle(reqs_per_sec=0.5, bucket_size=1, convert_to_async=False, name=func1)\n"
+        expected_result += "Throttle(reqs_per_sec=0.5, bucket_size=1.0, convert_to_async=False, name=func1)\n"
 
         captured = capsys.readouterr().out
 

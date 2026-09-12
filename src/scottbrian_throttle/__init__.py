@@ -1,6 +1,7 @@
 """scottbrian_throttle package."""
 
 import logging
+
 logging.getLogger(__name__).addHandler(logging.NullHandler())
 
-__version__ = '1.0.0'
+__version__: str = "1.0.0"

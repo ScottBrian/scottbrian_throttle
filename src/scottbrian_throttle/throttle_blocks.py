@@ -106,10 +106,11 @@ from typing import (
     Union,
 )
 
+import scottbrian_locking.se_lock as selk  # noqa F401
 ########################################################################
 # Third Party
 ########################################################################
-import scottbrian_locking.se_lock as selk  # noqa F401
+from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 from scottbrian_utils.diag_msg import get_formatted_call_sequence as call_seq
 from scottbrian_utils.pauser import Pauser
 from typing_extensions import TypeAlias
@@ -154,6 +155,17 @@ class InvalidArgs(ThrottleError):
 
 
 ########################################################################
+# ThrottleConfig
+########################################################################
+class ThrottleConfig(BaseModel):
+    reqs_per_sec: float = Field(
+        gt=0, default=1, description="Number of requests allowed per second"
+    )
+    bucket_size: float = Field(ge=1, default=1, description="Size of leaky bucket")
+    convert_to_async: bool = False
+
+
+########################################################################
 # Throttle class
 ########################################################################
 class Throttle:
@@ -190,7 +202,7 @@ class Throttle:
     ####################################################################
     # validators
     ####################################################################
-    # reqs_per_sec = NumValue(type=IntFloat, minvalue=1, maxvalue=5)
+    _validator = TypeAdapter(ThrottleConfig)
 
     ####################################################################
     # __init__
@@ -198,8 +210,8 @@ class Throttle:
     def __init__(
         self,
         *,
-        reqs_per_sec: IntFloat = 1,
-        bucket_size: IntFloat = 1,
+        reqs_per_sec: float = 1,
+        bucket_size: float = 1,
         asyncio_env: bool = False,
         convert_to_async: bool = False,
         name: str = "unknown",
@@ -236,25 +248,38 @@ class Throttle:
                 than zero.
 
         """
+        try:
+            validated = self._validator.validate_python(
+                {
+                    "reqs_per_sec": reqs_per_sec,
+                    "bucket_size": bucket_size,
+                    "convert_to_async": convert_to_async,
+                }
+            )
+        except ValidationError as e:
+            raise ValueError(f"Invalid Throttle initialization: {e}") from e
+
         ################################################################
         # reqs_per_sec
         ################################################################
         self.logger = logging.getLogger(__name__)
 
-        if isinstance(reqs_per_sec, int | float) and (0 < reqs_per_sec):
-            self.reqs_per_sec = reqs_per_sec
-        else:
-            error_msg = (
-                "The reqs_per_sec specification must be a positive "
-                "int or float greater than zero. "
-                f"Request call sequence: {call_seq(latest=1, depth=2)}"
-            )
-            self.logger.error(error_msg)
-            raise IncorrectReqsPerSecSpecified(error_msg)
+        self.reqs_per_sec = validated.reqs_per_sec
+        # if isinstance(reqs_per_sec, int | float) and (0 < reqs_per_sec):
+        #     self.reqs_per_sec = reqs_per_sec
+        # else:
+        #     error_msg = (
+        #         "The reqs_per_sec specification must be a positive "
+        #         "int or float greater than zero. "
+        #         f"Request call sequence: {call_seq(latest=1, depth=2)}"
+        #     )
+        #     self.logger.error(error_msg)
+        #     raise IncorrectReqsPerSecSpecified(error_msg)
 
         ################################################################
         # bucket_size
         ################################################################
+        self.bucket_size = validated.bucket_size
         if isinstance(bucket_size, int | float) and (1 <= bucket_size):
             self.bucket_size = bucket_size
         else:
@@ -267,7 +292,7 @@ class Throttle:
             raise IncorrectBucketSizeSpecified(error_msg)
 
         self.asyncio_env = asyncio_env
-        self.convert_to_async = convert_to_async
+        self.convert_to_async = validated.convert_to_async
 
         ################################################################
         # name

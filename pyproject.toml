@@ -20,7 +20,6 @@ classifiers = [
 dependencies = [
     "scottbrian-locking ~=3.0",
     "scottbrian-utils ~=7.1",
-    "typing_extensions ~=4.16",
     "wrapt ~=2.2",
 ]
 

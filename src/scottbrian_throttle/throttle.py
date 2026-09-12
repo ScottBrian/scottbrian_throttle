@@ -291,6 +291,7 @@ from typing import (
     Optional,
     overload,
     Protocol,
+    TypeAlias,
     TypeVar,
     Union,
 )
@@ -300,15 +301,15 @@ active_state_ctx = contextvars.ContextVar("active_state")
 ########################################################################
 # Third Party
 ########################################################################
+# from pydantic import BaseModel, Field  # TypeAdapter,ValidationError
 from wrapt.wrappers import ObjectProxy as BaseObjectProxy
 from wrapt.wrappers import FunctionWrapper as FW
 from wrapt.wrappers import BoundFunctionWrapper as BFW
 import scottbrian_locking.se_lock as selk  # noqa F401
-from scottbrian_throttle.throttle_blocks import Throttle
+from scottbrian_throttle.throttle_blocks import Throttle, ThrottleConfig
 
 # from wrapt import FunctionWrapper as FW
 # from wrapt import BoundFunctionWrapper as BFW
-from typing_extensions import TypeAlias
 from wrapt.decorators import decorator  # type: ignore
 import functools
 import inspect
@@ -328,186 +329,6 @@ OptIntFloat: TypeAlias = Optional[IntFloat]
 # Pie Throttle Decorator
 ########################################################################
 F = TypeVar("F", bound=Callable[..., Any])
-
-
-########################################################################
-# start of experiment1
-########################################################################
-# @wrapt.decorator
-# def track_state(wrapped, instance, args, kwargs):
-#     # 1. Check if the decorator is being used on an instance method
-#     if instance is not None:
-#         # 2. Define a unique attribute name for this decorator's state
-#         state_attr = f"_state_{wrapped.__name__}"
-#
-#         # 3. Initialize the state on the instance if it does not exist
-#         if not hasattr(instance, state_attr):
-#             setattr(instance, state_attr, {"call_count": 0})
-#
-#         # 4. Access and mutate the instance-specific state
-#         state = getattr(instance, state_attr)
-#         state["call_count"] += 1
-#         print(
-#             f"[Log] {wrapped.__name__} called {state['call_count']} time(s) for {instance}"
-#         )
-#
-#     # 5. Execute the original method
-#     return wrapped(*args, **kwargs)
-
-
-# class MethodStateProxy(wrapt.BaseObjectProxy):
-#     """A proxy wrapper that allows setting custom attributes on a bound method."""
-#
-#     def __init__(self, wrapped_method):
-#         super().__init__(wrapped_method)
-#         self.__self_dict__ = {}
-#
-#     def __getattr__(self, name):
-#         try:
-#             print(
-#                 f"\n ************** __getattr__ about to try to return super().__getattr__(name) for {name=}"
-#             )
-#             return super().__getattr__(name)
-#         except AttributeError:
-#             # return self.__dict__[name]
-#             print(
-#                 f"\n ************** __getattr__ did not find in super, about see if {name=} is in self.__self_dict__"
-#             )
-#             if name in self.__self_dict__:
-#                 print(
-#                     f"\n ******************** __getattr__ found name is in self.__self_dict__ for {name=}"
-#                 )
-#                 return self.__self_dict__[name]
-#             print(
-#                 f"\n ************** __getattr__ did not find {name=} in self.__self_dict__ will now raise AttributeError "
-#             )
-#             raise AttributeError(
-#                 f"'{type(self).__name__}' object has no attribute '{name}'"
-#             )
-#
-#     def __setattr__(self, name, value):
-#         # Allow setting custom attributes locally on this specific bound proxy
-#         print(
-#             f"\n ******************** __set_attr__ setting {value=} for attribute {name=}"
-#         )
-#         self.__self_dict__[name] = value
-#
-#     def __delattr__(self, name):
-#         # 1. Try to delete from the proxy's local dictionary first
-#         if name in self.__self_dict__:
-#             del self.__self_dict__[name]
-#             return
-#
-#         try:
-#             # 2. If not local, try to delete from the wrapped method
-#             super().__delattr__(name)
-#         except AttributeError:
-#             # 3. Raise a clean AttributeError if it doesn't exist anywhere
-#             raise AttributeError(
-#                 f"'{type(self).__name__}' object has no attribute '{name}'"
-#             )
-
-
-# class TrackState:
-#     def __init__(self, val1: int = 3):
-#         # Maps (instance_id, method_name) -> MethodStateProxy instance
-#         print(f"\n ######## entered TrackState __init__ with {self=}")
-#         self.val1 = val1
-#         self._proxies = {}
-#
-#     # def __call__(self, wrapped, instance, args, kwargs):
-#     # def __call__(self, func):
-#     @wrapt.decorator
-#     def __call__(self, wrapped, instance, args, kwargs):
-#
-#         def wrapper(wrapped, instance, args, kwargs):
-#             print(
-#                 f"\n ######## entered TrackState __call__ with {wrapped=} , {instance=}, {args=}, {kwargs=}"
-#             )
-#             # def call_dec()
-#             # Fallback for plain functions/staticmethods
-#             if instance is None:
-#                 if not hasattr(wrapped, "throttle"):
-#                     wrapped.throttle = Throttle()
-#                 return wrapped.throttle.send_request(wrapped, *args, **kwargs)
-#
-#             # Retrieve or create a unique method proxy for this specific class instance
-#             proxy_key = (id(instance), wrapped.__name__)
-#             if proxy_key not in self._proxies:
-#                 # Recreate the native bound method, then wrap it in our proxy
-#                 bound_method = getattr(instance, wrapped.__name__)
-#                 self._proxies[proxy_key] = MethodStateProxy(bound_method)
-#
-#             # Increment the state on the proxy object
-#             proxy = self._proxies[proxy_key]
-#             print(f"\n ######## TrackState now has {proxy=}")
-#             if not hasattr(proxy, "throttle"):
-#                 print(f"\n ########TrackState about to set the throttle into proxy")
-#                 proxy.throttle = Throttle()
-#                 print(f"\n*************  TrackState after assignment {proxy.throttle=}")
-#                 # wrapped.throttle = proxy.throttle
-#                 # print(f"\n*************  TrackState after assignment {wrapped.throttle=}")
-#             else:
-#                 print(f"\n ########TrackState already has throttle in proxy")
-#
-#             return proxy.throttle.send_request(wrapped, *args, **kwargs)
-#
-#         # wrapped_func = wrapper(func)
-#         # wrapped_func.throttle =
-#         return wrapper
-
-
-# class TrackState:
-#     def __init__(self, val1: int = 3):
-#         # Maps (instance_id, method_name) -> MethodStateProxy instance
-#         print(f"\n ######## entered TrackState __init__ with {self=}")
-#         self.val1 = val1
-#         self._proxies = {}
-#
-#     # def __call__(self, wrapped, instance, args, kwargs):
-#     # def __call__(self, func):
-#
-#     def __call__(self, args, kwargs):
-#
-#         @wrapt.decorator
-#         def wrapper(wrapped, instance, args, kwargs):
-#             print(
-#                 f"\n ######## entered TrackState __call__ with {wrapped=} , {instance=}, {args=}, {kwargs=}"
-#             )
-#             # def call_dec()
-#             # Fallback for plain functions/staticmethods
-#             if instance is None:
-#                 if not hasattr(wrapped, "throttle"):
-#                     wrapped.throttle = Throttle()
-#                 return wrapped.throttle.send_request(wrapped, *args, **kwargs)
-#
-#             # Retrieve or create a unique method proxy for this specific class instance
-#             proxy_key = (id(instance), wrapped.__name__)
-#             if proxy_key not in self._proxies:
-#                 # Recreate the native bound method, then wrap it in our proxy
-#                 bound_method = getattr(instance, wrapped.__name__)
-#                 self._proxies[proxy_key] = MethodStateProxy(bound_method)
-#
-#             # Increment the state on the proxy object
-#             proxy = self._proxies[proxy_key]
-#             print(f"\n ######## TrackState now has {proxy=}")
-#             if not hasattr(proxy, "throttle"):
-#                 print(f"\n ########TrackState about to set the throttle into proxy")
-#                 proxy.throttle = Throttle()
-#                 print(f"\n*************  TrackState after assignment {proxy.throttle=}")
-#                 # wrapped.throttle = proxy.throttle
-#                 # print(f"\n*************  TrackState after assignment {wrapped.throttle=}")
-#             else:
-#                 print(f"\n ########TrackState already has throttle in proxy")
-#
-#             return proxy.throttle.send_request(wrapped, *args, **kwargs)
-#
-#         # wrapped_func = wrapper(func)
-#         # wrapped_func.throttle =
-#         return wrapper
-
-
-########################################################################
 
 
 ########################################################################
@@ -608,6 +429,17 @@ class StatefulFunctionWrapper(FW):
     # async def __call__(self, *args, **kwargs):
     #     print(f"\n3333 StatefulFunctionWrapper __call__entered {args=}, {kwargs=}")
     #     return await super().__call__(*args, **kwargs)
+
+
+# ########################################################################
+# # ThrottleConfig
+# ########################################################################
+# class ThrottleConfig(BaseModel):
+#     reqs_per_sec: float = Field(
+#         gt=0, default=1, description="Number of requests allowed per second"
+#     )
+#     bucket_size: float = Field(ge=1, default=1, description="Size of leaky bucket")
+#     convert_to_async: bool = False
 
 
 ########################################################################
@@ -723,6 +555,12 @@ def throttle(
     #     and class methods.
     # ==================================================================
 
+    config = ThrottleConfig(
+        reqs_per_sec=reqs_per_sec,
+        bucket_size=bucket_size,
+        convert_to_async=convert_to_async,
+    )
+
     if _wrapped is None:
         return cast(
             _FuncWithThrottleAttr[F],
@@ -761,37 +599,14 @@ def throttle(
                     target,
                     key,
                     Throttle(
-                        reqs_per_sec=reqs_per_sec,
-                        bucket_size=bucket_size,
+                        reqs_per_sec=config.reqs_per_sec,
+                        bucket_size=config.bucket_size,
                         asyncio_env=is_async_func,
-                        convert_to_async=convert_to_async,
+                        convert_to_async=config.convert_to_async,
                         name=method_name,
                     ),
                 )
             state = getattr(target, key)
-
-            # -------------------------------------------------------------
-            # ENVIRONMENT MODE 3: Asyncio Mode (Non-blocking Cooperative Sleep)
-            # -------------------------------------------------------------
-            # elif mode == "asyncio":
-            #
-            #     async def async_exec():
-            #         wait_time = state.get_wait_time()
-            #         if wait_time > 0:
-            #             await asyncio.sleep(wait_time)
-            #
-            #         state.call_count += 1
-            #         token = active_state_ctx.set(state)
-            #         try:
-            #             return await wrapped_func(*args, **kwargs)
-            #         finally:
-            #             active_state_ctx.reset(token)
-            #
-            #     return async_exec()
-
-            # -------------------------------------------------------------
-            # ENVIRONMENT MODE 1: Synchronous Mode (Standard time.sleep Blocking)
-            # -------------------------------------------------------------
 
             token = active_state_ctx.set(state)
             try:
@@ -815,37 +630,15 @@ def throttle(
                     target,
                     key,
                     Throttle(
-                        reqs_per_sec=reqs_per_sec,
-                        bucket_size=bucket_size,
+                        reqs_per_sec=config.reqs_per_sec,
+                        bucket_size=config.bucket_size,
                         asyncio_env=is_async_func,
-                        convert_to_async=convert_to_async,
+                        convert_to_async=config.convert_to_async,
                         name=method_name,
                     ),
                 )
             state = getattr(target, key)
 
-            # -------------------------------------------------------------
-            # ENVIRONMENT MODE 3: Asyncio Mode (Non-blocking Cooperative Sleep)
-            # -------------------------------------------------------------
-            # elif mode == "asyncio":
-            #
-            #     async def async_exec():
-            #         wait_time = state.get_wait_time()
-            #         if wait_time > 0:
-            #             await asyncio.sleep(wait_time)
-            #
-            #         state.call_count += 1
-            #         token = active_state_ctx.set(state)
-            #         try:
-            #             return await wrapped_func(*args, **kwargs)
-            #         finally:
-            #             active_state_ctx.reset(token)
-            #
-            #     return async_exec()
-
-            # -------------------------------------------------------------
-            # ENVIRONMENT MODE 1: Synchronous Mode (Standard time.sleep Blocking)
-            # -------------------------------------------------------------
             token = active_state_ctx.set(state)
             try:
                 # return wrapped_func(*args, **kwargs)
@@ -862,10 +655,10 @@ def throttle(
             _wrapped,
             _core_execution_logic,
             method_name,
-            reqs_per_sec,
-            bucket_size,
+            config.reqs_per_sec,
+            config.bucket_size,
             is_async_func,
-            convert_to_async,
+            config.convert_to_async,
             method_name,
         )
         return proxy
@@ -874,82 +667,3 @@ def throttle(
     #     return decorator
     # else:
     return decorator(_wrapped)
-
-
-############# @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
-# ---- Decorator Parameter Factory ----
-# def throttle(reqs_per_sec, bucket_size, mode="sync"):
-#     def decorator(wrapped):
-#         method_name = wrapped.__name__
-#
-#         def _core_execution_logic(wrapped_func, instance, args, kwargs):
-#             # Resolve target mapping
-#             if instance is not None:
-#                 c_type = instance if isinstance(instance, type) else instance.__class__
-#                 key = f"_th_{method_name}_{c_type.__name__}_{id(proxy)}"
-#                 target = instance
-#             else:
-#                 key = f"_th_{method_name}_static_{id(proxy)}"
-#                 target = wrapped_func
-#
-#             if not hasattr(target, key):
-#                 setattr(
-#                     target,
-#                     key,
-#                     LeakyBucketThrottleState(reqs_per_sec, bucket_size, mode),
-#                 )
-#             state = getattr(target, key)
-#
-#             # -------------------------------------------------------------
-#             # ENVIRONMENT MODE 2: Thread Queue Mode (Fire-and-forget)
-#             # -------------------------------------------------------------
-#             if mode == "thread_queue":
-#                 # Bypass normal direct call route completely; strip 'self' if bound method
-#                 if instance is not None:
-#                     # Pass bound method invocation blueprint to worker queue
-#                     bound_call = getattr(instance, wrapped_func.__name__)
-#                     state.enqueue_work(bound_call, args, kwargs)
-#                 else:
-#                     state.enqueue_work(wrapped_func, args, kwargs)
-#                 return None  # Returns control back to caller instantly!
-#
-#             # -------------------------------------------------------------
-#             # ENVIRONMENT MODE 3: Asyncio Mode (Non-blocking Cooperative Sleep)
-#             # -------------------------------------------------------------
-#             elif mode == "asyncio":
-#
-#                 async def async_exec():
-#                     wait_time = state.get_wait_time()
-#                     if wait_time > 0:
-#                         await asyncio.sleep(wait_time)
-#
-#                     state.call_count += 1
-#                     token = active_state_ctx.set(state)
-#                     try:
-#                         return await wrapped_func(*args, **kwargs)
-#                     finally:
-#                         active_state_ctx.reset(token)
-#
-#                 return async_exec()
-#
-#             # -------------------------------------------------------------
-#             # ENVIRONMENT MODE 1: Synchronous Mode (Standard time.sleep Blocking)
-#             # -------------------------------------------------------------
-#             else:
-#                 wait_time = state.get_wait_time()
-#                 if wait_time > 0:
-#                     time.sleep(wait_time)
-#
-#                 state.call_count += 1
-#                 token = active_state_ctx.set(state)
-#                 try:
-#                     return wrapped_func(*args, **kwargs)
-#                 finally:
-#                     active_state_ctx.reset(token)
-#
-#         proxy = StatefulFunctionWrapper(
-#             wrapped, _core_execution_logic, method_name, reqs_per_sec, bucket_size, mode
-#         )
-#         return proxy
-#
-#     return decorator
