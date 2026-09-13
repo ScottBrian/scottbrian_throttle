@@ -302,6 +302,7 @@ active_state_ctx = contextvars.ContextVar("active_state")
 # Third Party
 ########################################################################
 # from pydantic import BaseModel, Field  # TypeAdapter,ValidationError
+import wrapt
 from wrapt.wrappers import ObjectProxy as BaseObjectProxy
 from wrapt.wrappers import FunctionWrapper as FW
 from wrapt.wrappers import BoundFunctionWrapper as BFW
@@ -311,7 +312,6 @@ from scottbrian_throttle.throttle_blocks import Throttle, ThrottleConfig
 # from wrapt import FunctionWrapper as FW
 # from wrapt import BoundFunctionWrapper as BFW
 from wrapt.decorators import decorator  # type: ignore
-import functools
 import inspect
 
 ########################################################################
@@ -374,7 +374,6 @@ class StatefulBoundWrapper(BFW):
                 Throttle(
                     reqs_per_sec=w._reqs_per_sec,
                     bucket_size=w._bucket_size,
-                    asyncio_env=w._asyncio_env,
                     convert_to_async=w._convert_to_async,
                     name=w._method_name,
                 ),
@@ -393,7 +392,6 @@ class StatefulFunctionWrapper(FW):
         method_name,
         reqs_per_sec,
         bucket_size,
-        asyncio_env,
         convert_to_async,
         name,
     ):
@@ -401,7 +399,6 @@ class StatefulFunctionWrapper(FW):
         self._method_name = method_name
         self._reqs_per_sec = reqs_per_sec
         self._bucket_size = bucket_size
-        self._asyncio_env = asyncio_env
         self._convert_to_async = convert_to_async
         self.name = name
 
@@ -419,27 +416,11 @@ class StatefulFunctionWrapper(FW):
                 Throttle(
                     reqs_per_sec=self._reqs_per_sec,
                     bucket_size=self._bucket_size,
-                    asyncio_env=self._asyncio_env,
                     convert_to_async=self._convert_to_async,
                     name=self._method_name,
                 ),
             )
         return getattr(self.__wrapped__, key)
-
-    # async def __call__(self, *args, **kwargs):
-    #     print(f"\n3333 StatefulFunctionWrapper __call__entered {args=}, {kwargs=}")
-    #     return await super().__call__(*args, **kwargs)
-
-
-# ########################################################################
-# # ThrottleConfig
-# ########################################################################
-# class ThrottleConfig(BaseModel):
-#     reqs_per_sec: float = Field(
-#         gt=0, default=1, description="Number of requests allowed per second"
-#     )
-#     bucket_size: float = Field(ge=1, default=1, description="Size of leaky bucket")
-#     convert_to_async: bool = False
 
 
 ########################################################################
@@ -561,24 +542,24 @@ def throttle(
         convert_to_async=convert_to_async,
     )
 
-    if _wrapped is None:
-        return cast(
-            _FuncWithThrottleAttr[F],
-            functools.partial(
-                throttle,
-                reqs_per_sec=reqs_per_sec,
-                bucket_size=bucket_size,
-                convert_to_async=convert_to_async,
-            ),
-        )
-
     # if _wrapped is None:
-    #     return wrapt.PartialCallableObjectProxy(
-    #         throttle,
-    #         reqs_per_sec=reqs_per_sec,
-    #         bucket_size=bucket_size,
-    #         convert_to_async=convert_to_async,
+    #     return cast(
+    #         _FuncWithThrottleAttr[F],
+    #         functools.partial(
+    #             throttle,
+    #             reqs_per_sec=reqs_per_sec,
+    #             bucket_size=bucket_size,
+    #             convert_to_async=convert_to_async,
+    #         ),
     #     )
+
+    if _wrapped is None:
+        return wrapt.PartialCallableObjectProxy(
+            throttle,
+            reqs_per_sec=reqs_per_sec,
+            bucket_size=bucket_size,
+            convert_to_async=convert_to_async,
+        )
 
     def decorator(wrapped):
         method_name = wrapped.__name__
@@ -601,7 +582,6 @@ def throttle(
                     Throttle(
                         reqs_per_sec=config.reqs_per_sec,
                         bucket_size=config.bucket_size,
-                        asyncio_env=is_async_func,
                         convert_to_async=config.convert_to_async,
                         name=method_name,
                     ),
@@ -632,7 +612,6 @@ def throttle(
                     Throttle(
                         reqs_per_sec=config.reqs_per_sec,
                         bucket_size=config.bucket_size,
-                        asyncio_env=is_async_func,
                         convert_to_async=config.convert_to_async,
                         name=method_name,
                     ),
@@ -657,7 +636,6 @@ def throttle(
             method_name,
             config.reqs_per_sec,
             config.bucket_size,
-            is_async_func,
             config.convert_to_async,
             method_name,
         )

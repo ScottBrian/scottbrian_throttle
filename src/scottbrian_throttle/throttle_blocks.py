@@ -92,6 +92,9 @@ calling the requested function.
 ########################################################################
 import asyncio
 import contextvars  # Native context tracking
+########################################################################
+# Third Party
+########################################################################
 import logging
 import threading
 import time
@@ -107,11 +110,7 @@ from typing import (
 )
 
 import scottbrian_locking.se_lock as selk  # noqa F401
-########################################################################
-# Third Party
-########################################################################
-from pydantic import BaseModel, Field, TypeAdapter, ValidationError
-from scottbrian_utils.diag_msg import get_formatted_call_sequence as call_seq
+from pydantic import BaseModel, Field, ConfigDict
 from scottbrian_utils.pauser import Pauser
 from typing_extensions import TypeAlias
 from wrapt.decorators import decorator  # type: ignore
@@ -168,8 +167,183 @@ class ThrottleConfig(BaseModel):
 ########################################################################
 # Throttle class
 ########################################################################
-class Throttle:
+# class Throttle:
+#     """Throttle class."""
+#
+#     class Mode(Enum):
+#         SYNC = auto()
+#         ASYNC = auto()
+#
+#     SECS_2_NS: Final[int] = 1000000000
+#     NS_2_SECS: Final[float] = 0.000000001
+#
+#     __slots__ = (
+#         "_arrival_time_ns",
+#         "_next_target_time_ns",
+#         "_target_interval",
+#         "_target_interval_ns",
+#         "_wait_time_ns",
+#         "async_lock",
+#         "call_count",
+#         "convert_to_async",
+#         "bucket_size",
+#         "lb_adjustment",
+#         "lb_adjustment_ns",
+#         "lb_with_one_request",
+#         "logger",
+#         "pauser",
+#         "reqs_per_sec",
+#         "sent_time_ns",
+#         "sync_lock",
+#         "t_name",
+#     )
+#     ####################################################################
+#     # validators
+#     ####################################################################
+#     _validator = TypeAdapter(ThrottleConfig)
+#
+#     ####################################################################
+#     # __init__
+#     ####################################################################
+#     def __init__(
+#         self,
+#         *,
+#         reqs_per_sec: float = 1,
+#         bucket_size: float = 1,
+#         convert_to_async: bool = False,
+#         name: str = "unknown",
+#     ) -> None:
+#         """Initialize an instance of the Throttle class.
+#
+#         Args:
+#             reqs_per_sec: The number of requests that can be made in
+#                           one second.
+#             bucket_size: Specifies the number of requests that can be
+#                          conceptually placed into the bucket for the
+#                          leaky bucket algorithm. As requests arrive,
+#                          the bucket is checked to determine if it has
+#                          room for the request. If so, it is placed into
+#                          the bucket and sent without delay. If not, the
+#                          request is delayed until enough time has
+#                          elapsed for the bucket to leak out enough to
+#                          allow the request to fit. A specification of
+#                          one for the bucket_size will effectively
+#                          cause non-leaky bucket behavior, meaning that
+#                          each request that arrives before the previous
+#                          request interval has elapsed will be delayed.
+#                          The bucket_size must be greater than or equal
+#                          to 1.
+#             name: The name used to identify the throttle in log messages
+#                 issued by the throttle.
+#
+#
+#         Raises:
+#             IncorrectReqsPerSecSpecified: The *reqs_per_sec*
+#                 specification must be a positive int or float greater
+#                 than zero.
+#
+#         """
+#         try:
+#             validated = self._validator.validate_python(
+#                 {
+#                     "reqs_per_sec": reqs_per_sec,
+#                     "bucket_size": bucket_size,
+#                     "convert_to_async": convert_to_async,
+#                 }
+#             )
+#         except ValidationError as e:
+#
+#             # 1. Extract a clean list of exactly what failed
+#             # Returns: [{'type': ..., 'loc': ('reqs_per_sec',), 'msg': ..., 'input': ...}]
+#             raw_errors = e.errors()
+#
+#             # 2. Build a highly descriptive, human-readable message for the ValueError
+#             detail_messages = []
+#             for err in raw_errors:
+#                 # Extract the field name (e.g., "reqs_per_sec")
+#                 field = ".".join(str(loc) for loc in err["loc"])
+#                 # Extract Pydantic's expectation (e.g., "Input should be a positive integer")
+#                 expectation = err["msg"]
+#                 # Extract the exact bad value that was provided
+#                 provided_value = err.get("input", "N/A")
+#
+#                 detail_messages.append(
+#                     f"Field '{field}' expected: {expectation} (Got: {provided_value})"
+#                 )
+#
+#             # Join multiple field errors with a semicolon if more than one failed
+#             error_summary = "; ".join(detail_messages)
+#             value_error_msg = f"Invalid Throttle initialization: {error_summary}"
+#
+#             # 2. Log quietly at DEBUG level for local development inspection.
+#             # We use exc_info=True to optionally capture the stack trace if the level is active.
+#             self.logger.debug(
+#                 "Throttle validation failed. Raw schematic payload: %s",
+#                 json.dumps(raw_errors),
+#                 exc_info=True,
+#                 extra={"validation_errors": raw_errors},
+#             )
+#
+#             # 3. Raise your cleanly formatted error.
+#             # If the app is run locally, this line ensures it bubbles up immediately.
+#             raise ValueError(value_error_msg) from e
+#
+#         ################################################################
+#         # set up logging
+#         ################################################################
+#         self.logger = logging.getLogger(__name__)
+#
+#         ################################################################
+#         # set input vars
+#         ################################################################
+#         self.reqs_per_sec = validated.reqs_per_sec
+#
+#         self.bucket_size = validated.bucket_size
+#
+#         self.convert_to_async = validated.convert_to_async
+#
+#         self.t_name = name
+#
+#         ################################################################
+#         # Set remainder of vars
+#         ################################################################
+#         self._target_interval = 1 / reqs_per_sec
+#         self._target_interval_ns: float = self._target_interval * Throttle.SECS_2_NS
+#         self.sync_lock = threading.Lock()
+#         self.async_lock = asyncio.Lock()
+#         self._arrival_time_ns = 0.0
+#         self.sent_time_ns = time.perf_counter_ns()
+#         self._wait_time_ns: float = 0.0
+#         self.logger = logging.getLogger(__name__)
+#         self.pauser = Pauser()
+#
+#         ################################################################
+#         # Set leaky bucket vars
+#         ################################################################
+#         self.lb_adjustment: float = max(
+#             0.0, (self._target_interval * self.bucket_size) - self._target_interval
+#         )
+#         self.lb_adjustment_ns: float = self.lb_adjustment * Throttle.SECS_2_NS
+#
+#         self.lb_with_one_request = -self.lb_adjustment_ns + self._target_interval_ns
+#
+#         # adjust _next_target_time_ns for normal or lb algo
+#         self._next_target_time_ns = time.perf_counter_ns() - self.lb_adjustment_ns
+#
+#         self.call_count = 0
+
+
+class Throttle(BaseModel):
     """Throttle class."""
+
+    model_config = ConfigDict(extra="allow")
+
+    reqs_per_sec: float = Field(
+        gt=0, default=1, description="Number of requests allowed per second"
+    )
+    bucket_size: float = Field(ge=1, default=1, description="Size of leaky bucket")
+    convert_to_async: bool = False
+    name: str = ""
 
     class Mode(Enum):
         SYNC = auto()
@@ -178,131 +352,17 @@ class Throttle:
     SECS_2_NS: Final[int] = 1000000000
     NS_2_SECS: Final[float] = 0.000000001
 
-    __slots__ = (
-        "_arrival_time_ns",
-        "_next_target_time_ns",
-        "_target_interval",
-        "_target_interval_ns",
-        "_wait_time_ns",
-        "asyncio_env",
-        "async_lock",
-        "call_count",
-        "convert_to_async",
-        "bucket_size",
-        "lb_adjustment",
-        "lb_adjustment_ns",
-        "lb_with_one_request",
-        "logger",
-        "pauser",
-        "reqs_per_sec",
-        "sent_time_ns",
-        "sync_lock",
-        "t_name",
-    )
-    ####################################################################
-    # validators
-    ####################################################################
-    _validator = TypeAdapter(ThrottleConfig)
-
-    ####################################################################
-    # __init__
-    ####################################################################
-    def __init__(
-        self,
-        *,
-        reqs_per_sec: float = 1,
-        bucket_size: float = 1,
-        asyncio_env: bool = False,
-        convert_to_async: bool = False,
-        name: str = "unknown",
-    ) -> None:
-        """Initialize an instance of the Throttle class.
-
-        Args:
-            reqs_per_sec: The number of requests that can be made in
-                          one second.
-            bucket_size: Specifies the number of requests that can be
-                         conceptually placed into the bucket for the
-                         leaky bucket algorithm. As requests arrive,
-                         the bucket is checked to determine if it has
-                         room for the request. If so, it is placed into
-                         the bucket and sent without delay. If not, the
-                         request is delayed until enough time has
-                         elapsed for the bucket to leak out enough to
-                         allow the request to fit. A specification of
-                         one for the bucket_size will effectively
-                         cause non-leaky bucket behavior, meaning that
-                         each request that arrives before the previous
-                         request interval has elapsed will be delayed.
-                         The bucket_size must be greater than or equal
-                         to 1.
-            asyncio_env: When True, use await and asyncio.sleep. The
-                         default is False.
-            name: The name used to identify the throttle in log messages
-                issued by the throttle.
-
-
-        Raises:
-            IncorrectReqsPerSecSpecified: The *reqs_per_sec*
-                specification must be a positive int or float greater
-                than zero.
-
-        """
-        try:
-            validated = self._validator.validate_python(
-                {
-                    "reqs_per_sec": reqs_per_sec,
-                    "bucket_size": bucket_size,
-                    "convert_to_async": convert_to_async,
-                }
-            )
-        except ValidationError as e:
-            raise ValueError(f"Invalid Throttle initialization: {e}") from e
+    def model_post_init(self, context: Any) -> None:
 
         ################################################################
-        # reqs_per_sec
+        # set up logging
         ################################################################
-        self.logger = logging.getLogger(__name__)
-
-        self.reqs_per_sec = validated.reqs_per_sec
-        # if isinstance(reqs_per_sec, int | float) and (0 < reqs_per_sec):
-        #     self.reqs_per_sec = reqs_per_sec
-        # else:
-        #     error_msg = (
-        #         "The reqs_per_sec specification must be a positive "
-        #         "int or float greater than zero. "
-        #         f"Request call sequence: {call_seq(latest=1, depth=2)}"
-        #     )
-        #     self.logger.error(error_msg)
-        #     raise IncorrectReqsPerSecSpecified(error_msg)
-
-        ################################################################
-        # bucket_size
-        ################################################################
-        self.bucket_size = validated.bucket_size
-        if isinstance(bucket_size, int | float) and (1 <= bucket_size):
-            self.bucket_size = bucket_size
-        else:
-            error_msg = (
-                "The bucket_size specification must be a positive "
-                "int or float greater than or equal to 1. "
-                f"Request call sequence: {call_seq(latest=1, depth=2)}"
-            )
-            self.logger.error(error_msg)
-            raise IncorrectBucketSizeSpecified(error_msg)
-
-        self.asyncio_env = asyncio_env
-        self.convert_to_async = validated.convert_to_async
-
-        ################################################################
-        # name
-        ################################################################
-        self.t_name = name
+        # self.logger = logging.getLogger(__name__)
 
         ################################################################
         # Set remainder of vars
         ################################################################
-        self._target_interval = 1 / reqs_per_sec
+        self._target_interval = 1 / self.reqs_per_sec
         self._target_interval_ns: float = self._target_interval * Throttle.SECS_2_NS
         self.sync_lock = threading.Lock()
         self.async_lock = asyncio.Lock()
@@ -362,7 +422,8 @@ class Throttle:
             f"reqs_per_sec={self.reqs_per_sec}, "
             f"bucket_size={self.bucket_size}, "
             f"convert_to_async={str(self.convert_to_async)}, "
-            f"name={self.t_name}"
+            # f"name={self.t_name}"
+            f"name={self.name}"
         )
 
         return f"{classname}({parms})"
@@ -593,15 +654,23 @@ class Throttle:
     ####################################################################
     def _capture_apm_error(self, e: Exception, context_name: str):
         # 1. Standard structured logging (parsed cleanly by Datadog/ELK)
+        # self.logger.error(
+        #     f"Exception in {context_name} for '{self.t_name}': {e}",
+        #     exc_info=True,
+        #     extra={
+        #         "function_name": self.t_name,
+        #         "throttle_delay": self._wait_time_ns * Throttle.NS_2_SECS,
+        #     },
+        # )
+
         self.logger.error(
-            f"Exception in {context_name} for '{self.t_name}': {e}",
+            f"Exception in {context_name} for '{self.name}': {e}",
             exc_info=True,
             extra={
-                "function_name": self.t_name,
+                "function_name": self.name,
                 "throttle_delay": self._wait_time_ns * Throttle.NS_2_SECS,
             },
         )
-
         # 2. Sentry Explicit Fallback (If the developer uses Sentry)
         # Many APMs capture unhandled exceptions automatically, but inside
         # background threads, explicit capture guarantees it isn't dropped.
@@ -611,637 +680,3 @@ class Throttle:
             sentry_sdk.capture_exception(e)
         except ImportError:
             pass
-
-
-##### @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
-
-# import asyncio
-# import contextvars  # Native context tracking
-# import functools
-# import inspect
-# import logging
-# import time
-# from typing import Literal, Optional
-#
-# logger = logging.getLogger("hybrid_decorator")
-#
-#
-# def hybrid_delayed_execution(
-#     delay: float, sync_action: Optional[Literal["keep_sync", "convert_to_async"]] = None
-# ):
-#     def decorator(func):
-#         is_async_func = inspect.iscoroutinefunction(func)
-#
-#         # ---- VALIDATION GATE ----
-#         if is_async_func and sync_action is not None:
-#             raise TypeError(
-#                 f"Cannot specify 'sync_action' on async function '{func.__name__}'."
-#             )
-#         if not is_async_func and sync_action is None:
-#             raise TypeError(
-#                 f"The function '{func.__name__}' is synchronous. Provide 'sync_action'."
-#             )
-#
-#         # Helper to safely log or tag errors for APM systems
-#         def capture_apm_error(e: Exception, context_name: str):
-#             # 1. Standard structured logging (parsed cleanly by Datadog/ELK)
-#             logger.error(
-#                 f"Exception in {context_name} for '{func.__name__}': {e}",
-#                 exc_info=True,
-#                 extra={"function_name": func.__name__, "decorator_delay": delay},
-#             )
-#
-#             # 2. Sentry Explicit Fallback (If the developer uses Sentry)
-#             # Many APMs capture unhandled exceptions automatically, but inside
-#             # background threads, explicit capture guarantees it isn't dropped.
-#             try:
-#                 import sentry_sdk
-#
-#                 sentry_sdk.capture_exception(e)
-#             except ImportError:
-#                 pass
-#
-#         # ---- EXECUTION PATHS ----
-#
-#         # PATH 1: Native Async Function
-#         if is_async_func:
-#
-#             @functools.wraps(func)
-#             async def async_wrapper(*args, **kwargs):
-#                 await asyncio.sleep(delay)
-#                 try:
-#                     return await func(*args, **kwargs)
-#                 except Exception as e:
-#                     capture_apm_error(e, "async context")
-#                     raise
-#
-#             return async_wrapper
-#
-#         # PATH 2: Sync Function -> Keep Sync (Option A)
-#         elif sync_action == "keep_sync":
-#
-#             @functools.wraps(func)
-#             def sync_blocking_wrapper(*args, **kwargs):
-#                 try:
-#                     asyncio.get_running_loop()
-#                     raise RuntimeError(
-#                         f"CRITICAL: Called 'keep_sync' function '{func.__name__}' directly on the main loop thread."
-#                     )
-#                 except RuntimeError as e:
-#                     if "CRITICAL" in str(e):
-#                         logger.critical(str(e))
-#                         raise e
-#
-#                 time.sleep(delay)
-#                 try:
-#                     return func(*args, **kwargs)
-#                 except Exception as e:
-#                     capture_apm_error(e, "pure sync context")
-#                     raise
-#
-#             return sync_blocking_wrapper
-#
-#         # PATH 3: Sync Function -> Convert to Async (Option B)
-#         elif sync_action == "convert_to_async":
-#
-#             @functools.wraps(func)
-#             async def sync_to_async_wrapper(*args, **kwargs):
-#                 await asyncio.sleep(delay)
-#
-#                 # We extract the current execution context explicitly.
-#                 # asyncio.to_thread handles this automatically, but doing it explicitly
-#                 # guarantees third-party custom tracing hooks remain flawlessly linked.
-#                 ctx = contextvars.copy_context()
-#
-#                 def worker_thread_target():
-#                     try:
-#                         return func(*args, **kwargs)
-#                     except Exception as e:
-#                         capture_apm_error(e, "worker thread")
-#                         raise
-#
-#                 # Run the worker thread using the captured main-thread context
-#                 return await asyncio.to_thread(lambda: ctx.run(worker_thread_target))
-#
-#             return sync_to_async_wrapper
-#
-#     return decorator
-
-
-##### @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
-
-
-# import asyncio
-# import threading
-# from contextlib import contextmanager
-#
-# import wrapt
-#
-# class MethodStateProxy(wrapt.ObjectProxy):
-#     """A proxy wrapper that allows setting custom attributes on a bound method."""
-#     def __init__(self, wrapped_method):
-#         super().__init__(wrapped_method)
-#         # Use object.__setattr__ to bypass the proxy forwarding for our own dict
-#         object.__setattr__(self, '__dict__', {})
-#
-#     def __getattr__(self, name):
-#         try:
-#             return super().__getattr__(name)
-#         except AttributeError:
-#             return self.__dict__[name]
-#
-#     def __setattr__(self, name, value):
-#         # Allow setting custom attributes locally on this specific bound proxy
-#         self.__dict__[name] = value
-
-
-# class StatefulMethodProxy(wrapt.ObjectProxy):
-#     """A thread-and-async-safe proxy that enables custom states and teardowns."""
-#
-#     def __init__(self, wrapped_method):
-#         super().__init__(wrapped_method)
-#         # Internal state dictionary allocation
-#         object.__setattr__(
-#             self, "__dict__", {"count": 0, "status": "idle", "history": []}
-#         )
-#         # Thread lock for synchronous execution paths
-#         object.__setattr__(self, "_thread_lock", threading.Lock())
-#         # Lazy-loaded Asyncio lock for asynchronous execution paths
-#         object.__setattr__(self, "_async_lock", None)
-#
-#     def __getattr__(self, name):
-#         try:
-#             return super().__getattr__(name)
-#         except AttributeError:
-#             return self.__dict__[name]
-#
-#     def __setattr__(self, name, value):
-#         self.__dict__[name] = value
-#
-#     @contextmanager
-#     def teardown_context(self):
-#         """Context manager allowing users to cleanly reset state metrics on error."""
-#         try:
-#             yield self
-#         except Exception:
-#             # Automatic teardown routine triggered upon code failures
-#             with self._thread_lock:
-#                 self.status = "idle (recovered via teardown)"
-#                 self.history.append("Teardown executed: State automatically cleared.")
-#             raise
-#
-#     def get_async_lock(self):
-#         """Lazily initialize the asyncio lock inside the running event loop."""
-#         if self._async_lock is None:
-#             self._async_lock = asyncio.Lock()
-#         return self._async_lock
-#
-#
-# class ConfigurableTracker:
-#     """Configurable tracker tracking separate sync & async method calls."""
-#
-#     def __init__(self, initial_status, increment_by):
-#         self.initial_status = initial_status
-#         self.increment_by = increment_by
-#         self._proxy_cache = weakref.WeakKeyDictionary()
-#         self._cache_lock = threading.Lock()
-#
-#     def __call__(self, wrapped, instance, args, kwargs):
-#         if instance is None:
-#             return wrapped(*args, **kwargs)
-#
-#         proxy = self._get_or_create_proxy(instance, wrapped)
-#
-#         # ROUTE 1: Asynchronous Execution Path
-#         if inspect.iscoroutinefunction(wrapped):
-#
-#             async def async_wrapper():
-#                 async_lock = proxy.get_async_lock()
-#                 async with async_lock:
-#                     proxy.count += self.increment_by
-#                     proxy.status = "running"
-#                     proxy.history.append(f"Async processing: {args}")
-#                 try:
-#                     result = await wrapped(*args, **kwargs)
-#                     async with async_lock:
-#                         proxy.status = "success"
-#                     return result
-#                 except Exception as e:
-#                     async with async_lock:
-#                         proxy.status = f"failed: {type(e).__name__}"
-#                     raise e
-#
-#             return async_wrapper()
-#
-#         # ROUTE 2: Synchronous Execution Path
-#         else:
-#             with proxy._thread_lock:
-#                 proxy.count += self.increment_by
-#                 proxy.status = "running"
-#                 proxy.history.append(f"Sync processing: {args}")
-#             try:
-#                 result = wrapped(*args, **kwargs)
-#                 with proxy._thread_lock:
-#                     proxy.status = "success"
-#                 return result
-#             except Exception as e:
-#                 with proxy._thread_lock:
-#                     proxy.status = f"failed: {type(e).__name__}"
-#                 raise e
-#
-#     def _get_or_create_proxy(self, instance, wrapped):
-#         with self._cache_lock:
-#             if instance not in self._proxy_cache:
-#                 bound_method = getattr(instance, wrapped.__name__)
-#                 proxy = StatefulMethodProxy(bound_method)
-#                 proxy.status = self.initial_status
-#                 self._proxy_cache[instance] = proxy
-#             return self._proxy_cache[instance]
-#
-#     def __get__(self, instance, owner):
-#         if instance is None:
-#             return self
-#         return self._get_or_create_proxy(instance, self._self_wrapped)
-#
-#
-# class CustomDecoratorWrapper(wrapt.FunctionWrapper):
-#     """Exposes descriptor bindings natively past wrapt core restrictions."""
-#
-#     def __get__(self, instance, owner):
-#         return self._self_wrapper.__get__(instance, owner)
-#
-#
-# def track_state(initial_status="initialized", increment_by=1):
-#     """The master decorator factory supporting parameters, sync, and async."""
-#
-#     def decorator(wrapped):
-#         tracker = ConfigurableTracker(
-#             initial_status=initial_status, increment_by=increment_by
-#         )
-#         return CustomDecoratorWrapper(wrapped, tracker)
-#
-#     return decorator
-#
-#
-#
-# #####################################
-# # latest
-# #####################################
-# """
-#
-# To handle failed states and execute custom callback functions,
-# pass the callbacks directly as arguments into the outermost @track_state
-# decorator factory.
-# To make this architecture production-grade, the tracker must dynamically
-# inspect if the provided callbacks are synchronous functions or asynchronous coroutines.
-#  This prevents blocking errors when mixing execution contexts.
-#  Enhanced Parameterized Architecture with CallbacksHere is the complete
-#  implementation incorporating on-success and on-failure callbacks,
-#  supporting both sync and async operations seamlessly:
-# """
-#
-#
-# pythonimport asyncio
-# import inspect
-# import threading
-# import weakref
-# import wrapt
-#
-# class StatefulMethodProxy(wrapt.ObjectProxy):
-#     """A thread-and-async-safe proxy that holds instance-isolated state data."""
-#     def __init__(self, wrapped_method):
-#         super().__init__(wrapped_method)
-#         object.__setattr__(self, '__dict__', {
-#             'count': 0,
-#             'status': 'idle',
-#             'history': [],
-#             'last_exception': None
-#         })
-#         object.__setattr__(self, '_thread_lock', threading.Lock())
-#         object.__setattr__(self, '_async_lock', None)
-#
-#     def __getattr__(self, name):
-#         try:
-#             return super().__getattr__(name)
-#         except AttributeError:
-#             return self.__dict__[name]
-#
-#     def __setattr__(self, name, value):
-#         self.__dict__[name] = value
-#
-#     def get_async_lock(self):
-#         if self._async_lock is None:
-#             self._async_lock = asyncio.Lock()
-#         return self._async_lock
-#
-#
-# class ConfigurableTracker:
-#     """Tracks state and safely invokes user-defined callback hooks."""
-#     def __init__(self, initial_status, increment_by, on_success=None, on_failure=None):
-#         self.initial_status = initial_status
-#         self.increment_by = increment_by
-#         self.on_success_callback = on_success
-#         self.on_failure_callback = on_failure
-#
-#         self._proxy_cache = weakref.WeakKeyDictionary()
-#         self._cache_lock = threading.Lock()
-#
-#     def _execute_callback(self, callback, instance, proxy, exception=None):
-#         """Helper to invoke a callback safely based on its sync/async signature."""
-#         if not callback:
-#             return
-#
-#         # Build the payload to feed into the user's custom callback
-#         kwargs = {'instance': instance, 'proxy': proxy}
-#         if exception:
-#             kwargs['exception'] = exception
-#
-#         if inspect.iscoroutinefunction(callback):
-#             # If the callback is async, schedule it safely on the active event loop
-#             try:
-#                 loop = asyncio.get_running_loop()
-#                 loop.create_task(callback(**kwargs))
-#             except RuntimeError:
-#                 # Fallback if no loop is running in the current thread
-#                 asyncio.run(callback(**kwargs))
-#         else:
-#             # Standard synchronous callback execution
-#             callback(**kwargs)
-#
-#     def __call__(self, wrapped, instance, args, kwargs):
-#         if instance is None:
-#             return wrapped(*args, **kwargs)
-#
-#         proxy = self._get_or_create_proxy(instance, wrapped)
-#
-#         # ROUTE 1: Asynchronous Execution Path
-#         if inspect.iscoroutinefunction(wrapped):
-#             async def async_wrapper():
-#                 async_lock = proxy.get_async_lock()
-#                 async with async_lock:
-#                     proxy.count += self.increment_by
-#                     proxy.status = 'running'
-#                 try:
-#                     result = await wrapped(*args, **kwargs)
-#                     async with async_lock:
-#                         proxy.status = 'success'
-#                         proxy.last_exception = None
-#                     self._execute_callback(self.on_success_callback, instance, proxy)
-#                     return result
-#                 except Exception as e:
-#                     async with async_lock:
-#                         proxy.status = 'failed'
-#                         proxy.last_exception = e
-#                     self._execute_callback(self.on_failure_callback, instance, proxy, exception=e)
-#                     raise e
-#             return async_wrapper()
-#
-#         # ROUTE 2: Synchronous Execution Path
-#         else:
-#             with proxy._thread_lock:
-#                 proxy.count += self.increment_by
-#                 proxy.status = 'running'
-#             try:
-#                 result = wrapped(*args, **kwargs)
-#                 with proxy._thread_lock:
-#                     proxy.status = 'success'
-#                     proxy.last_exception = None
-#                 self._execute_callback(self.on_success_callback, instance, proxy)
-#                 return result
-#             except Exception as e:
-#                 with proxy._thread_lock:
-#                     proxy.status = 'failed'
-#                     proxy.last_exception = e
-#                 self._execute_callback(self.on_failure_callback, instance, proxy, exception=e)
-#                 raise e
-#
-#     def _get_or_create_proxy(self, instance, wrapped):
-#         with self._cache_lock:
-#             if instance not in self._proxy_cache:
-#                 bound_method = getattr(instance, wrapped.__name__)
-#                 proxy = StatefulMethodProxy(bound_method)
-#                 proxy.status = self.initial_status
-#                 self._proxy_cache[instance] = proxy
-#             return self._proxy_cache[instance]
-#
-#     def __get__(self, instance, owner):
-#         if instance is None:
-#             return self
-#         return self._get_or_create_proxy(instance, self._self_wrapped)
-#
-#
-# class CustomDecoratorWrapper(wrapt.FunctionWrapper):
-#     def __get__(self, instance, owner):
-#         return self._self_wrapper.__get__(instance, owner)
-#
-#
-# def track_state(initial_status='initialized', increment_by=1, on_success=None, on_failure=None):
-#     """The master factory decorator allowing configuration and callback injection."""
-#     def decorator(wrapped):
-#         tracker = ConfigurableTracker(
-#             initial_status=initial_status,
-#             increment_by=increment_by,
-#             on_success=on_success,
-#             on_failure=on_failure
-#         )
-#         return CustomDecoratorWrapper(wrapped, tracker)
-
-# import asyncio
-# import contextvars
-# import queue
-# import threading
-# import time
-# import wrapt
-#
-# active_state_ctx = contextvars.ContextVar("active_state")
-#
-# class LeakyBucketThrottleState:
-#     def __init__(self, reqs_per_sec, bucket_size, mode="sync"):
-#         self.reqs_per_sec = reqs_per_sec
-#         self.bucket_size = bucket_size
-#         self.capacity = float(bucket_size)
-#         self.last_leak_time = time.monotonic()
-#         self.mode = mode  # "sync", "thread_queue", or "asyncio"
-#         self.call_count = 0
-#
-#         # Mode 2: Thread Queue Infrastructure
-#         self._work_queue = None
-#         self._worker_thread = None
-#         self._stop_signal = threading.Event()
-#
-#         # Thread safety lock for calculations across modes 1 and 2
-#         self._lock = threading.Lock()
-#
-#         if self.mode == "thread_queue":
-#             self._start_background_worker()
-#
-#     def leak_unlocked(self):
-#         """Calculates token regeneration based on elapsed time."""
-#         now = time.monotonic()
-#         elapsed = now - self.last_leak_time
-#         leaked_amount = elapsed * self.reqs_per_sec
-#         self.capacity = min(float(self.bucket_size), self.capacity + leaked_amount)
-#         self.last_leak_time = now
-#
-#     def get_wait_time(self) -> float:
-#         """
-#         Determines if a token is ready. If not, returns the exact duration
-#         (in seconds) needed until the next token regenerates.
-#         """
-#         with self._lock:
-#             self.leak_unlocked()
-#             if self.capacity >= 1.0:
-#                 self.capacity -= 1.0
-#                 return 0.0  # Immediate execution
-#
-#             # Calculate time needed to recover missing token fraction
-#             needed_tokens = 1.0 - self.capacity
-#             wait_time = needed_tokens / self.reqs_per_sec
-#
-#             # Pretend we consumed it ahead of time so next calls stack appropriately
-#             self.capacity = 0.0
-#             self.last_leak_time = self.last_leak_time + wait_time
-#             return wait_time
-#
-#     # ---- Mode 2: Async Thread + Queue Operations ----
-#     def _start_background_worker(self):
-#         self._work_queue = queue.Queue()
-#         self._worker_thread = threading.Thread(target=self._worker_loop, daemon=True)
-#         self._worker_thread.start()
-#
-#     def _worker_loop(self):
-#         """Background thread consumes tasks from queue and applies rate limits sequentially."""
-#         while not self._stop_signal.is_set():
-#             try:
-#                 # Block briefly checking for new work packets
-#                 func, args, kwargs = self._work_queue.get(timeout=0.2)
-#             except queue.Empty:
-#                 continue
-#
-#             # Calculate and apply blocking time.sleep within this private thread context
-#             wait_time = self.get_wait_time()
-#             if wait_time > 0:
-#                 time.sleep(wait_time)
-#
-#             try:
-#                 func(*args, **kwargs)
-#             except Exception as e:
-#                 print(f"[Thread Worker Exception]: {e}")
-#             finally:
-#                 self._work_queue.task_done()
-#
-#     def enqueue_work(self, func, args, kwargs):
-#         """Pushes work execution payload to background thread line."""
-#         if self._stop_signal.is_set():
-#             raise RuntimeError("Cannot enqueue work. Throttle cleanup already executed.")
-#         self._work_queue.put((func, args, kwargs))
-#
-#     def start_cleanup(self):
-#         """Shuts down background queue workers and safely terminates threads."""
-#         if self.mode == "thread_queue" and not self._stop_signal.is_set():
-#             print(f"\n[Cleanup] Signaling background worker thread to stop...")
-#             self._stop_signal.set()
-#             if self._worker_thread:
-#                 self._worker_thread.join(timeout=2.0)
-#             print("[Cleanup] Background thread closed down safely.")
-#
-#
-# # ---- Wrapt Descriptors (Preserved from yesterday) ----
-# class StatefulBoundWrapper(wrapt.BoundFunctionWrapper):
-#     @property
-#     def throttle(self):
-#         try: return active_state_ctx.get()
-#         except LookupError: pass
-#         w = self._self_parent
-#         inst = self._self_instance
-#         c_type = inst if isinstance(inst, type) else inst.__class__
-#         key = f"_th_{w._method_name}_{c_type.__name__}_{id(w)}"
-#         if not hasattr(inst, key):
-#             setattr(inst, key, LeakyBucketThrottleState(w._reqs_per_sec, w._bucket_size, w._mode))
-#         return getattr(inst, key)
-#
-# class StatefulFunctionWrapper(wrapt.FunctionWrapper):
-#     __bound_function_wrapper__ = StatefulBoundWrapper
-#     def __init__(self, wrapped, wrapper_func, method_name, reqs_per_sec, bucket_size, mode):
-#         super().__init__(wrapped, wrapper_func)
-#         self._method_name = method_name
-#         self._reqs_per_sec = reqs_per_sec
-#         self._bucket_size = bucket_size
-#         self._mode = mode
-#     @property
-#     def throttle(self):
-#         try: return active_state_ctx.get()
-#         except LookupError: pass
-#         key = f"_th_{self._method_name}_static_{id(self)}"
-#         if not hasattr(self.__wrapped__, key):
-#             setattr(self.__wrapped__, key, LeakyBucketThrottleState(self._reqs_per_sec, self._bucket_size, self._mode))
-#         return getattr(self.__wrapped__, key)
-#
-#
-# # ---- Decorator Parameter Factory ----
-# def throttle(reqs_per_sec, bucket_size, mode="sync"):
-#     def decorator(wrapped):
-#         method_name = wrapped.__name__
-#
-#         def _core_execution_logic(wrapped_func, instance, args, kwargs):
-#             # Resolve target mapping
-#             if instance is not None:
-#                 c_type = instance if isinstance(instance, type) else instance.__class__
-#                 key = f"_th_{method_name}_{c_type.__name__}_{id(proxy)}"
-#                 target = instance
-#             else:
-#                 key = f"_th_{method_name}_static_{id(proxy)}"
-#                 target = wrapped_func
-#
-#             if not hasattr(target, key):
-#                 setattr(target, key, LeakyBucketThrottleState(reqs_per_sec, bucket_size, mode))
-#             state = getattr(target, key)
-#
-#             # -------------------------------------------------------------
-#             # ENVIRONMENT MODE 2: Thread Queue Mode (Fire-and-forget)
-#             # -------------------------------------------------------------
-#             if mode == "thread_queue":
-#                 # Bypass normal direct call route completely; strip 'self' if bound method
-#                 if instance is not None:
-#                     # Pass bound method invocation blueprint to worker queue
-#                     bound_call = getattr(instance, wrapped_func.__name__)
-#                     state.enqueue_work(bound_call, args, kwargs)
-#                 else:
-#                     state.enqueue_work(wrapped_func, args, kwargs)
-#                 return None  # Returns control back to caller instantly!
-#
-#             # -------------------------------------------------------------
-#             # ENVIRONMENT MODE 3: Asyncio Mode (Non-blocking Cooperative Sleep)
-#             # -------------------------------------------------------------
-#             elif mode == "asyncio":
-#                 async def async_exec():
-#                     wait_time = state.get_wait_time()
-#                     if wait_time > 0:
-#                         await asyncio.sleep(wait_time)
-#
-#                     state.call_count += 1
-#                     token = active_state_ctx.set(state)
-#                     try:
-#                         return await wrapped_func(*args, **kwargs)
-#                     finally:
-#                         active_state_ctx.reset(token)
-#                 return async_exec()
-#
-#             # -------------------------------------------------------------
-#             # ENVIRONMENT MODE 1: Synchronous Mode (Standard time.sleep Blocking)
-#             # -------------------------------------------------------------
-#             else:
-#                 wait_time = state.get_wait_time()
-#                 if wait_time > 0:
-#                     time.sleep(wait_time)
-#
-#                 state.call_count += 1
-#                 token = active_state_ctx.set(state)
-#                 try:
-#                     return wrapped_func(*args, **kwargs)
-#                 finally:
-#                     active_state_ctx.reset(token)
-#
-#         proxy = StatefulFunctionWrapper(wrapped, _core_execution_logic, method_name, reqs_per_sec, bucket_size, mode)
-#         return proxy
-#     return decorator
