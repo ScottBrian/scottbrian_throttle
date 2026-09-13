@@ -112,229 +112,55 @@ from typing import (
 import scottbrian_locking.se_lock as selk  # noqa F401
 from pydantic import BaseModel, Field, ConfigDict
 from scottbrian_utils.pauser import Pauser
-from typing_extensions import TypeAlias
 from wrapt.decorators import decorator  # type: ignore
 
 ########################################################################
 # Local
 ########################################################################
 
-########################################################################
-# type aliases and TypeVars
-########################################################################
-IntFloat: TypeAlias = Union[int, float]
-OptIntFloat: TypeAlias = Optional[IntFloat]
-
-
-########################################################################
-# Throttle class exceptions
-########################################################################
-class ThrottleError(Exception):
-    """Base class for exceptions in this module."""
-
-    pass
-
-
-class IncorrectReqsPerSecSpecified(ThrottleError):
-    """Throttle exception for incorrect reqs_per_sec specification."""
-
-    pass
-
-
-class IncorrectBucketSizeSpecified(ThrottleError):
-    """Throttle exception for incorrect bucket_size specification."""
-
-    pass
-
-
-class InvalidArgs(ThrottleError):
-    """Throttle exception for invalid args."""
-
-    pass
-
-
-########################################################################
-# ThrottleConfig
-########################################################################
-class ThrottleConfig(BaseModel):
-    reqs_per_sec: float = Field(
-        gt=0, default=1, description="Number of requests allowed per second"
-    )
-    bucket_size: float = Field(ge=1, default=1, description="Size of leaky bucket")
-    convert_to_async: bool = False
-
-
-########################################################################
-# Throttle class
-########################################################################
-# class Throttle:
-#     """Throttle class."""
-#
-#     class Mode(Enum):
-#         SYNC = auto()
-#         ASYNC = auto()
-#
-#     SECS_2_NS: Final[int] = 1000000000
-#     NS_2_SECS: Final[float] = 0.000000001
-#
-#     __slots__ = (
-#         "_arrival_time_ns",
-#         "_next_target_time_ns",
-#         "_target_interval",
-#         "_target_interval_ns",
-#         "_wait_time_ns",
-#         "async_lock",
-#         "call_count",
-#         "convert_to_async",
-#         "bucket_size",
-#         "lb_adjustment",
-#         "lb_adjustment_ns",
-#         "lb_with_one_request",
-#         "logger",
-#         "pauser",
-#         "reqs_per_sec",
-#         "sent_time_ns",
-#         "sync_lock",
-#         "t_name",
-#     )
-#     ####################################################################
-#     # validators
-#     ####################################################################
-#     _validator = TypeAdapter(ThrottleConfig)
-#
-#     ####################################################################
-#     # __init__
-#     ####################################################################
-#     def __init__(
-#         self,
-#         *,
-#         reqs_per_sec: float = 1,
-#         bucket_size: float = 1,
-#         convert_to_async: bool = False,
-#         name: str = "unknown",
-#     ) -> None:
-#         """Initialize an instance of the Throttle class.
-#
-#         Args:
-#             reqs_per_sec: The number of requests that can be made in
-#                           one second.
-#             bucket_size: Specifies the number of requests that can be
-#                          conceptually placed into the bucket for the
-#                          leaky bucket algorithm. As requests arrive,
-#                          the bucket is checked to determine if it has
-#                          room for the request. If so, it is placed into
-#                          the bucket and sent without delay. If not, the
-#                          request is delayed until enough time has
-#                          elapsed for the bucket to leak out enough to
-#                          allow the request to fit. A specification of
-#                          one for the bucket_size will effectively
-#                          cause non-leaky bucket behavior, meaning that
-#                          each request that arrives before the previous
-#                          request interval has elapsed will be delayed.
-#                          The bucket_size must be greater than or equal
-#                          to 1.
-#             name: The name used to identify the throttle in log messages
-#                 issued by the throttle.
-#
-#
-#         Raises:
-#             IncorrectReqsPerSecSpecified: The *reqs_per_sec*
-#                 specification must be a positive int or float greater
-#                 than zero.
-#
-#         """
-#         try:
-#             validated = self._validator.validate_python(
-#                 {
-#                     "reqs_per_sec": reqs_per_sec,
-#                     "bucket_size": bucket_size,
-#                     "convert_to_async": convert_to_async,
-#                 }
-#             )
-#         except ValidationError as e:
-#
-#             # 1. Extract a clean list of exactly what failed
-#             # Returns: [{'type': ..., 'loc': ('reqs_per_sec',), 'msg': ..., 'input': ...}]
-#             raw_errors = e.errors()
-#
-#             # 2. Build a highly descriptive, human-readable message for the ValueError
-#             detail_messages = []
-#             for err in raw_errors:
-#                 # Extract the field name (e.g., "reqs_per_sec")
-#                 field = ".".join(str(loc) for loc in err["loc"])
-#                 # Extract Pydantic's expectation (e.g., "Input should be a positive integer")
-#                 expectation = err["msg"]
-#                 # Extract the exact bad value that was provided
-#                 provided_value = err.get("input", "N/A")
-#
-#                 detail_messages.append(
-#                     f"Field '{field}' expected: {expectation} (Got: {provided_value})"
-#                 )
-#
-#             # Join multiple field errors with a semicolon if more than one failed
-#             error_summary = "; ".join(detail_messages)
-#             value_error_msg = f"Invalid Throttle initialization: {error_summary}"
-#
-#             # 2. Log quietly at DEBUG level for local development inspection.
-#             # We use exc_info=True to optionally capture the stack trace if the level is active.
-#             self.logger.debug(
-#                 "Throttle validation failed. Raw schematic payload: %s",
-#                 json.dumps(raw_errors),
-#                 exc_info=True,
-#                 extra={"validation_errors": raw_errors},
-#             )
-#
-#             # 3. Raise your cleanly formatted error.
-#             # If the app is run locally, this line ensures it bubbles up immediately.
-#             raise ValueError(value_error_msg) from e
-#
-#         ################################################################
-#         # set up logging
-#         ################################################################
-#         self.logger = logging.getLogger(__name__)
-#
-#         ################################################################
-#         # set input vars
-#         ################################################################
-#         self.reqs_per_sec = validated.reqs_per_sec
-#
-#         self.bucket_size = validated.bucket_size
-#
-#         self.convert_to_async = validated.convert_to_async
-#
-#         self.t_name = name
-#
-#         ################################################################
-#         # Set remainder of vars
-#         ################################################################
-#         self._target_interval = 1 / reqs_per_sec
-#         self._target_interval_ns: float = self._target_interval * Throttle.SECS_2_NS
-#         self.sync_lock = threading.Lock()
-#         self.async_lock = asyncio.Lock()
-#         self._arrival_time_ns = 0.0
-#         self.sent_time_ns = time.perf_counter_ns()
-#         self._wait_time_ns: float = 0.0
-#         self.logger = logging.getLogger(__name__)
-#         self.pauser = Pauser()
-#
-#         ################################################################
-#         # Set leaky bucket vars
-#         ################################################################
-#         self.lb_adjustment: float = max(
-#             0.0, (self._target_interval * self.bucket_size) - self._target_interval
-#         )
-#         self.lb_adjustment_ns: float = self.lb_adjustment * Throttle.SECS_2_NS
-#
-#         self.lb_with_one_request = -self.lb_adjustment_ns + self._target_interval_ns
-#
-#         # adjust _next_target_time_ns for normal or lb algo
-#         self._next_target_time_ns = time.perf_counter_ns() - self.lb_adjustment_ns
-#
-#         self.call_count = 0
-
 
 class Throttle(BaseModel):
-    """Throttle class."""
+    """Throttle class.
+
+
+        Args:
+            reqs_per_sec: The number of requests that can be made in
+                          one second.
+            bucket_size: Specifies the number of requests that can be
+                         conceptually placed into the bucket for the
+                         leaky bucket algorithm. As requests arrive,
+                         the bucket is checked to determine if it has
+                         room for the request. If so, it is placed into
+                         the bucket and sent without delay. If not, the
+                         request is delayed until enough time has
+                         elapsed for the bucket to leak out enough to
+                         allow the request to fit. A specification of
+                         one for the bucket_size will effectively
+                         cause non-leaky bucket behavior, meaning that
+                         each request that arrives before the previous
+                         request interval has elapsed will be delayed.
+                         The bucket_size must be greater than or equal
+                         to 1.
+            convert_to_async: If the function being throttled is
+                              synchronous and the user is in an asyncio
+                              environment, the user can specify
+                              *convert_to_async=True* to request that
+                              asyncio.sleep be used for delay if needed
+                              and the function is to be run in a
+                              separate thread using asyncio.to_thread.
+                              Otherwise, if *convert_to_async=False*,
+                              the use can use asyncio.to_thread to
+                              run the synchronous function is a separate
+                              thread and time.sleep will be used for
+                              any delay as needed. Note that
+                              *convert_to_async* has no meaning is a
+                              non-asyncio environment.
+            name: The name of the function that was wrapped by the
+                  throttle decorator, meaning the function that is being
+                  throttled.
+
+
+        """
 
     model_config = ConfigDict(extra="allow")
 
@@ -454,7 +280,7 @@ class Throttle(BaseModel):
     ####################################################################
     # get_completion_time_secs
     ####################################################################
-    def get_completion_time_secs(self, num_requests: int, from_start: bool) -> IntFloat:
+    def get_completion_time_secs(self, num_requests: int, from_start: bool) -> float:
         """Calculate completion time secs for given number requests.
 
         Args:
@@ -476,7 +302,7 @@ class Throttle(BaseModel):
     ####################################################################
     # get_completion_time_ns
     ####################################################################
-    def get_completion_time_ns(self, num_requests: int, from_start: bool) -> IntFloat:
+    def get_completion_time_ns(self, num_requests: int, from_start: bool) -> float:
         """Calculate completion time ns for given number requests.
 
         Args:
@@ -498,7 +324,7 @@ class Throttle(BaseModel):
     ####################################################################
     # get_expected_num_completed_reqs
     ####################################################################
-    def get_expected_num_completed_reqs(self, interval: IntFloat) -> int:
+    def get_expected_num_completed_reqs(self, interval: float) -> int:
         """Calculate number of requests that completed.
 
         Args:

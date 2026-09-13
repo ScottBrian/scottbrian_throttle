@@ -89,8 +89,8 @@ interval is calculated as 1/*reqs_per_sec*. For example,
 Using the throttle in asyncio and non-asyncio environments
 ==========================================================
 
-The throttle can be used on an async defined function or a normal
-non-async function.
+The throttle can be used on an async defined function or a non-async
+function.
 
 When the throttle is used to decorate an async defined function, the
 caller is expected to be running in an asyncio environment and to invoke
@@ -116,7 +116,7 @@ loop will not be blocked. There are two possible scenarios:
        the throttle to cause the wrapper to be defined as an async
        function. In this scenario, the caller can invoke the function
        using the proper asyncio method, such as using await. The
-       throttle will use asyncio.sleep as needed to delay the function,
+       throttle will use asyncio.sleep as needed to delay the function
        and will use asyncio.to_thread to run the sync function in a
        separate thread.
 
@@ -301,13 +301,13 @@ active_state_ctx = contextvars.ContextVar("active_state")
 ########################################################################
 # Third Party
 ########################################################################
-# from pydantic import BaseModel, Field  # TypeAdapter,ValidationError
+from pydantic import validate_call, Field
 import wrapt
 from wrapt.wrappers import ObjectProxy as BaseObjectProxy
 from wrapt.wrappers import FunctionWrapper as FW
 from wrapt.wrappers import BoundFunctionWrapper as BFW
 import scottbrian_locking.se_lock as selk  # noqa F401
-from scottbrian_throttle.throttle_blocks import Throttle, ThrottleConfig
+from scottbrian_throttle.throttle_blocks import Throttle  # ThrottleConfig
 
 # from wrapt import FunctionWrapper as FW
 # from wrapt import BoundFunctionWrapper as BFW
@@ -447,11 +447,12 @@ def throttle(
     pass
 
 
+@validate_call
 def throttle(
     _wrapped: Optional[F] = None,
     *,
-    reqs_per_sec: IntFloat = 1,
-    bucket_size: IntFloat = 1,
+    reqs_per_sec: float = Field(gt=0, default=1),
+    bucket_size: float = Field(ge=1, default=1),
     convert_to_async: bool = False,
 ) -> Union[F, _FuncWithThrottleAttr[F]]:
     """Decorator to wrap a function in a throttle.
@@ -535,12 +536,12 @@ def throttle(
     #     introspection and support different cases, such as static
     #     and class methods.
     # ==================================================================
-
-    config = ThrottleConfig(
-        reqs_per_sec=reqs_per_sec,
-        bucket_size=bucket_size,
-        convert_to_async=convert_to_async,
-    )
+    #
+    # config = ThrottleConfig(
+    #     reqs_per_sec=reqs_per_sec,
+    #     bucket_size=bucket_size,
+    #     convert_to_async=convert_to_async,
+    # )
 
     # if _wrapped is None:
     #     return cast(
@@ -580,9 +581,9 @@ def throttle(
                     target,
                     key,
                     Throttle(
-                        reqs_per_sec=config.reqs_per_sec,
-                        bucket_size=config.bucket_size,
-                        convert_to_async=config.convert_to_async,
+                        reqs_per_sec=reqs_per_sec,
+                        bucket_size=bucket_size,
+                        convert_to_async=convert_to_async,
                         name=method_name,
                     ),
                 )
@@ -610,9 +611,9 @@ def throttle(
                     target,
                     key,
                     Throttle(
-                        reqs_per_sec=config.reqs_per_sec,
-                        bucket_size=config.bucket_size,
-                        convert_to_async=config.convert_to_async,
+                        reqs_per_sec=reqs_per_sec,
+                        bucket_size=bucket_size,
+                        convert_to_async=convert_to_async,
                         name=method_name,
                     ),
                 )
@@ -634,9 +635,9 @@ def throttle(
             _wrapped,
             _core_execution_logic,
             method_name,
-            config.reqs_per_sec,
-            config.bucket_size,
-            config.convert_to_async,
+            reqs_per_sec,
+            bucket_size,
+            convert_to_async,
             method_name,
         )
         return proxy
