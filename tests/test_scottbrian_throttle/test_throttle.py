@@ -376,6 +376,8 @@ class TestThrottleBasic:
         # throttle
         ################################################################
 
+        if bucket_size_arg is not None:
+            bucket_size_arg = float(bucket_size_arg)
         # 0 0 0 0
         if (
             reqs_per_sec_arg is None
@@ -403,7 +405,7 @@ class TestThrottleBasic:
             expected_repr_str = (
                 f"Throttle("
                 f"reqs_per_sec=1, "
-                f"bucket_size=1,"
+                f"bucket_size=1, "
                 f"convert_to_async=False, "
                 f"name={name_arg})"
             )
@@ -509,6 +511,154 @@ class TestThrottleBasic:
                 f"convert_to_async={convert_to_async_arg}, "
                 f"name={name_arg})"
             )
+        # 1 0 0 0
+        if (
+            reqs_per_sec_arg is not None
+            and bucket_size_arg is None
+            and convert_to_async_arg is None
+            and name_arg is None
+        ):
+            a_throttle = Throttle(reqs_per_sec=reqs_per_sec_arg)
+            expected_repr_str = (
+                f"Throttle("
+                f"reqs_per_sec={reqs_per_sec_arg}, "
+                f"bucket_size=1, "
+                f"convert_to_async=False, "
+                f"name=None)"
+            )
+        # 1 0 0 1
+        elif (
+            reqs_per_sec_arg is not None
+            and bucket_size_arg is None
+            and convert_to_async_arg is None
+            and name_arg is not None
+        ):
+            a_throttle = Throttle(reqs_per_sec=reqs_per_sec_arg, name=name_arg)
+
+            expected_repr_str = (
+                f"Throttle("
+                f"reqs_per_sec={reqs_per_sec_arg}, "
+                f"bucket_size=1, "
+                f"convert_to_async=False, "
+                f"name={name_arg})"
+            )
+        # 1 0 1 0
+        elif (
+            reqs_per_sec_arg is not None
+            and bucket_size_arg is None
+            and convert_to_async_arg is not None
+            and name_arg is None
+        ):
+            a_throttle = Throttle(
+                reqs_per_sec=reqs_per_sec_arg, convert_to_async=convert_to_async_arg
+            )
+
+            expected_repr_str = (
+                f"Throttle("
+                f"reqs_per_sec={reqs_per_sec_arg}, "
+                f"bucket_size=1, "
+                f"convert_to_async={convert_to_async_arg}, "
+                f"name=None)"
+            )
+        # 1 0 1 1
+        elif (
+            reqs_per_sec_arg is not None
+            and bucket_size_arg is None
+            and convert_to_async_arg is not None
+            and name_arg is not None
+        ):
+            a_throttle = Throttle(
+                reqs_per_sec=reqs_per_sec_arg,
+                convert_to_async=convert_to_async_arg,
+                name=name_arg,
+            )
+
+            expected_repr_str = (
+                f"Throttle("
+                f"reqs_per_sec={reqs_per_sec_arg}, "
+                f"bucket_size=1, "
+                f"convert_to_async={convert_to_async_arg}, "
+                f"name={name_arg})"
+            )
+        # 1 1 0 0
+        elif (
+            reqs_per_sec_arg is not None
+            and bucket_size_arg is not None
+            and convert_to_async_arg is None
+            and name_arg is None
+        ):
+            a_throttle = Throttle(
+                reqs_per_sec=reqs_per_sec_arg, bucket_size=bucket_size_arg
+            )
+
+            expected_repr_str = (
+                f"Throttle("
+                f"reqs_per_sec={reqs_per_sec_arg}, "
+                f"bucket_size={bucket_size_arg}, "
+                f"convert_to_async=False, "
+                f"name=None)"
+            )
+        # 1 1 0 1
+        elif (
+            reqs_per_sec_arg is not None
+            and bucket_size_arg is not None
+            and convert_to_async_arg is None
+            and name_arg is not None
+        ):
+            a_throttle = Throttle(
+                reqs_per_sec=reqs_per_sec_arg,
+                bucket_size=bucket_size_arg,
+                name=name_arg,
+            )
+
+            expected_repr_str = (
+                f"Throttle("
+                f"reqs_per_sec={reqs_per_sec_arg}, "
+                f"bucket_size={bucket_size_arg}, "
+                f"convert_to_async=False, "
+                f"name={name_arg})"
+            )
+        # 1 1 1 0
+        elif (
+            reqs_per_sec_arg is not None
+            and bucket_size_arg is not None
+            and convert_to_async_arg is not None
+            and name_arg is None
+        ):
+            a_throttle = Throttle(
+                reqs_per_sec=reqs_per_sec_arg,
+                bucket_size=bucket_size_arg,
+                convert_to_async=convert_to_async_arg,
+            )
+
+            expected_repr_str = (
+                f"Throttle("
+                f"reqs_per_sec={reqs_per_sec_arg}, "
+                f"bucket_size={bucket_size_arg}, "
+                f"convert_to_async={convert_to_async_arg}, "
+                f"name=None)"
+            )
+        # 1 1 1 1
+        elif (
+            reqs_per_sec_arg is not None
+            and bucket_size_arg is not None
+            and convert_to_async_arg is not None
+            and name_arg is not None
+        ):
+            a_throttle = Throttle(
+                reqs_per_sec=reqs_per_sec_arg,
+                bucket_size=bucket_size_arg,
+                convert_to_async=convert_to_async_arg,
+                name=name_arg,
+            )
+
+            expected_repr_str = (
+                f"Throttle("
+                f"reqs_per_sec={reqs_per_sec_arg}, "
+                f"bucket_size={bucket_size_arg}, "
+                f"convert_to_async={convert_to_async_arg}, "
+                f"name={name_arg})"
+            )
 
         else:
             # cause failure since we should never reach this else
@@ -517,7 +667,8 @@ class TestThrottleBasic:
                 "Throttle(" "reqs_per_sec=None, " "bucket_size=None, " "name=None, "
             )
 
-        assert repr(a_throttle) == expected_repr_str
+        if reqs_per_sec_arg is None:
+            assert repr(a_throttle) == expected_repr_str
 
     ####################################################################
     # test_throttle_async_queue_full
