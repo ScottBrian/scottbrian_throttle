@@ -103,16 +103,15 @@ from typing import (
     Any,
     Callable,
     Final,
-    Optional,
     TYPE_CHECKING,
     Type,
-    Union,
 )
 
 import scottbrian_locking.se_lock as selk  # noqa F401
 from pydantic import BaseModel, Field, ConfigDict
 from scottbrian_utils.pauser import Pauser
 from wrapt.decorators import decorator  # type: ignore
+
 
 ########################################################################
 # Local
@@ -123,44 +122,44 @@ class Throttle(BaseModel):
     """Throttle class.
 
 
-        Args:
-            reqs_per_sec: The number of requests that can be made in
-                          one second.
-            bucket_size: Specifies the number of requests that can be
-                         conceptually placed into the bucket for the
-                         leaky bucket algorithm. As requests arrive,
-                         the bucket is checked to determine if it has
-                         room for the request. If so, it is placed into
-                         the bucket and sent without delay. If not, the
-                         request is delayed until enough time has
-                         elapsed for the bucket to leak out enough to
-                         allow the request to fit. A specification of
-                         one for the bucket_size will effectively
-                         cause non-leaky bucket behavior, meaning that
-                         each request that arrives before the previous
-                         request interval has elapsed will be delayed.
-                         The bucket_size must be greater than or equal
-                         to 1.
-            convert_to_async: If the function being throttled is
-                              synchronous and the user is in an asyncio
-                              environment, the user can specify
-                              *convert_to_async=True* to request that
-                              asyncio.sleep be used for delay if needed
-                              and the function is to be run in a
-                              separate thread using asyncio.to_thread.
-                              Otherwise, if *convert_to_async=False*,
-                              the use can use asyncio.to_thread to
-                              run the synchronous function is a separate
-                              thread and time.sleep will be used for
-                              any delay as needed. Note that
-                              *convert_to_async* has no meaning is a
-                              non-asyncio environment.
-            name: The name of the function that was wrapped by the
-                  throttle decorator, meaning the function that is being
-                  throttled.
+    Args:
+        reqs_per_sec: The number of requests that can be made in
+                      one second.
+        bucket_size: Specifies the number of requests that can be
+                     conceptually placed into the bucket for the
+                     leaky bucket algorithm. As requests arrive,
+                     the bucket is checked to determine if it has
+                     room for the request. If so, it is placed into
+                     the bucket and sent without delay. If not, the
+                     request is delayed until enough time has
+                     elapsed for the bucket to leak out enough to
+                     allow the request to fit. A specification of
+                     one for the bucket_size will effectively
+                     cause non-leaky bucket behavior, meaning that
+                     each request that arrives before the previous
+                     request interval has elapsed will be delayed.
+                     The bucket_size must be greater than or equal
+                     to 1.
+        convert_to_async: If the function being throttled is
+                          synchronous and the user is in an asyncio
+                          environment, the user can specify
+                          *convert_to_async=True* to request that
+                          asyncio.sleep be used for delay if needed
+                          and the function is to be run in a
+                          separate thread using asyncio.to_thread.
+                          Otherwise, if *convert_to_async=False*,
+                          the use can use asyncio.to_thread to
+                          run the synchronous function is a separate
+                          thread and time.sleep will be used for
+                          any delay as needed. Note that
+                          *convert_to_async* has no meaning is a
+                          non-asyncio environment.
+        name: The name of the function that was wrapped by the
+              throttle decorator, meaning the function that is being
+              throttled.
 
 
-        """
+    """
 
     model_config = ConfigDict(extra="allow")
 
@@ -169,7 +168,7 @@ class Throttle(BaseModel):
     )
     bucket_size: float = Field(ge=1, default=1, description="Size of leaky bucket")
     convert_to_async: bool = False
-    name: str = ""
+    name: str | None = None
 
     class Mode(Enum):
         SYNC = auto()
