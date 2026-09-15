@@ -453,7 +453,7 @@ def throttle(
     *,
     reqs_per_sec: float = Field(gt=0, default=1),
     bucket_size: float = Field(ge=1, default=1),
-    convert_to_async: bool = False,
+    convert_to_async: bool = Field(default=False),
 ) -> Union[F, _FuncWithThrottleAttr[F]]:
     """Decorator to wrap a function in a throttle.
 

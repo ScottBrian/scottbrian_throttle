@@ -488,7 +488,7 @@ class Throttle(BaseModel):
         #     },
         # )
 
-        self.logger.error(
+        self.logger.debug(
             f"Exception in {context_name} for '{self.name}': {e}",
             exc_info=True,
             extra={
