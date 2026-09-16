@@ -206,7 +206,7 @@ loop will not be blocked. There are two possible scenarios:
         for idx in range(10):
             await func5(idx, start_time)
 
-    asyncio.run(main())
+    asyncio.run(main_loop())
 
     Expected output for Example 5::
 
