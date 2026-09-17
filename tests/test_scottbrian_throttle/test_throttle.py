@@ -1113,91 +1113,50 @@ class TestThrottle:
         a_throttle = request_validator.t_throttle
         throttle_mode = request_validator.throttle_mode
 
-        # call_args: str
-        #
-        # if throttle_mode == Mode.SYNC:
-        #     send_req = "a_throttle.sync_send_request"
-        # else:
-        #     send_req = "await a_throttle.async_send_request"
-        #
-        # if request_style == 0:
-        #     call_args = f"{send_req}(request_validator.request0b)"
-        # elif request_style == 1:
-        #     call_args = f"{send_req}(request_validator.request1b, idx)"
-        # elif request_style == 2:
-        #     call_args = (
-        #         f"{send_req}(request_validator.request2b, idx, "
-        #         "request_validator.reqs_per_sec)"
-        #     )
-        # elif request_style == 3:
-        #     call_args = f"{send_req}(request_validator.request3b, req_id=idx)"
-        # elif request_style == 4:
-        #     call_args = (
-        #         f"{send_req}(request_validator.request4b, "
-        #         "req_id=idx, send_interval=request_validator.send_interval)"
-        #     )
-        # elif request_style == 5:
-        #     call_args = (
-        #         f"{send_req}(request_validator.request5b, idx, "
-        #         "send_interval=request_validator.send_interval,)"
-        #     )
-        # elif request_style == 6:
-        #     call_args = (
-        #         f"{send_req}(request_validator.request6b, "
-        #         "idx, "
-        #         "request_validator.reqs_per_sec, "
-        #         "bucket_size=request_validator.bucket_size, "
-        #         "send_interval=request_validator.send_interval,)"
-        #     )
-        # else:
-        #     raise BadRequestStyleArg("The request style arg must be 0 to 6")
-        #
-        # for idx, s_interval in enumerate(request_validator.send_intervals):
-        #     request_item = RequestItem(
-        #         req_id=idx,
-        #         create_time_ns=perf_counter_ns(),
-        #         throttle_mode=throttle_mode,
-        #         send_interval=s_interval,
-        #     )
+        call_args: str
 
-        call_args: tuple[Any, ...] = ()
-        call_kwargs: dict[str, Any] = {}
+        if throttle_mode == Mode.SYNC:
+            send_req = "a_throttle.sync_send_request"
+            targ_prefix = ""
+        else:
+            send_req = "a_throttle.async_send_request"
+            targ_prefix = "async_"
+
+        if request_style == 0:
+            call_args = f"{send_req}(request_validator.{targ_prefix}request0b)"
+        elif request_style == 1:
+            call_args = f"{send_req}(request_validator.{targ_prefix}request1b, idx)"
+        elif request_style == 2:
+            call_args = (
+                f"{send_req}(request_validator.{targ_prefix}request2b, idx, "
+                "request_validator.reqs_per_sec)"
+            )
+        elif request_style == 3:
+            call_args = (
+                f"{send_req}(request_validator.{targ_prefix}request3b, req_id=idx)"
+            )
+        elif request_style == 4:
+            call_args = (
+                f"{send_req}(request_validator.{targ_prefix}request4b, "
+                "req_id=idx, send_interval=request_validator.send_interval)"
+            )
+        elif request_style == 5:
+            call_args = (
+                f"{send_req}(request_validator.{targ_prefix}request5b, idx, "
+                "send_interval=request_validator.send_interval,)"
+            )
+        elif request_style == 6:
+            call_args = (
+                f"{send_req}(request_validator.{targ_prefix}request6b, "
+                "idx, "
+                "request_validator.reqs_per_sec, "
+                "bucket_size=request_validator.bucket_size, "
+                "send_interval=request_validator.send_interval,)"
+            )
+        else:
+            raise BadRequestStyleArg("The request style arg must be 0 to 6")
 
         for idx, s_interval in enumerate(request_validator.send_intervals):
-            if request_style == 0:
-                call_args = (request_validator.request0b,)
-            elif request_style == 1:
-                call_args = (request_validator.request1b, idx)
-            elif request_style == 2:
-                call_args = (
-                    request_validator.request2b,
-                    idx,
-                    request_validator.reqs_per_sec,
-                )
-            elif request_style == 3:
-                call_args = (request_validator.request3b,)
-                call_kwargs = {"req_id": idx}
-            elif request_style == 4:
-                call_args = (request_validator.request4b,)
-                call_kwargs = {
-                    "req_id": idx,
-                    "send_interval": request_validator.send_interval,
-                }
-            elif request_style == 5:
-                call_args = (request_validator.request5b, idx)
-                call_kwargs = {"send_interval": request_validator.send_interval}
-            elif request_style == 6:
-                call_args = (
-                    request_validator.request6b,
-                    idx,
-                    request_validator.reqs_per_sec,
-                )
-                call_kwargs = {
-                    "bucket_size": request_validator.bucket_size,
-                    "send_interval": request_validator.send_interval,
-                }
-            else:
-                raise BadRequestStyleArg("The request style arg must be 0 to 6")
             request_item = RequestItem(
                 req_id=idx,
                 create_time_ns=perf_counter_ns(),
@@ -1210,52 +1169,15 @@ class TestThrottle:
             request_item.send_time_ns = perf_counter_ns()
             request_validator.request_deque.appendleft(request_item)
             if throttle_mode == Mode.SYNC:
-                rc = a_throttle.sync_send_request(*call_args, **call_kwargs)
+                rc = eval(call_args)
             else:
 
-                async def main_loop(a_throttle: Throttle):
+                async def main_loop(
+                    a_throttle: Throttle, request_validator: RequestValidator, idx: int
+                ):
+                    return await eval(call_args)
 
-                    async def request42() -> int:
-                        """Request0 target.
-
-                        Returns:
-                            the index reflected back
-
-                        Notes:
-                              1) this code is serialized by the throttle lock
-                        """
-
-                        # logger.debug("request0b entered")
-                        # logger.debug(f"{self.request_item=}")
-                        request_validator.idx += 1
-                        request_item = request_validator.request_deque.pop()
-                        assert request_item.req_id == request_validator.idx
-                        request_item.arrival_idx = (
-                            request_validator.idx
-                        )  # first is zero
-                        request_item.actual_func_arrival_time_ns = perf_counter_ns()
-                        request_item.throttle_arrival_time_ns = (
-                            request_validator.t_throttle._arrival_time_ns
-                        )
-                        request_item.throttle_next_target_time_ns = (
-                            request_validator.t_throttle._next_target_time_ns
-                        )
-                        request_item.throttle_wait_time_ns = (
-                            request_validator.t_throttle._wait_time_ns
-                        )
-                        request_item.throttle_sent_time_ns = (
-                            request_validator.t_throttle.sent_time_ns
-                        )
-                        request_validator.request_items.append(request_item)
-
-                        # logger.debug("request0b exiting")
-                        return request_item.req_id
-
-                    # rc = await a_throttle.async_send_request(*call_args, **call_kwargs)
-                    rc = await a_throttle.async_send_request(request42)
-                    return rc
-
-                rc = asyncio.run(main_loop(a_throttle))
+                rc = asyncio.run(main_loop(a_throttle, request_validator, idx))
 
             request_item.return_time_ns = perf_counter_ns()
             exp_rc = idx
@@ -1277,6 +1199,7 @@ class TestThrottle:
         """
         pauser = Pauser()
         a_throttle = request_validator.t_throttle
+        throttle_mode = request_validator.throttle_mode
 
         for idx, s_interval in enumerate(request_thread_item.send_intervals):
             request_item = RequestItem(
@@ -1289,9 +1212,21 @@ class TestThrottle:
             if s_interval > 0.0:
                 pauser.pause(s_interval)
             request_item.send_time_ns = perf_counter_ns()
-            _ = a_throttle.sync_send_request(
-                request_validator.request0c, request_item=request_item
-            )
+
+            if throttle_mode == Mode.SYNC:
+                _ = a_throttle.sync_send_request(
+                    request_validator.request0c, request_item=request_item
+                )
+            else:
+
+                async def main_loop(
+                    a_throttle: Throttle, request_validator: RequestValidator, idx: int
+                ):
+                    await a_throttle.async_send_request(
+                        request_validator.async_request0c, request_item=request_item
+                    )
+
+                asyncio.run(main_loop(a_throttle, request_validator, idx))
             request_item.return_time_ns = perf_counter_ns()
 
     ####################################################################
@@ -2066,6 +2001,9 @@ class RequestValidator:
     ####################################################################
     # request0c
     ####################################################################
+    async def async_request0c(self, request_item: RequestItem) -> int:
+        return self.request0c(request_item)
+
     def request0c(self, request_item: RequestItem) -> int:
         """Request0 target.
 
@@ -2091,6 +2029,9 @@ class RequestValidator:
     ####################################################################
     # request0b
     ####################################################################
+    async def async_request0b(self) -> int:
+        return self.request0b()
+
     def request0b(self) -> int:
         """Request0 target.
 
@@ -2120,6 +2061,9 @@ class RequestValidator:
     ####################################################################
     # request1b
     ####################################################################
+    async def async_request1b(self, req_id: int) -> int:
+        return self.request1b(req_id)
+
     def request1b(self, req_id: int) -> int:
         """Request1 target.
 
@@ -2145,6 +2089,9 @@ class RequestValidator:
     ####################################################################
     # request2b
     ####################################################################
+    async def async_request2b(self, req_id: int, reqs_per_sec: float) -> int:
+        return self.request2b(req_id, reqs_per_sec)
+
     # def request2b(self, idx: int, requests: int,
     # obtained_nowait: bool) -> int:
     def request2b(self, req_id: int, reqs_per_sec: float) -> int:
@@ -2174,6 +2121,9 @@ class RequestValidator:
     ####################################################################
     # request3b
     ####################################################################
+    async def async_request3b(self, *, req_id: int) -> int:
+        return self.request3b(req_id=req_id)
+
     def request3b(self, *, req_id: int) -> int:
         """Request3 target.
 
@@ -2200,6 +2150,9 @@ class RequestValidator:
     ####################################################################
     # request4b
     ####################################################################
+    async def async_request4b(self, *, req_id: int, send_interval: float) -> int:
+        return self.request4b(req_id=req_id, send_interval=send_interval)
+
     def request4b(self, *, req_id: int, send_interval: float) -> int:
         """Request4 target.
 
@@ -2227,6 +2180,9 @@ class RequestValidator:
     ####################################################################
     # request5b
     ####################################################################
+    async def async_request5b(self, req_id: int, *, send_interval: float) -> int:
+        return self.request5b(req_id, send_interval=send_interval)
+
     def request5b(self, req_id: int, *, send_interval: float) -> int:
         """Request5 target.
 
@@ -2254,6 +2210,18 @@ class RequestValidator:
     ####################################################################
     # request6b
     ####################################################################
+    async def async_request6b(
+        self,
+        req_id: int,
+        reqs_per_sec: float,
+        *,
+        bucket_size: float,
+        send_interval: float,
+    ) -> int:
+        return self.request6b(
+            req_id, reqs_per_sec, bucket_size=bucket_size, send_interval=send_interval
+        )
+
     def request6b(
         self,
         req_id: int,
