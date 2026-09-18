@@ -71,6 +71,7 @@ class IncorrectWhichThrottle(ErrorTstThrottle):
 
 class Mode(Enum):
     SYNC = auto()
+    SYNC_CONVERT = auto()
     ASYNC = auto()
 
 
@@ -878,7 +879,9 @@ class TestThrottle:
     ####################################################################
     # test_throttle_args_style
     ####################################################################
-    @pytest.mark.parametrize("throttle_mode_arg", (Mode.SYNC, Mode.ASYNC))
+    @pytest.mark.parametrize(
+        "throttle_mode_arg", (Mode.SYNC, Mode.SYNC_CONVERT, Mode.ASYNC)
+    )
     @pytest.mark.parametrize("request_style_arg", (0, 1, 2, 3, 4, 5, 6))
     def test_throttle_args_style(
         self, throttle_mode_arg: Mode, request_style_arg: int
@@ -904,7 +907,9 @@ class TestThrottle:
     ####################################################################
     # test_throttle_multi_threads1
     ####################################################################
-    @pytest.mark.parametrize("throttle_mode_arg", (Mode.SYNC, Mode.ASYNC))
+    @pytest.mark.parametrize(
+        "throttle_mode_arg", (Mode.SYNC, Mode.SYNC_CONVERT, Mode.ASYNC)
+    )
     @pytest.mark.parametrize("num_threads_arg", (0, 1, 2))
     @pytest.mark.parametrize("reqs_per_sec_arg", (0.25, 0.33, 0.5))
     @pytest.mark.parametrize("bucket_size_arg", (1, 1.25, 1.5, 2))
@@ -938,7 +943,9 @@ class TestThrottle:
     ####################################################################
     # test_throttle_multi_threads2
     ####################################################################
-    @pytest.mark.parametrize("throttle_mode_arg", (Mode.SYNC, Mode.ASYNC))
+    @pytest.mark.parametrize(
+        "throttle_mode_arg", (Mode.SYNC, Mode.SYNC_CONVERT, Mode.ASYNC)
+    )
     @pytest.mark.parametrize("num_threads_arg", (0, 2, 8))
     @pytest.mark.parametrize("reqs_per_sec_arg", (1, 2, 3))
     @pytest.mark.parametrize("bucket_size_arg", (1, 1.5, 2, 3))
@@ -1031,12 +1038,21 @@ class TestThrottle:
         if num_threads > 1:
             num_reqs_to_do *= num_threads
 
+        ################################################################
+        # set sync_convert
+        ################################################################
+        if throttle_mode == Mode.SYNC_CONVERT:
+            sync_convert = True
+        else:
+            sync_convert = False
+
         ##############################################################
         # Instantiate Throttle
         ##############################################################
         a_throttle = Throttle(
             reqs_per_sec=reqs_per_sec,
             bucket_size=bucket_size,
+            convert_to_async=sync_convert,
         )
 
         ################################################################
@@ -1135,9 +1151,12 @@ class TestThrottle:
 
         if throttle_mode == Mode.SYNC:
             send_req = "a_throttle.sync_send_request"
-            targ_prefix = ""
         else:
             send_req = "a_throttle.async_send_request"
+
+        if throttle_mode == Mode.SYNC or throttle_mode == Mode.SYNC_CONVERT:
+            targ_prefix = ""
+        else:
             targ_prefix = "async_"
 
         if request_style == 0:
@@ -1266,9 +1285,14 @@ class TestThrottle:
                 await asyncio.sleep(s_interval)
 
             request_item.send_time_ns = perf_counter_ns()
-            await a_throttle.async_send_request(
-                request_validator.async_request0c, request_item=request_item
-            )
+            if throttle_mode == Mode.SYNC_CONVERT:
+                await a_throttle.async_send_request(
+                    request_validator.request0c, request_item=request_item
+                )
+            else:
+                await a_throttle.async_send_request(
+                    request_validator.async_request0c, request_item=request_item
+                )
 
             request_item.return_time_ns = perf_counter_ns()
 
@@ -1282,7 +1306,9 @@ class TestPieThrottle:
     ####################################################################
     # test_pie_throttle_args_style
     ####################################################################
-    @pytest.mark.parametrize("throttle_mode_arg", (Mode.SYNC, Mode.ASYNC))
+    @pytest.mark.parametrize(
+        "throttle_mode_arg", (Mode.SYNC, Mode.SYNC_CONVERT, Mode.ASYNC)
+    )
     @pytest.mark.parametrize("request_style_arg", (0, 1, 2, 3, 4, 5, 6))
     def test_pie_throttle_args_style(
         self, throttle_mode_arg: Mode, request_style_arg: int
@@ -1309,6 +1335,13 @@ class TestPieThrottle:
             send_interval, num_reqs_to_do
         )
 
+        ################################################################
+        # set sync_convert
+        ################################################################
+        if throttle_mode_arg == Mode.SYNC_CONVERT:
+            sync_convert = True
+        else:
+            sync_convert = False
         ################################################################
         # Decorate functions with throttle
         ################################################################
@@ -1350,7 +1383,7 @@ class TestPieThrottle:
 
         async_call_list.append(("async_f0", " ", "request_id + 42 + 0"))
 
-        @throttle(reqs_per_sec=reqs_per_sec_arg)
+        @throttle(reqs_per_sec=reqs_per_sec_arg, convert_to_async=sync_convert)
         def f0() -> Any:
 
             request_item = set_idx_and_times()
@@ -1369,7 +1402,7 @@ class TestPieThrottle:
 
         async_call_list.append(("async_f1", "(request_id)", "request_id + 42 + 1"))
 
-        @throttle(reqs_per_sec=reqs_per_sec_arg)
+        @throttle(reqs_per_sec=reqs_per_sec_arg, convert_to_async=sync_convert)
         def f1(req_id: int) -> Any:
 
             request_item = set_idx_and_times()
@@ -1393,7 +1426,7 @@ class TestPieThrottle:
             ("async_f2", "(request_id, reqs_per_sec_arg)", "request_id + 42 + 2")
         )
 
-        @throttle(reqs_per_sec=reqs_per_sec_arg)
+        @throttle(reqs_per_sec=reqs_per_sec_arg, convert_to_async=sync_convert)
         def f2(req_id: int, reqs_per_sec: float) -> Any:
 
             request_item = set_idx_and_times()
@@ -1419,7 +1452,7 @@ class TestPieThrottle:
             ("async_f3", "(req_id=request_id)", "request_id + 42 + 3")
         )
 
-        @throttle(reqs_per_sec=reqs_per_sec_arg)
+        @throttle(reqs_per_sec=reqs_per_sec_arg, convert_to_async=sync_convert)
         def f3(*, req_id: int) -> Any:
 
             request_item = set_idx_and_times()
@@ -1447,7 +1480,7 @@ class TestPieThrottle:
             )
         )
 
-        @throttle(reqs_per_sec=reqs_per_sec_arg)
+        @throttle(reqs_per_sec=reqs_per_sec_arg, convert_to_async=sync_convert)
         def f4(*, req_id: int, interval: float) -> Any:
 
             request_item = set_idx_and_times()
@@ -1482,7 +1515,7 @@ class TestPieThrottle:
             )
         )
 
-        @throttle(reqs_per_sec=reqs_per_sec_arg)
+        @throttle(reqs_per_sec=reqs_per_sec_arg, convert_to_async=sync_convert)
         def f5(req_id: int, *, interval: float) -> Any:
 
             request_item = set_idx_and_times()
@@ -1521,7 +1554,7 @@ class TestPieThrottle:
             )
         )
 
-        @throttle(reqs_per_sec=reqs_per_sec_arg)
+        @throttle(reqs_per_sec=reqs_per_sec_arg, convert_to_async=sync_convert)
         def f6(
             req_id: int, reqs_per_sec: float, *, bucket_size: float, interval: float
         ) -> Any:
@@ -1545,7 +1578,7 @@ class TestPieThrottle:
         ################################################################
         # Instantiate the validator
         ################################################################
-        if throttle_mode_arg == Mode.SYNC:
+        if throttle_mode_arg == Mode.SYNC or throttle_mode_arg == Mode.SYNC_CONVERT:
             t_throttle = eval(call_list[request_style_arg][0]).throttle
         else:
             t_throttle = eval(async_call_list[request_style_arg][0]).throttle
@@ -1588,24 +1621,50 @@ class TestPieThrottle:
                     ml_request_item.send_time_ns = perf_counter_ns()
                     request_validator.request_deque.appendleft(ml_request_item)
                     if request_style_arg == 0:
-                        rc = await async_f0()
+                        if throttle_mode_arg == Mode.SYNC_CONVERT:
+                            rc = await f0()
+                        else:
+                            rc = await async_f0()
                     elif request_style_arg == 1:
-                        rc = await async_f1(request_id)
+                        if throttle_mode_arg == Mode.SYNC_CONVERT:
+                            rc = await f1(request_id)
+                        else:
+                            rc = await async_f1(request_id)
                     elif request_style_arg == 2:
-                        rc = await async_f2(request_id, reqs_per_sec_arg)
+                        if throttle_mode_arg == Mode.SYNC_CONVERT:
+                            rc = await f2(request_id, reqs_per_sec_arg)
+                        else:
+                            rc = await async_f2(request_id, reqs_per_sec_arg)
                     elif request_style_arg == 3:
-                        rc = await async_f3(req_id=request_id)
+                        if throttle_mode_arg == Mode.SYNC_CONVERT:
+                            rc = await f3(req_id=request_id)
+                        else:
+                            rc = await async_f3(req_id=request_id)
                     elif request_style_arg == 4:
-                        rc = await async_f4(req_id=request_id, interval=s_interval)
+                        if throttle_mode_arg == Mode.SYNC_CONVERT:
+                            rc = await f4(req_id=request_id, interval=s_interval)
+                        else:
+                            rc = await async_f4(req_id=request_id, interval=s_interval)
                     elif request_style_arg == 5:
-                        rc = await async_f5(req_id=request_id, interval=s_interval)
+                        if throttle_mode_arg == Mode.SYNC_CONVERT:
+                            rc = await f5(req_id=request_id, interval=s_interval)
+                        else:
+                            rc = await async_f5(req_id=request_id, interval=s_interval)
                     else:  # request_style_arg == 6:
-                        rc = await async_f6(
-                            request_id,
-                            reqs_per_sec_arg,
-                            bucket_size=1,
-                            interval=s_interval,
-                        )
+                        if throttle_mode_arg == Mode.SYNC_CONVERT:
+                            rc = await f6(
+                                request_id,
+                                reqs_per_sec_arg,
+                                bucket_size=1,
+                                interval=s_interval,
+                            )
+                        else:
+                            rc = await async_f6(
+                                request_id,
+                                reqs_per_sec_arg,
+                                bucket_size=1,
+                                interval=s_interval,
+                            )
                     ml_request_item.return_time_ns = perf_counter_ns()
                     assert rc == eval(async_call_list[request_style_arg][2])
 
@@ -1616,7 +1675,9 @@ class TestPieThrottle:
     ####################################################################
     # test_pie_throttle
     ####################################################################
-    @pytest.mark.parametrize("throttle_mode_arg", (Mode.SYNC, Mode.ASYNC))
+    @pytest.mark.parametrize(
+        "throttle_mode_arg", (Mode.SYNC, Mode.SYNC_CONVERT, Mode.ASYNC)
+    )
     @pytest.mark.parametrize("reqs_per_sec_arg", (1, 2, 3))
     @pytest.mark.parametrize("bucket_size_arg", (1, 1.3, 2, 3))
     @pytest.mark.parametrize("send_interval_mult_arg", (0.0, 0.9, 1.0, 1.1))
@@ -1649,6 +1710,14 @@ class TestPieThrottle:
         send_intervals = TestThrottle.build_send_intervals(
             send_interval, num_reqs_to_do
         )
+
+        ################################################################
+        # set sync_convert
+        ################################################################
+        if throttle_mode_arg == Mode.SYNC_CONVERT:
+            sync_convert = True
+        else:
+            sync_convert = False
 
         ################################################################
         # set_idx_and_times
@@ -1687,6 +1756,7 @@ class TestPieThrottle:
         @throttle(
             reqs_per_sec=reqs_per_sec_arg,
             bucket_size=bucket_size_arg,
+            convert_to_async=sync_convert,
         )
         def f0() -> Any:
             set_idx_and_times()
@@ -1695,10 +1765,11 @@ class TestPieThrottle:
         ################################################################
         # Instantiate the validator
         ################################################################
-        if throttle_mode_arg == Mode.SYNC:
+        if throttle_mode_arg == Mode.SYNC or throttle_mode_arg == Mode.SYNC_CONVERT:
             t_throttle = f0.throttle
         else:
             t_throttle = async_f0.throttle
+
         request_validator = RequestValidator(
             reqs_per_sec=reqs_per_sec_arg,
             throttle_mode=throttle_mode_arg,
@@ -1737,8 +1808,10 @@ class TestPieThrottle:
                         await asyncio.sleep(s_interval)
                     ml_request_item.send_time_ns = perf_counter_ns()
                     request_validator.request_deque.appendleft(ml_request_item)
-                    rc = await async_f0()
-
+                    if throttle_mode_arg == Mode.SYNC_CONVERT:
+                        rc = await f0()
+                    else:
+                        rc = await async_f0()
                     ml_request_item.return_time_ns = perf_counter_ns()
                     assert rc == 0
 
@@ -1788,15 +1861,11 @@ class TestThrottleMisc:
     ####################################################################
     # test_get_interval_secs
     ####################################################################
-    @pytest.mark.parametrize("throttle_mode_arg", (Mode.SYNC, Mode.ASYNC))
     @pytest.mark.parametrize("reqs_per_sec_arg", (0.5, 1, 2, 3))
-    def test_get_interval_secs(
-        self, throttle_mode_arg: Mode, reqs_per_sec_arg: float
-    ) -> None:
+    def test_get_interval_secs(self, reqs_per_sec_arg: float) -> None:
         """Method to test get_interval in seconds.
 
         Args:
-            throttle_mode_arg: sync or async
             reqs_per_sec_arg: number of requests per second specified
                 for the throttle
 
@@ -1814,15 +1883,11 @@ class TestThrottleMisc:
     ####################################################################
     # test_get_completion_time_secs
     ####################################################################
-    @pytest.mark.parametrize("throttle_mode_arg", (Mode.SYNC, Mode.ASYNC))
     @pytest.mark.parametrize("reqs_per_sec_arg", (0.2, 1, 2, 3))
-    def test_get_completion_time_secs(
-        self, throttle_mode_arg: Mode, reqs_per_sec_arg: float
-    ) -> None:
+    def test_get_completion_time_secs(self, reqs_per_sec_arg: float) -> None:
         """Method to test get completion time in seconds.
 
         Args:
-            throttle_mode_arg: sync or async
             reqs_per_sec_arg: number of requests per second specified
                 for the throttle
 
