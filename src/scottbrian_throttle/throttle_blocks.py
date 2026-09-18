@@ -362,7 +362,6 @@ class Throttle(BaseModel):
         ############################################################
         # SYNC mode
         ############################################################
-        self.logger.debug(f"sync_send_request entered: {func=}")
         with self.sync_lock:
             self._arrival_time_ns = time.perf_counter_ns()
             self._wait_time_ns = max(
@@ -425,7 +424,6 @@ class Throttle(BaseModel):
         ############################################################
         # ASYNC mode
         ############################################################
-        # self.logger.debug(f"async_send_request entered: {func=}")
         async with self.async_lock:
             self._arrival_time_ns = time.perf_counter_ns()
             self._wait_time_ns = max(
