@@ -18,14 +18,20 @@ classifiers = [
     "Programming Language :: Python :: 3.14",
     "Operating System :: Microsoft :: Windows :: Windows 11"]
 dependencies = [
+    "pydantic ~=2.13",
+    "sentry-sdk ~=2.69",
     "scottbrian-locking ~=3.0",
     "scottbrian-utils ~=7.1",
-    "wrapt ~=2.2",
+    "wrapt ~=2.4",
 ]
 
 [tool.setuptools]
 packages = ["scottbrian_throttle"]
 package-dir = { "" = "src" }
+
+[tool.mypy]
+mypy_path = "C:\\Users\\Tiger\\PycharmProjects\\scottbrian_throttle\\.venv314\\Lib\\site-packages"
+
 
 [project.urls]
 Documentation = "https://scottbrian-throttle.readthedocs.io/en/latest/"

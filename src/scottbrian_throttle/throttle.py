@@ -279,51 +279,38 @@ bucket increases.
 
 """
 
-import contextvars
-
 ########################################################################
 # Standard Library
 ########################################################################
+import contextvars
+import inspect
 from typing import (
     Any,
     Callable,
     cast,
-    Optional,
     overload,
     Protocol,
-    TypeAlias,
     TypeVar,
-    Union,
 )
 
-active_state_ctx = contextvars.ContextVar("active_state")
-
+from pydantic import validate_call, Field
 ########################################################################
 # Third Party
 ########################################################################
-from pydantic import validate_call, Field
-import wrapt
-from wrapt.wrappers import ObjectProxy as BaseObjectProxy
-from wrapt.wrappers import FunctionWrapper as FW
-from wrapt.wrappers import BoundFunctionWrapper as BFW
-import scottbrian_locking.se_lock as selk  # noqa F401
-from scottbrian_throttle.throttle_blocks import Throttle  # ThrottleConfig
+from wrapt import PartialCallableObjectProxy
+from wrapt.wrappers import BoundFunctionWrapper
+from wrapt.wrappers import FunctionWrapper
 
-# from wrapt import FunctionWrapper as FW
-# from wrapt import BoundFunctionWrapper as BFW
-from wrapt.decorators import decorator  # type: ignore
-import inspect
+from scottbrian_throttle.throttle_blocks import Throttle  # ThrottleConfig
 
 ########################################################################
 # Local
 ########################################################################
 
-########################################################################
-# type aliases and TypeVars
-########################################################################
-IntFloat: TypeAlias = Union[int, float]
-OptIntFloat: TypeAlias = Optional[IntFloat]
 
+active_state_ctx: contextvars.ContextVar[Throttle] = contextvars.ContextVar(
+    "active_state"
+)
 
 ########################################################################
 # Pie Throttle Decorator
@@ -356,9 +343,9 @@ def _add_throttle_attr(func: F) -> _FuncWithThrottleAttr[F]:
 
 # ---- Wrapt Descriptors (Preserved from yesterday) ----
 # class StatefulBoundWrapper(wrapt.BoundFunctionWrapper):
-class StatefulBoundWrapper(BFW):
+class StatefulBoundWrapper(BoundFunctionWrapper):
     @property
-    def throttle(self):
+    def throttle(self) -> Throttle:
         try:
             return active_state_ctx.get()
         except LookupError:
@@ -378,23 +365,23 @@ class StatefulBoundWrapper(BFW):
                     name=w._method_name,
                 ),
             )
-        return getattr(inst, key)
+        return cast(Throttle, getattr(inst, key))
 
 
 # class StatefulFunctionWrapper(wrapt.FunctionWrapper):
-class StatefulFunctionWrapper(FW):
+class StatefulFunctionWrapper(FunctionWrapper):
     __bound_function_wrapper__ = StatefulBoundWrapper
 
     def __init__(
         self,
-        wrapped,
-        wrapper_func,
-        method_name,
-        reqs_per_sec,
-        bucket_size,
-        convert_to_async,
-        name,
-    ):
+        wrapped: F,
+        wrapper_func: F,
+        method_name: str,
+        reqs_per_sec: float,
+        bucket_size: float,
+        convert_to_async: bool,
+        name: str,
+    ) -> None:
         super().__init__(wrapped, wrapper_func)
         self._method_name = method_name
         self._reqs_per_sec = reqs_per_sec
@@ -403,7 +390,7 @@ class StatefulFunctionWrapper(FW):
         self.name = name
 
     @property
-    def throttle(self):
+    def throttle(self) -> Throttle:
         try:
             return active_state_ctx.get()
         except LookupError:
@@ -420,7 +407,7 @@ class StatefulFunctionWrapper(FW):
                     name=self._method_name,
                 ),
             )
-        return getattr(self.__wrapped__, key)
+        return cast(Throttle, getattr(self.__wrapped__, key))
 
 
 ########################################################################
@@ -430,31 +417,31 @@ class StatefulFunctionWrapper(FW):
 def throttle(
     _wrapped: F,
     *,
-    reqs_per_sec: IntFloat = 1,
-    bucket_size: IntFloat = 1,
+    reqs_per_sec: float = 1,
+    bucket_size: float = 1,
     convert_to_async: bool = False,
-) -> _FuncWithThrottleAttr[F]:
+) -> F:  # _FuncWithThrottleAttr[F]:
     pass
 
 
 @overload
 def throttle(
     *,
-    reqs_per_sec: IntFloat = 1,
-    bucket_size: IntFloat = 1,
+    reqs_per_sec: float = 1,
+    bucket_size: float = 1,
     convert_to_async: bool = False,
-) -> Callable[[F], _FuncWithThrottleAttr[F]]:
+) -> PartialCallableObjectProxy:  # Callable[[F], _FuncWithThrottleAttr[F]]:
     pass
 
 
 @validate_call
 def throttle(
-    _wrapped: Optional[F] = None,
+    _wrapped: F | None,
     *,
     reqs_per_sec: float = Field(gt=0, default=1),
     bucket_size: float = Field(ge=1, default=1),
     convert_to_async: bool = Field(default=False),
-) -> Union[F, _FuncWithThrottleAttr[F]]:
+) -> F | PartialCallableObjectProxy:  # , _FuncWithThrottleAttr[F]]:
     """Decorator to wrap a function in a throttle.
 
     The throttle wraps code around a function to limit the rate that it
@@ -555,18 +542,23 @@ def throttle(
     #     )
 
     if _wrapped is None:
-        return wrapt.PartialCallableObjectProxy(
+        return PartialCallableObjectProxy(
             throttle,
             reqs_per_sec=reqs_per_sec,
             bucket_size=bucket_size,
             convert_to_async=convert_to_async,
         )
 
-    def decorator(wrapped):
+    def t_decorator(wrapped: F) -> F:
         method_name = wrapped.__name__
         is_async_func = inspect.iscoroutinefunction(wrapped)
 
-        def sync__core_execution_logic(wrapped_func, instance, args, kwargs):
+        def sync__core_execution_logic(
+            wrapped_func: F,
+            instance: object,
+            args: tuple[Any, ...],
+            kwargs: dict[str, Any],
+        ) -> Any:
             # Resolve target mapping
             if instance is not None:
                 c_type = instance if isinstance(instance, type) else instance.__class__
@@ -596,7 +588,12 @@ def throttle(
             finally:
                 active_state_ctx.reset(token)
 
-        async def async__core_execution_logic(wrapped_func, instance, args, kwargs):
+        async def async__core_execution_logic(
+            wrapped_func: F,
+            instance: object,
+            args: tuple[Any, ...],
+            kwargs: dict[str, Any],
+        ) -> Any:
             # Resolve target mapping
             if instance is not None:
                 c_type = instance if isinstance(instance, type) else instance.__class__
@@ -642,7 +639,4 @@ def throttle(
         )
         return proxy
 
-    # if _wrapped is None:
-    #     return decorator
-    # else:
-    return decorator(_wrapped)
+    return t_decorator(_wrapped)

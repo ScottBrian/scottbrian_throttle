@@ -351,11 +351,11 @@ class TestThrottleBasic:
         ):
             a_throttle = Throttle()
             expected_repr_str = (
-                f"Throttle("
-                f"reqs_per_sec=1, "
-                f"bucket_size=1, "
-                f"convert_to_async=False, "
-                f"name=None)"
+                "Throttle("
+                "reqs_per_sec=1, "
+                "bucket_size=1, "
+                "convert_to_async=False, "
+                "name=None)"
             )
         # 0 0 0 1
         elif (
@@ -367,10 +367,10 @@ class TestThrottleBasic:
             a_throttle = Throttle(name=name_arg)
 
             expected_repr_str = (
-                f"Throttle("
-                f"reqs_per_sec=1, "
-                f"bucket_size=1, "
-                f"convert_to_async=False, "
+                "Throttle("
+                "reqs_per_sec=1, "
+                "bucket_size=1, "
+                "convert_to_async=False, "
                 f"name={name_arg})"
             )
         # 0 0 1 0
@@ -383,11 +383,11 @@ class TestThrottleBasic:
             a_throttle = Throttle(convert_to_async=convert_to_async_arg)
 
             expected_repr_str = (
-                f"Throttle("
-                f"reqs_per_sec=1, "
-                f"bucket_size=1, "
+                "Throttle("
+                "reqs_per_sec=1, "
+                "bucket_size=1, "
                 f"convert_to_async={convert_to_async_arg}, "
-                f"name=None)"
+                "name=None)"
             )
         # 0 0 1 1
         elif (
@@ -779,17 +779,17 @@ class TestThrottleDecoratorErrors:
             pass
 
         @throttle(convert_to_async="yes")  # type: ignore
-        def f19() -> None:
+        def f20() -> None:
             pass
 
         @throttle(convert_to_async="no")  # type: ignore
-        def f19() -> None:
+        def f21() -> None:
             pass
 
         my_ans = True
 
         @throttle(convert_to_async=my_ans)  # type: ignore
-        def f20() -> None:
+        def f22() -> None:
             pass
 
 
@@ -2772,7 +2772,10 @@ class TestThrottleDocstrings:
         expected_result = "\n" + flower_str
         expected_result += f"* {hdr_str} *\n"
         expected_result += flower_str
-        expected_result += "Throttle(reqs_per_sec=0.5, bucket_size=1.0, convert_to_async=False, name=func1)\n"
+        expected_result += (
+            "Throttle(reqs_per_sec=0.5, bucket_size=1.0, "
+            "convert_to_async=False, name=func1)\n"
+        )
 
         captured = capsys.readouterr().out
 
@@ -2824,15 +2827,23 @@ class TestThrottleDocstrings:
         funky2.func7b()
 
         print(
-            f"\n{funky1.func7a.throttle.reqs_per_sec=}, {funky1.func7a.throttle.call_count=}, {funky1.funky_var=}, {id(funky1.func7a.throttle)=}\n"
+            f"\n{funky1.func7a.throttle.reqs_per_sec=},"
+            f" {funky1.func7a.throttle.call_count=}, "
+            f"{funky1.funky_var=}, {id(funky1.func7a.throttle)=}\n"
         )
         print(
-            f"\n{funky1.func7b.throttle.reqs_per_sec=}, {funky1.func7b.throttle.call_count=}, {funky1.funky_var=}, {id(funky1.func7b.throttle)=}\n"
+            f"\n{funky1.func7b.throttle.reqs_per_sec=},"
+            f" {funky1.func7b.throttle.call_count=},"
+            f" {funky1.funky_var=}, {id(funky1.func7b.throttle)=}\n"
         )
 
         print(
-            f"\n{funky2.func7a.throttle.reqs_per_sec=}, {funky2.func7a.throttle.call_count=}, {funky2.funky_var=}, {id(funky2.func7a.throttle)=}\n"
+            f"\n{funky2.func7a.throttle.reqs_per_sec=},"
+            f" {funky2.func7a.throttle.call_count=}, "
+            f"{funky2.funky_var=}, {id(funky2.func7a.throttle)=}\n"
         )
         print(
-            f"\n{funky2.func7b.throttle.reqs_per_sec=}, {funky2.func7b.throttle.call_count=}, {funky2.funky_var=}, {id(funky2.func7b.throttle)=}\n"
+            f"\n{funky2.func7b.throttle.reqs_per_sec=},"
+            f" {funky2.func7b.throttle.call_count=}, "
+            f"{funky2.funky_var=}, {id(funky2.func7b.throttle)=}\n"
         )

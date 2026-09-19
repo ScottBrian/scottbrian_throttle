@@ -2,14 +2,14 @@ import time
 
 
 class MultiEngineProcessor:
-    @track_state(initial_status="ready", increment_by=5)
+    # @track_state(initial_status="ready", increment_by=5)
     def sync_task(self):
         time.sleep(0.01)
         return "sync done"
 
-    @track_state(initial_status="ready_async", increment_by=1)
+    # @track_state(initial_status="ready_async", increment_by=1)
     async def async_task(self):
-        await asyncio.sleep(0.01)
+        # await asyncio.sleep(0.01)
         return "async done"
 
 
@@ -43,7 +43,7 @@ async def main():
 
 
 # Run the async loop validation
-asyncio.run(main())
+# asyncio.run(main())
 
 
 ###################################################
@@ -52,13 +52,15 @@ asyncio.run(main())
 """
 
 Practical Verification Example
-Below, we define a custom failure alert function and assign it to an active worker class to intercept runtime exceptions.
+Below, we define a custom failure alert function and assign it to an
+active worker class to intercept runtime exceptions.
 """
 
 
 # 1. Define global or class-level callback handlers
 def global_alert_system(instance, proxy, exception):
-    """Custom sync callback triggered immediately when any tracked method fails."""
+    """Custom sync callback triggered immediately when any tracked
+    method fails."""
     print(f"\n[ALERT] Incident detected on object: {instance}")
     print(f"[ALERT] Method Status: {proxy.status}")
     print(f"[ALERT] Total invocation attempts before failure: {proxy.count}")
@@ -66,10 +68,13 @@ def global_alert_system(instance, proxy, exception):
 
 
 async def async_logging_system(instance, proxy):
-    """Custom async callback triggered upon a successful method execution."""
-    await asyncio.sleep(0.001)  # Simulate non-blocking async network log write
+    """Custom async callback triggered upon a successful method
+    execution."""
+    # await asyncio.sleep(0.001)  # Simulate non-blocking async network
+    # log write
     print(
-        f"\n[LOG] Success confirmation logged for {instance}. Execution count: {proxy.count}"
+        f"\n[LOG] Success confirmation logged for {instance}. "
+        f"Execution count: {proxy.count}"
     )
 
 
@@ -81,7 +86,8 @@ class DataIngestionEngine:
     def __str__(self):
         return f"DataIngestionEngine({self.name})"
 
-    @track_state(on_success=async_logging_system, on_failure=global_alert_system)
+    # @track_state(on_success=async_logging_system,
+    # on_failure=global_alert_system)
     def process_records(self, should_fail=False):
         if should_fail:
             raise ConnectionResetError(
@@ -104,19 +110,26 @@ def run_test():
         engine_1.process_records(should_fail=True)
     except ConnectionResetError:
         print(
-            "\n[Main Thread] Caught the expected exception bubbles-up from the class method."
+            "\n[Main Thread] Caught the expected exception bubbles-up "
+            "from the class method."
         )
 
 
 run_test()
 
-
 """
-Key Highlights of this ArchitectureContext Preservation: 
-The helper _execute_callback receives both instance (the actual class instance, e.g., self) and proxy (the method state object). 
-This allows your callbacks to access internal object attributes or verify metrics like proxy.count directly.
-Smart Event-Loop Routing: If a user provides an async def callback to a synchronous tracking path,
- the engine leverages asyncio.get_running_loop().create_task() to schedule it on the loop without freezing the
-  thread or throwing a RuntimeError.State Retention: In addition to setting proxy.status = 'failed', 
-  the proxy retains the actual Python exception object under proxy.last_exception, letting you inspect traceback details after the fact.
+Key Highlights of this ArchitectureContext Preservation:
+The helper _execute_callback receives both instance (the actual class
+instance, e.g., self) and proxy (the method state object).
+This allows your callbacks to access internal object attributes or
+verify metrics like proxy.count directly.
+Smart Event-Loop Routing: If a user provides an async def callback to
+a synchronous tracking path,
+the engine leverages asyncio.get_running_loop().create_task() to
+schedule it on the loop without freezing the
+thread or throwing a RuntimeError.State Retention: In addition to
+setting proxy.status = 'failed',
+the proxy retains the actual Python exception object under
+proxy.last_exception, letting you inspect traceback details after the
+fact.
 """

@@ -110,7 +110,6 @@ from typing import (
 import scottbrian_locking.se_lock as selk  # noqa F401
 from pydantic import BaseModel, Field, ConfigDict
 from scottbrian_utils.pauser import Pauser
-from wrapt.decorators import decorator  # type: ignore
 
 
 ########################################################################
@@ -235,9 +234,7 @@ class Throttle(BaseModel):
 
             Expected output for Example 1::
 
-            'Throttle(reqs_per_sec=0.5, bucket_size=1, convert_to_async=False, name=func1)'
-
-
+            'Throttle(reqs_per_sec=0.5, bucket_size=1, convert_to_async=False, name=func1)'  # noqa: E501, W505
 
         """
         if TYPE_CHECKING:
@@ -458,14 +455,15 @@ class Throttle(BaseModel):
             ctx = contextvars.copy_context()
             if self.convert_to_async:
 
-                def worker_thread_target():
+                def worker_thread_target() -> Any:
                     try:
                         return func(*args, **kwargs)
                     except Exception as e:
                         self._capture_apm_error(e, "sync to async to_thread")
                         raise
 
-                # Run the worker thread using the captured main-thread context
+                # Run the worker thread using the captured main-thread
+                # context
                 return await asyncio.to_thread(lambda: ctx.run(worker_thread_target))
             else:
                 try:
@@ -477,19 +475,10 @@ class Throttle(BaseModel):
     ####################################################################
     # _capture_apm_error
     ####################################################################
-    def _capture_apm_error(self, e: Exception, context_name: str):
+    def _capture_apm_error(self, e: Exception, context_name: str) -> None:
         # 1. Standard structured logging (parsed cleanly by Datadog/ELK)
-        # self.logger.error(
-        #     f"Exception in {context_name} for '{self.t_name}': {e}",
-        #     exc_info=True,
-        #     extra={
-        #         "function_name": self.t_name,
-        #         "throttle_delay": self._wait_time_ns * Throttle.NS_2_SECS,
-        #     },
-        # )
-
         self.logger.debug(
-            f"Exception in {context_name} for '{self.name}': {e}",
+            msg=f"Exception in {context_name} for '{self.name}': {e}",
             exc_info=True,
             extra={
                 "function_name": self.name,
@@ -497,8 +486,9 @@ class Throttle(BaseModel):
             },
         )
         # 2. Sentry Explicit Fallback (If the developer uses Sentry)
-        # Many APMs capture unhandled exceptions automatically, but inside
-        # background threads, explicit capture guarantees it isn't dropped.
+        # Many APMs capture unhandled exceptions automatically, but
+        # inside background threads, explicit capture guarantees it
+        # isn't dropped.
         try:
             import sentry_sdk
 
