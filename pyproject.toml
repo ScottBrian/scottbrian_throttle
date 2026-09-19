@@ -30,7 +30,7 @@ packages = ["scottbrian_throttle"]
 package-dir = { "" = "src" }
 
 [tool.mypy]
-mypy_path = "C:\\Users\\Tiger\\PycharmProjects\\scottbrian_throttle\\.venv314\\Lib\\site-packages"
+mypy_path = "typings"
 
 
 [project.urls]

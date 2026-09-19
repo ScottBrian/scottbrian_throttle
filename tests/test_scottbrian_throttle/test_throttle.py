@@ -1106,7 +1106,7 @@ class TestThrottle:
                     thread_item.thread_item.join()
             else:
 
-                async def main_loop():
+                async def main_loop() -> None:
                     logger.debug("throttle_router creating asyncio tasks")
                     task_items: list[Any] = []
                     for _ in range(num_threads):
@@ -1615,7 +1615,7 @@ class TestPieThrottle:
                 assert rc == eval(call_list[request_style_arg][2])
             else:
 
-                async def main_loop(request_id):
+                async def main_loop(request_id) -> None:
                     if s_interval > 0.0:
                         await asyncio.sleep(s_interval)
                     ml_request_item.send_time_ns = perf_counter_ns()
@@ -1803,7 +1803,7 @@ class TestPieThrottle:
                 assert rc == 0
             else:
 
-                async def main_loop():
+                async def main_loop() -> None:
                     if s_interval > 0.0:
                         await asyncio.sleep(s_interval)
                     ml_request_item.send_time_ns = perf_counter_ns()
@@ -2455,7 +2455,7 @@ class TestThrottleDocstrings:
         import time
 
         @throttle
-        def func1(request_number: int, time_of_start: float):
+        def func1(request_number: int, time_of_start: float) -> str:
             ret_value = (
                 f"request {request_number} sent at elapsed time: "
                 f"{time.time() - time_of_start:0.1f}"
@@ -2505,7 +2505,7 @@ class TestThrottleDocstrings:
         import time
 
         @throttle(reqs_per_sec=2)
-        def func2(request_number: int, time_of_start: float):
+        def func2(request_number: int, time_of_start: float) -> str:
             ret_value = (
                 f"request {request_number} sent at elapsed time: "
                 f"{time.time() - time_of_start:0.1f}"
@@ -2557,13 +2557,13 @@ class TestThrottleDocstrings:
         import time
 
         @throttle(reqs_per_sec=2)
-        async def func3(request_number: int, time_of_start: float):
+        async def func3(request_number: int, time_of_start: float) -> None:
             print(
                 f"request {request_number} sent at elapsed time: "
                 f"{time.time() - time_of_start:0.1f}"
             )
 
-        async def main_loop():
+        async def main_loop() -> None:
             start_time = time.time()
             for idx in range(10):
                 await func3(idx, start_time)
@@ -2610,13 +2610,13 @@ class TestThrottleDocstrings:
         import time
 
         @throttle(reqs_per_sec=2)
-        def func4(request_number: int, time_of_start: float):
+        def func4(request_number: int, time_of_start: float) -> None:
             print(
                 f"request {request_number} sent at elapsed time: "
                 f"{time.time() - time_of_start:0.1f}"
             )
 
-        async def main_loop():
+        async def main_loop() -> None:
             start_time = time.time()
             for idx in range(10):
                 await asyncio.to_thread(func4, idx, start_time)
@@ -2663,13 +2663,13 @@ class TestThrottleDocstrings:
         import time
 
         @throttle(reqs_per_sec=2, convert_to_async=True)
-        def func5(request_number: int, time_of_start: float):
+        def func5(request_number: int, time_of_start: float) -> None:
             print(
                 f"request {request_number} sent at elapsed time: "
                 f"{time.time() - time_of_start:0.1f}"
             )
 
-        async def main_loop():
+        async def main_loop() -> None:
             start_time = time.time()
             for idx in range(10):
                 await func5(idx, start_time)
@@ -2715,7 +2715,7 @@ class TestThrottleDocstrings:
         import time
 
         @throttle(reqs_per_sec=2, bucket_size=3)
-        def func4(request_number, time_of_start):
+        def func4(request_number, time_of_start) -> None:
             print(
                 f"request {request_number} sent at elapsed time: "
                 f"{time.time() - time_of_start:0.1f}"
@@ -2762,7 +2762,7 @@ class TestThrottleDocstrings:
         from scottbrian_throttle.throttle import throttle
 
         @throttle(reqs_per_sec=0.5)
-        def func1(request_number, time_of_start):
+        def func1(request_number, time_of_start) -> None:
             pass
 
         print(repr(func1.throttle))
@@ -2798,15 +2798,15 @@ class TestThrottleDocstrings:
         from scottbrian_throttle.throttle import throttle
 
         class Funky:
-            def __init__(self, a_var: int):
+            def __init__(self, a_var: int) -> None:
                 self.funky_var = a_var
 
             @throttle(reqs_per_sec=2)
-            def func7a(self):
+            def func7a(self) -> None:
                 self.funky_var += 1
 
             @throttle(reqs_per_sec=3)
-            def func7b(self):
+            def func7b(self) -> None:
                 self.funky_var += 10
 
         funky1 = Funky(a_var=2)

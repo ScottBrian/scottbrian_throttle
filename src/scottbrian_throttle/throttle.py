@@ -288,7 +288,6 @@ from typing import (
     Any,
     Callable,
     cast,
-    overload,
     Protocol,
     TypeVar,
 )
@@ -413,25 +412,27 @@ class StatefulFunctionWrapper(FunctionWrapper):
 ########################################################################
 # @throttle
 ########################################################################
-@overload
-def throttle(
-    _wrapped: F,
-    *,
-    reqs_per_sec: float = 1,
-    bucket_size: float = 1,
-    convert_to_async: bool = False,
-) -> F:  # _FuncWithThrottleAttr[F]:
-    pass
-
-
-@overload
-def throttle(
-    *,
-    reqs_per_sec: float = 1,
-    bucket_size: float = 1,
-    convert_to_async: bool = False,
-) -> PartialCallableObjectProxy:  # Callable[[F], _FuncWithThrottleAttr[F]]:
-    pass
+# @overload
+# def throttle(
+#     _wrapped: F,
+#     *,
+#     reqs_per_sec: float = 1,
+#     bucket_size: float = 1,
+#     convert_to_async: bool = False,
+# ) -> StatefulFunctionWrapper | PartialCallableObjectProxy:  # _FuncWithThrottleAttr[F]:
+#     pass
+#
+#
+# @overload
+# def throttle(
+#     *,
+#     reqs_per_sec: float = 1,
+#     bucket_size: float = 1,
+#     convert_to_async: bool = False,
+# ) -> (
+#     StatefulFunctionWrapper | PartialCallableObjectProxy
+# ):  # Callable[[F], _FuncWithThrottleAttr[F]]:
+#     pass
 
 
 @validate_call
@@ -441,7 +442,9 @@ def throttle(
     reqs_per_sec: float = Field(gt=0, default=1),
     bucket_size: float = Field(ge=1, default=1),
     convert_to_async: bool = Field(default=False),
-) -> F | PartialCallableObjectProxy:  # , _FuncWithThrottleAttr[F]]:
+) -> (
+    StatefulFunctionWrapper | PartialCallableObjectProxy
+):  # , _FuncWithThrottleAttr[F]]:
     """Decorator to wrap a function in a throttle.
 
     The throttle wraps code around a function to limit the rate that it
@@ -549,7 +552,7 @@ def throttle(
             convert_to_async=convert_to_async,
         )
 
-    def t_decorator(wrapped: F) -> F:
+    def t_decorator(wrapped: F) -> StatefulFunctionWrapper:
         method_name = wrapped.__name__
         is_async_func = inspect.iscoroutinefunction(wrapped)
 
