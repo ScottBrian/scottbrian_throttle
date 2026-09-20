@@ -13,7 +13,7 @@ Throttle
 
 The Throttle class provides routines to delay as needed the function
 wrapped the throttle decorator. After any delay, the decorated function
-is called, and any error are captured and reported. The Throttle used a
+is called, and any errors are captured and reported. The Throttle uses a
 leaky bucket algorithm to rate limit the execution of the decorated
 function.
 
@@ -27,8 +27,8 @@ preceding requests such that the new request can fit and be sent. The
 effect of the bucket is to allow a burst of requests to be sent
 immediately at a faster rate than the target interval, acting as a shock
 absorber to the flow of traffic. The number of requests allowed to go
-immediately is controlled by the size of the bucket which in turn is
-specified by the bucket_size argument when the throttle is instantiated.
+immediately is controlled by the size of the bucket as specified by the
+bucket_size argument when the throttle is instantiated.
 Note that a bucket_size of 1 means there will never be enough room in
 the bucket for more than one request at a time.
 
@@ -47,7 +47,7 @@ The Throttle provides both sync and async versions of the throttle
 function: sync_throttle and async_throttle. Both routines are similar:
 sync_throttle uses a threading lock, time.sleep, and calls the decorated
 function synchronously, while async_throttle uses an asyncio lock,
-asyncio.sleep, and call the decorated function with an await. The
+asyncio.sleep, and calls the decorated function with an await. The
 following explains the detail of the leaky bucket adjustment which is
 the same for both routines:
 
@@ -232,7 +232,9 @@ class Throttle(BaseModel):
 
             print(repr(func1.throttle))
 
-            Expected output for Example 1::
+        :Expected output for Example 1::
+
+        .. code-block:: text
 
             'Throttle(reqs_per_sec=0.5, bucket_size=1, convert_to_async=False, name=func1)'  # noqa: E501, W505
 

@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from enum import Enum, auto
 from time import perf_counter_ns
 from typing import Any, Final
+from unittest.mock import patch
 
 import pytest
 ########################################################################
@@ -754,11 +755,11 @@ class TestThrottleDecoratorErrors:
                 pass
 
         # the following are valid
-        @throttle(convert_to_async=True)  # type: ignore
+        @throttle(convert_to_async=True)
         def f14() -> None:
             pass
 
-        @throttle(convert_to_async=False)  # type: ignore
+        @throttle(convert_to_async=False)
         def f15() -> None:
             pass
 
@@ -788,7 +789,7 @@ class TestThrottleDecoratorErrors:
 
         my_ans = True
 
-        @throttle(convert_to_async=my_ans)  # type: ignore
+        @throttle(convert_to_async=my_ans)
         def f22() -> None:
             pass
 
@@ -810,6 +811,7 @@ class TestThrottleDecoratorRequestErrors:
 
         """
         log_ver = LogVer(log_name=__name__)
+        logging.getLogger("asyncio").setLevel(logging.WARNING)
         alpha_call_seq = (
             "test_throttle.py::TestThrottleDecoratorRequestErrors"
             ".test_pie_throttle_request_errors"
@@ -851,9 +853,192 @@ class TestThrottleDecoratorRequestErrors:
 
             f2()
 
+        ################################################################
+        # sync to async to_thread request failure
+        ################################################################
+        log_msg = (
+            "Exception in sync to async to_thread for 'f3': division by zero"
+        )
+        log_ver.add_pattern(
+            log_name="scottbrian_throttle.throttle_blocks",
+            level=logging.DEBUG,
+            pattern=log_msg,
+        )
+        with pytest.raises(ZeroDivisionError):
+
+            @throttle(reqs_per_sec=1, convert_to_async=True)
+            def f3() -> None:
+                ans = 42 / 0
+                print(f"{ans=}")
+
+            asyncio.run(f3())
+
+        ################################################################
+        # sync to async to_thread lb request failure
+        ################################################################
+        log_msg = (
+            "Exception in sync to async to_thread for 'f4': division by zero"
+        )
+        log_ver.add_pattern(
+            log_name="scottbrian_throttle.throttle_blocks",
+            level=logging.DEBUG,
+            pattern=log_msg,
+        )
+        with pytest.raises(ZeroDivisionError):
+
+            @throttle(reqs_per_sec=1, bucket_size=2, convert_to_async=True)
+            def f4() -> None:
+                ans = 42 / 0
+                print(f"{ans=}")
+
+            asyncio.run(f4())
+
+        ################################################################
+        # async context request failure
+        ################################################################
+        log_msg = "Exception in async context for 'f5': division by zero"
+        log_ver.add_pattern(
+            log_name="scottbrian_throttle.throttle_blocks",
+            level=logging.DEBUG,
+            pattern=log_msg,
+        )
+        with pytest.raises(ZeroDivisionError):
+
+            @throttle(reqs_per_sec=1)
+            async def f5() -> None:
+                ans = 42 / 0
+                print(f"{ans=}")
+
+            asyncio.run(f5())
+
+        ################################################################
+        # async context lb request failure
+        ################################################################
+        log_msg = "Exception in async context for 'f6': division by zero"
+        log_ver.add_pattern(
+            log_name="scottbrian_throttle.throttle_blocks",
+            level=logging.DEBUG,
+            pattern=log_msg,
+        )
+        with pytest.raises(ZeroDivisionError):
+
+            @throttle(reqs_per_sec=1, bucket_size=2)
+            async def f6() -> None:
+                ans = 42 / 0
+                print(f"{ans=}")
+
+            asyncio.run(f6())
+
         match_results = log_ver.get_match_results(caplog=caplog)
         log_ver.print_match_results(match_results)
-        log_ver.verify_log_results(match_results)
+        log_ver.verify_match_results(match_results)
+
+    ####################################################################
+    # test_sentry_capture_exception
+    ####################################################################
+    def test_sentry_capture_exception(self) -> None:
+        """Test sentry_sdk.capture_exception across contexts."""
+        with patch("sentry_sdk.capture_exception") as mock_capture:
+            # 1. Sync context
+            with pytest.raises(ValueError) as exc_info_sync:
+
+                @throttle(reqs_per_sec=1)
+                def f_sync() -> None:
+                    raise ValueError("sync error")
+
+                f_sync()
+
+            mock_capture.assert_called_with(exc_info_sync.value)
+
+            # 2. Sync converted to async (to_thread) context
+            mock_capture.reset_mock()
+            with pytest.raises(RuntimeError) as exc_info_to_thread:
+
+                @throttle(reqs_per_sec=1, convert_to_async=True)
+                def f_to_thread() -> None:
+                    raise RuntimeError("to_thread error")
+
+                asyncio.run(f_to_thread())
+
+            mock_capture.assert_called_with(exc_info_to_thread.value)
+
+            # 3. Pure async context
+            mock_capture.reset_mock()
+            with pytest.raises(KeyError) as exc_info_async:
+
+                @throttle(reqs_per_sec=1)
+                async def f_async() -> None:
+                    raise KeyError("async error")
+
+                asyncio.run(f_async())
+
+            mock_capture.assert_called_with(exc_info_async.value)
+
+    ####################################################################
+    # test_sentry_import_error
+    ####################################################################
+    def test_sentry_import_error(self) -> None:
+        """Test graceful fallback when sentry_sdk is not installed."""
+        with patch.dict("sys.modules", {"sentry_sdk": None}):
+            # Verify exception is still raised properly in sync context
+            with pytest.raises(ZeroDivisionError):
+
+                @throttle(reqs_per_sec=1)
+                def f_sync() -> None:
+                    _ = 1 / 0
+
+                f_sync()
+
+            # Verify exception in to_thread context
+            with pytest.raises(ZeroDivisionError):
+
+                @throttle(reqs_per_sec=1, convert_to_async=True)
+                def f_to_thread() -> None:
+                    _ = 1 / 0
+
+                asyncio.run(f_to_thread())
+
+            # Verify exception in async context
+            with pytest.raises(ZeroDivisionError):
+
+                @throttle(reqs_per_sec=1)
+                async def f_async() -> None:
+                    _ = 1 / 0
+
+                asyncio.run(f_async())
+
+    ####################################################################
+    # test_capture_apm_error_structured_logging_extra
+    ####################################################################
+    def test_capture_apm_error_structured_logging_extra(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Test structured logging extra fields attached by APM capture.
+
+        Args:
+            caplog: pytest fixture to capture log output
+        """
+        caplog.set_level(logging.DEBUG)
+
+        with pytest.raises(ValueError):
+
+            @throttle(reqs_per_sec=2, bucket_size=1)
+            def f_extra() -> None:
+                raise ValueError("structured logging test")
+
+            f_extra()
+
+        matched_records = [
+            r
+            for r in caplog.records
+            if r.name == "scottbrian_throttle.throttle_blocks"
+            and "structured logging test" in r.getMessage()
+        ]
+        assert len(matched_records) == 1
+        record = matched_records[0]
+        assert getattr(record, "function_name") == "f_extra"
+        assert getattr(record, "throttle_delay") >= 0.0
+        assert record.exc_info is not None
 
 
 ########################################################################
@@ -1211,7 +1396,7 @@ class TestThrottle:
 
                 async def main_loop(
                     a_throttle: Throttle, request_validator: RequestValidator, idx: int
-                ):
+                ) -> Any:
                     return await eval(call_args)
 
                 rc = asyncio.run(main_loop(a_throttle, request_validator, idx))
@@ -1338,6 +1523,7 @@ class TestPieThrottle:
         ################################################################
         # set sync_convert
         ################################################################
+        sync_convert: bool
         if throttle_mode_arg == Mode.SYNC_CONVERT:
             sync_convert = True
         else:
@@ -1615,7 +1801,7 @@ class TestPieThrottle:
                 assert rc == eval(call_list[request_style_arg][2])
             else:
 
-                async def main_loop(request_id) -> None:
+                async def main_loop(request_id: int) -> None:
                     if s_interval > 0.0:
                         await asyncio.sleep(s_interval)
                     ml_request_item.send_time_ns = perf_counter_ns()
@@ -1714,6 +1900,7 @@ class TestPieThrottle:
         ################################################################
         # set sync_convert
         ################################################################
+        sync_convert: bool
         if throttle_mode_arg == Mode.SYNC_CONVERT:
             sync_convert = True
         else:
@@ -2715,7 +2902,7 @@ class TestThrottleDocstrings:
         import time
 
         @throttle(reqs_per_sec=2, bucket_size=3)
-        def func4(request_number, time_of_start) -> None:
+        def func4(request_number: int, time_of_start: float) -> None:
             print(
                 f"request {request_number} sent at elapsed time: "
                 f"{time.time() - time_of_start:0.1f}"
@@ -2762,7 +2949,7 @@ class TestThrottleDocstrings:
         from scottbrian_throttle.throttle import throttle
 
         @throttle(reqs_per_sec=0.5)
-        def func1(request_number, time_of_start) -> None:
+        def func1(request_number: int, time_of_start: float) -> None:
             pass
 
         print(repr(func1.throttle))

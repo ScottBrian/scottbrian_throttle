@@ -58,6 +58,10 @@ templates_path = ["_templates"]
 # This pattern also affects html_static_path and html_extra_path.
 exclude_patterns = []
 
+# Ensure autodoc_type_aliases is configured
+autodoc_type_aliases = {
+    "JsonValue": "pydantic.JsonValue",
+}
 
 # -- Options for HTML output -------------------------------------------------
 
