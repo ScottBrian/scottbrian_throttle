@@ -53,6 +53,7 @@ the throttle maintains a limit of 1 call per second.
 You can specify the limit with the *reqs_per_sec* parameter as a float
 or int of any value greater than 0. The interval is calculated as
 1/*reqs_per_sec*. Some examples:
+
     1) *reqs_per_sec=2* will be an interval of 1/2 seconds.
     2) *reqs_per_sec=1* will be an interval of 1 second
     3) *reqs_per_sec=0.5* will be an interval of 2 seconds

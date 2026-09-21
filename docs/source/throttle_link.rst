@@ -1,2 +1,2 @@
 .. automodule:: throttle
-   :members:
+   :members: throttle

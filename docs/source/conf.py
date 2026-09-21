@@ -47,6 +47,7 @@ autoclass_content = "both"
 autodoc_member_order = "groupwise"
 
 autodoc_typehints = "description"
+typehints_document_overloads = False
 
 napoleon_use_rtype = False
 

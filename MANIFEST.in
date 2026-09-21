@@ -4,6 +4,7 @@ include mypy.ini
 include pytest.ini
 include tox.ini
 include *.py
+include *.yaml
 include *.yml
 include docs/source/_static
 include docs/requirements.txt
@@ -17,3 +18,4 @@ recursive-include src *.typed
 recursive-include tests *.py
 recursive-include type_stubs *.py
 recursive-include type_stubs *.pyi
+recursive-include typings *.pyi

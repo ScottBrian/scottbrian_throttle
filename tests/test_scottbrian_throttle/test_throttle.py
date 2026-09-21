@@ -2109,6 +2109,141 @@ class TestThrottleMisc:
             assert actual_completion_time == exp_completion_time
             assert actual_completion_time_ns == exp_completion_time_ns
 
+    ####################################################################
+    # test_decorated_func_get_interval
+    ####################################################################
+    @pytest.mark.parametrize("reqs_per_sec_arg", (0.5, 1, 2, 3))
+    def test_decorated_func_get_interval(
+        self, reqs_per_sec_arg: float
+    ) -> None:
+        """Method to test get_interval on decorated function.
+
+        Args:
+            reqs_per_sec_arg: number of requests per second specified
+                for the throttle
+
+        """
+        @throttle(reqs_per_sec=reqs_per_sec_arg)
+        def func_sync() -> None:
+            pass
+
+        interval = 1 / reqs_per_sec_arg
+        interval_ns = interval * SECS_2_NS
+        assert func_sync.throttle.get_interval_secs() == interval
+        assert func_sync.throttle.get_interval_ns() == interval_ns
+
+        @throttle(reqs_per_sec=reqs_per_sec_arg)
+        async def func_async() -> None:
+            pass
+
+        assert func_async.throttle.get_interval_secs() == interval
+        assert func_async.throttle.get_interval_ns() == interval_ns
+
+    ####################################################################
+    # test_decorated_func_get_completion_time
+    ####################################################################
+    @pytest.mark.parametrize("reqs_per_sec_arg", (0.2, 1, 2, 3))
+    def test_decorated_func_get_completion_time(
+        self, reqs_per_sec_arg: float
+    ) -> None:
+        """Method to test get completion time on decorated function.
+
+        Args:
+            reqs_per_sec_arg: number of requests per second specified
+                for the throttle
+
+        """
+        @throttle(reqs_per_sec=reqs_per_sec_arg)
+        def func_sync() -> None:
+            pass
+
+        interval = 1 / reqs_per_sec_arg
+        for num_reqs in range(1, 10):
+            exp_completion_time = (num_reqs - 1) * interval
+            exp_completion_time_ns = (num_reqs - 1) * interval * SECS_2_NS
+            actual_completion_time = (
+                func_sync.throttle.get_completion_time_secs(
+                    num_requests=num_reqs, from_start=True
+                )
+            )
+            actual_completion_time_ns = (
+                func_sync.throttle.get_completion_time_ns(
+                    num_requests=num_reqs, from_start=True
+                )
+            )
+            assert actual_completion_time == exp_completion_time
+            assert actual_completion_time_ns == exp_completion_time_ns
+
+        for num_reqs in range(1, 10):
+            exp_completion_time = num_reqs * interval
+            exp_completion_time_ns = num_reqs * interval * SECS_2_NS
+            actual_completion_time = (
+                func_sync.throttle.get_completion_time_secs(
+                    num_requests=num_reqs, from_start=False
+                )
+            )
+            actual_completion_time_ns = (
+                func_sync.throttle.get_completion_time_ns(
+                    num_requests=num_reqs, from_start=False
+                )
+            )
+            assert actual_completion_time == exp_completion_time
+            assert actual_completion_time_ns == exp_completion_time_ns
+
+    ####################################################################
+    # test_decorated_method_throttle_methods
+    ####################################################################
+    @pytest.mark.parametrize("reqs_per_sec_arg", (0.5, 2, 4))
+    def test_decorated_method_throttle_methods(
+        self, reqs_per_sec_arg: float
+    ) -> None:
+        """Method to test throttle methods on decorated class method.
+
+        Args:
+            reqs_per_sec_arg: number of requests per second specified
+                for the throttle
+
+        """
+        class ExampleWorker:
+            @throttle(reqs_per_sec=reqs_per_sec_arg)
+            def work(self) -> None:
+                pass
+
+        worker = ExampleWorker()
+        interval = 1 / reqs_per_sec_arg
+        interval_ns = interval * SECS_2_NS
+
+        assert worker.work.throttle.get_interval_secs() == interval
+        assert worker.work.throttle.get_interval_ns() == interval_ns
+
+        comp_secs_from_start = (
+            worker.work.throttle.get_completion_time_secs(
+                num_requests=5, from_start=True
+            )
+        )
+        assert comp_secs_from_start == 4 * interval
+
+        comp_ns_from_start = (
+            worker.work.throttle.get_completion_time_ns(
+                num_requests=5, from_start=True
+            )
+        )
+        assert comp_ns_from_start == 4 * interval_ns
+
+        comp_secs_not_start = (
+            worker.work.throttle.get_completion_time_secs(
+                num_requests=5, from_start=False
+            )
+        )
+        assert comp_secs_not_start == 5 * interval
+
+        comp_ns_not_start = (
+            worker.work.throttle.get_completion_time_ns(
+                num_requests=5, from_start=False
+            )
+        )
+        assert comp_ns_not_start == 5 * interval_ns
+
 
 SECS_2_NS: Final[int] = 1000000000
 NS_2_SECS: Final[float] = 0.000000001

@@ -60,10 +60,10 @@ from typing import (
     Any,
     Callable,
     cast,
+    Concatenate,
     Literal,
     overload,
     ParamSpec,
-    Protocol,
     TypeVar,
 )
 
@@ -93,37 +93,15 @@ P = ParamSpec("P")
 R = TypeVar("R")
 F = TypeVar("F", bound=Callable[..., Any])
 
-
-########################################################################
-# _FuncWithThrottleAttr class
-########################################################################
-class _FuncWithThrottleAttr(Protocol[F]):
-    """Class to allow type checking on function with attribute."""
-
-    throttle: Throttle
-    __call__: F
-
-    def __get__(self, instance: Any, owner: Any = None) -> Any:
-        ...
-
-
-def _add_throttle_attr(func: F) -> _FuncWithThrottleAttr[F]:
-    """Wrapper to add throttle attribute to function.
-
-    Args:
-        func: function that has the attribute added
-
-    Returns:
-        input function with throttle attached as attribute
-
-    """
-    return cast(_FuncWithThrottleAttr[F], func)
+_T = TypeVar("_T")
+_P2 = ParamSpec("_P2")
+_R2 = TypeVar("_R2")
 
 
 ########################################################################
-# StatefulBoundWrapper
+# _StatefulBoundWrapper
 ########################################################################
-class StatefulBoundWrapper(BoundFunctionWrapper):
+class _StatefulBoundWrapper(BoundFunctionWrapper[P, R]):
     @property
     def throttle(self) -> Throttle:
         try:
@@ -149,15 +127,15 @@ class StatefulBoundWrapper(BoundFunctionWrapper):
 
 
 ########################################################################
-# StatefulFunctionWrapper
+# _StatefulFunctionWrapper
 ########################################################################
-class StatefulFunctionWrapper(FunctionWrapper):
-    __bound_function_wrapper__ = StatefulBoundWrapper
+class _StatefulFunctionWrapper(FunctionWrapper[P, R]):
+    __bound_function_wrapper__: Any = _StatefulBoundWrapper
 
     def __init__(
         self,
-        wrapped: F,
-        wrapper_func: F,
+        wrapped: Any,
+        wrapper_func: Any,
         method_name: str,
         reqs_per_sec: float,
         bucket_size: float,
@@ -191,6 +169,50 @@ class StatefulFunctionWrapper(FunctionWrapper):
             )
         return cast(Throttle, getattr(self.__wrapped__, key))
 
+    @overload
+    def __get__(
+        self: _StatefulFunctionWrapper[Concatenate[_T, _P2], _R2],
+        instance: _T,
+        owner: type[Any] | None = None,
+        /,
+    ) -> _StatefulBoundWrapper[_P2, _R2]:
+        ...
+
+    @overload
+    def __get__(
+        self: _StatefulFunctionWrapper[Concatenate[_T, _P2], _R2],
+        instance: _T,
+        owner: type[_T] | None = None,
+        /,
+    ) -> _StatefulBoundWrapper[_P2, _R2]:
+        ...
+
+    @overload
+    def __get__(
+        self,
+        instance: None,
+        owner: type[Any] | None = None,
+        /,
+    ) -> _StatefulFunctionWrapper[P, R]:
+        ...
+
+    @overload
+    def __get__(
+        self,
+        instance: Any,
+        owner: type[Any] | None = None,
+        /,
+    ) -> _StatefulBoundWrapper[Any, Any]:
+        ...
+
+    def __get__(
+        self,
+        instance: Any,
+        owner: type[Any] | None = None,
+        /,
+    ) -> Any:
+        return super().__get__(instance, owner)
+
 
 ########################################################################
 # @throttle
@@ -202,7 +224,7 @@ def throttle(
     reqs_per_sec: float = 1,
     bucket_size: float = 1,
     convert_to_async: Literal[True],
-) -> _FuncWithThrottleAttr[Callable[P, Coroutine[Any, Any, R]]]:
+) -> _StatefulFunctionWrapper[P, Coroutine[Any, Any, R]]:
     ...
 
 
@@ -213,7 +235,7 @@ def throttle(
     reqs_per_sec: float = 1,
     bucket_size: float = 1,
     convert_to_async: Literal[False] = False,
-) -> _FuncWithThrottleAttr[Callable[P, R]]:
+) -> _StatefulFunctionWrapper[P, R]:
     ...
 
 
@@ -224,7 +246,7 @@ def throttle(
     reqs_per_sec: float = 1,
     bucket_size: float = 1,
     convert_to_async: bool = False,
-) -> _FuncWithThrottleAttr[Callable[P, Any]]:
+) -> _StatefulFunctionWrapper[P, Any]:
     ...
 
 
@@ -236,7 +258,7 @@ def throttle(
     bucket_size: float = 1,
     convert_to_async: Literal[True],
 ) -> Callable[
-    [Callable[P, R]], _FuncWithThrottleAttr[Callable[P, Coroutine[Any, Any, R]]]
+    [Callable[P, R]], _StatefulFunctionWrapper[P, Coroutine[Any, Any, R]]
 ]:
     ...
 
@@ -248,7 +270,7 @@ def throttle(
     reqs_per_sec: float = 1,
     bucket_size: float = 1,
     convert_to_async: Literal[False] = False,
-) -> Callable[[Callable[P, R]], _FuncWithThrottleAttr[Callable[P, R]]]:
+) -> Callable[[Callable[P, R]], _StatefulFunctionWrapper[P, R]]:
     ...
 
 
@@ -259,7 +281,7 @@ def throttle(
     reqs_per_sec: float = 1,
     bucket_size: float = 1,
     convert_to_async: bool = False,
-) -> Callable[[Callable[P, R]], _FuncWithThrottleAttr[Callable[P, Any]]]:
+) -> Callable[[Callable[P, R]], _StatefulFunctionWrapper[P, Any]]:
     ...
 
 
@@ -304,6 +326,7 @@ def throttle(
     Returns:
         A callable or awaitable function that delays the request as
         needed in accordance with the specified limits.
+
 
     :Example 10: wrap a function with a throttle for 1 request
                   per second
@@ -352,23 +375,6 @@ def throttle(
     #     introspection and support different cases, such as static
     #     and class methods.
     # ==================================================================
-    #
-    # config = ThrottleConfig(
-    #     reqs_per_sec=reqs_per_sec,
-    #     bucket_size=bucket_size,
-    #     convert_to_async=convert_to_async,
-    # )
-
-    # if _wrapped is None:
-    #     return cast(
-    #         _FuncWithThrottleAttr[F],
-    #         functools.partial(
-    #             throttle,
-    #             reqs_per_sec=reqs_per_sec,
-    #             bucket_size=bucket_size,
-    #             convert_to_async=convert_to_async,
-    #         ),
-    #     )
 
     if _wrapped is None:
         return PartialCallableObjectProxy(
@@ -378,7 +384,7 @@ def throttle(
             convert_to_async=convert_to_async,
         )
 
-    def t_decorator(wrapped: F) -> StatefulFunctionWrapper:
+    def t_decorator(wrapped: F) -> _StatefulFunctionWrapper[Any, Any]:
         method_name = wrapped.__name__
         is_async_func = inspect.iscoroutinefunction(wrapped)
 
@@ -457,7 +463,7 @@ def throttle(
         else:
             _core_execution_logic = sync__core_execution_logic
 
-        proxy = StatefulFunctionWrapper(
+        proxy: _StatefulFunctionWrapper[Any, Any] = _StatefulFunctionWrapper(
             _wrapped,
             _core_execution_logic,
             method_name,
