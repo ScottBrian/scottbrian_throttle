@@ -320,23 +320,6 @@ class Throttle(BaseModel):
             return num_requests * self._target_interval_ns
 
     ####################################################################
-    # get_expected_num_completed_reqs
-    ####################################################################
-    def get_expected_num_completed_reqs(self, interval: float) -> int:
-        """Calculate number of requests that completed.
-
-        Args:
-            interval: number of elapsed seconds that requests were being
-              processed
-
-        Returns:
-            The estimated number of requests that were processed during
-            the given interval
-
-        """
-        return int(interval / self._target_interval) + 1
-
-    ####################################################################
     # sync_send_request
     ####################################################################
     def sync_send_request(
