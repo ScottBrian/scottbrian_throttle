@@ -341,6 +341,9 @@ class Throttle(BaseModel):
 
         """
         self.call_count += 1
+        # self.logger.debug(
+        #     f"sync_send_request: {self.call_count=}, {self=}, {id(self)=}"
+        # )
         ############################################################
         # SYNC mode
         ############################################################
@@ -349,6 +352,9 @@ class Throttle(BaseModel):
             self._wait_time_ns = max(
                 0.0, self._next_target_time_ns - self._arrival_time_ns
             )
+            # self.logger.debug(
+            #     f"sync_send_request: {self._arrival_time_ns=}, {self._wait_time_ns=}, {self._next_target_time_ns=}"
+            # )
             if (
                 self._next_target_time_ns + self.lb_adjustment_ns
                 < self._arrival_time_ns

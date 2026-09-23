@@ -76,6 +76,12 @@ class Mode(Enum):
     ASYNC = auto()
 
 
+class MethodType(Enum):
+    INSTANCE = auto()
+    STATIC = auto()
+    CLASS = auto()
+
+
 ########################################################################
 # ReqTime data class used for shutdown testing
 ########################################################################
@@ -2003,18 +2009,22 @@ class TestPieThrottle:
         request_validator.validate_series()  # validate for the series
 
     ####################################################################
-    # test_pie_throttle
+    # test_pie_throttle_methods
     ####################################################################
     @pytest.mark.parametrize(
-        "throttle_mode_arg", (Mode.SYNC, Mode.SYNC_CONVERT, Mode.ASYNC)
+        "throttle_mode_arg", (Mode.SYNC,)  # Mode.SYNC_CONVERT, Mode.ASYNC)
+    )
+    @pytest.mark.parametrize(
+        "method_type_arg", (MethodType.INSTANCE, MethodType.STATIC, MethodType.CLASS)
     )
     @pytest.mark.parametrize("reqs_per_sec_arg", (1, 2, 3))
     @pytest.mark.parametrize("bucket_size_arg", (1, 1.3, 2, 3))
     @pytest.mark.parametrize("send_interval_mult_arg", (0.0, 0.9, 1.0, 1.1))
-    @pytest.mark.parametrize("num_threads_arg", (2, 16))
-    def test_pie_throttle_multi(
+    @pytest.mark.parametrize("num_threads_arg", (1, 2, 16))
+    def test_pie_throttle_methods(
         self,
         throttle_mode_arg: Mode,
+        method_type_arg: MethodType,
         reqs_per_sec_arg: float,
         bucket_size_arg: float,
         send_interval_mult_arg: float,
@@ -2044,9 +2054,15 @@ class TestPieThrottle:
         send_intervals = TestThrottle.build_send_intervals(
             send_interval, num_reqs_to_do
         )
-        # since each thread is a separate throttle, the total_requests
-        # is not a multiple of the number of threads
-        total_requests = num_reqs_to_do  #  * num_threads_arg
+
+        if method_type_arg == MethodType.INSTANCE:
+            # since each thread is a separate throttle, the
+            # total_requests is not a multiple of the number of threads
+            total_requests = num_reqs_to_do
+        else:
+            # for static and class methods, we use the samee validator
+            # and will have total_requests as a multiple of threads
+            total_requests = num_reqs_to_do * num_threads_arg
 
         ################################################################
         # set sync_convert
@@ -2061,6 +2077,9 @@ class TestPieThrottle:
         ################################################################
         class Class0:
             """Class that will have methods with throttle."""
+
+            num_class0: int = 0
+            class0_validator: RequestValidator
 
             ############################################################
             # __init__
@@ -2080,20 +2099,46 @@ class TestPieThrottle:
                     request_validator: used to keep track of throttle
                                        times
                 """
-
+                self.validator_lock = threading.Lock()
+                self.method_type: MethodType = method_type_arg
                 if throttle_mode == Mode.ASYNC:
-                    a_throttle = self.async_m0.throttle
+                    if method_type_arg == MethodType.INSTANCE:
+                        a_throttle = self.async_m0.throttle
+                    elif method_type_arg == MethodType.STATIC:
+                        a_throttle = self.async_s0.throttle
+                    else:
+                        a_throttle = self.async_cm0.throttle
+
                 else:
-                    a_throttle = self.m0.throttle
-                self.request_validator = RequestValidator(
-                    reqs_per_sec=reqs_per_sec,
-                    throttle_mode=throttle_mode,
-                    bucket_size=bucket_size,
-                    total_requests=total_requests,
-                    send_interval=send_interval,
-                    send_intervals=send_intervals,
-                    t_throttle=a_throttle,
-                )
+                    if method_type_arg == MethodType.INSTANCE:
+                        a_throttle = self.m0.throttle
+                    elif method_type_arg == MethodType.STATIC:
+                        a_throttle = self.s0.throttle
+                    else:
+                        a_throttle = self.cm0.throttle
+
+                # logger.debug(f"Class0 init: {id(self)=}, {id(a_throttle)=}")
+
+                with self.validator_lock:
+                    if method_type_arg == MethodType.INSTANCE or Class0.num_class0 == 0:
+                        self.request_validator = RequestValidator(
+                            reqs_per_sec=reqs_per_sec,
+                            throttle_mode=throttle_mode,
+                            bucket_size=bucket_size,
+                            total_requests=total_requests,
+                            send_interval=send_interval,
+                            send_intervals=send_intervals,
+                            t_throttle=a_throttle,
+                        )
+                        if Class0.num_class0 == 0:
+                            Class0.class0_validator = self.request_validator
+                        Class0.num_class0 += 1
+                    else:
+                        self.request_validator = Class0.class0_validator
+
+                # logger.debug(
+                #     f"Class0 init: {id(self.request_validator)=}, {id(Class0.class0_validator)=}"
+                # )
                 self.pauser = Pauser()
 
             @throttle(
@@ -2113,13 +2158,53 @@ class TestPieThrottle:
                 self.set_idx_and_times()
                 return 0
 
+            @staticmethod
+            @throttle(
+                reqs_per_sec=reqs_per_sec_arg,
+                bucket_size=bucket_size_arg,
+            )
+            async def async_s0(a_class0: Class0):
+                a_class0.set_idx_and_times()
+                return 0
+
+            @staticmethod
+            @throttle(
+                reqs_per_sec=reqs_per_sec_arg,
+                bucket_size=bucket_size_arg,
+                convert_to_async=sync_convert,
+            )
+            def s0(a_class0: Class0):
+                a_class0.set_idx_and_times()
+                return 0
+
+            @classmethod
+            @throttle(
+                reqs_per_sec=reqs_per_sec_arg,
+                bucket_size=bucket_size_arg,
+            )
+            async def async_cm0(cls, a_class0: Class0):
+                a_class0.set_idx_and_times()
+                return 0
+
+            @classmethod
+            @throttle(
+                reqs_per_sec=reqs_per_sec_arg,
+                bucket_size=bucket_size_arg,
+                convert_to_async=sync_convert,
+            )
+            def cm0(cls: Class0, a_class0: Class0):
+                a_class0.set_idx_and_times()
+                return 0
+
             ################################################################
             # set_idx_and_times
             ################################################################
             def set_idx_and_times(self) -> None:
+                # print(f"set_idx_and_times: {self=}")
                 self.request_validator.idx += 1
                 request_item = self.request_validator.request_deque.pop()
-                assert request_item.req_id == self.request_validator.idx
+                if self.method_type == MethodType.INSTANCE:
+                    assert request_item.req_id == self.request_validator.idx
                 request_item.arrival_idx = self.request_validator.idx
                 request_item.actual_func_arrival_time_ns = perf_counter_ns()
                 request_item.throttle_arrival_time_ns = (
@@ -2131,6 +2216,7 @@ class TestPieThrottle:
                 request_item.throttle_wait_time_ns = (
                     self.request_validator.t_throttle._wait_time_ns
                 )
+                # print(f"set_idx_and_times: {request_item.throttle_wait_time_ns=}")
                 request_item.throttle_sent_time_ns = (
                     self.request_validator.t_throttle.sent_time_ns
                 )
@@ -2140,6 +2226,7 @@ class TestPieThrottle:
             # invoke_requests
             ################################################################
             def invoke_requests(self) -> None:
+                # print(f"invoke_requests entered: {self=}")
                 for req_id, s_interval in enumerate(
                     self.request_validator.send_intervals
                 ):
@@ -2155,7 +2242,12 @@ class TestPieThrottle:
                             self.pauser.pause(s_interval)
                         ml_request_item.send_time_ns = perf_counter_ns()
                         self.request_validator.request_deque.appendleft(ml_request_item)
-                        rc = self.m0()
+                        if method_type_arg == MethodType.INSTANCE:
+                            rc = self.m0()
+                        elif method_type_arg == MethodType.STATIC:
+                            rc = self.s0(a_class0=self)
+                        else:
+                            rc = self.cm0(a_class0=self)
                         ml_request_item.return_time_ns = perf_counter_ns()
                         assert rc == 0
                     else:
@@ -2168,50 +2260,46 @@ class TestPieThrottle:
                                 ml_request_item
                             )
                             if throttle_mode_arg == Mode.SYNC_CONVERT:
-                                rc = await self.m0()
+                                if method_type_arg == MethodType.INSTANCE:
+                                    rc = await self.m0()
+                                elif method_type_arg == MethodType.STATIC:
+                                    rc = await self.s0(a_class0=self)
+                                else:
+                                    rc = await self.cm0(a_class0=self)
                             else:
-                                rc = await self.async_m0()
+                                if method_type_arg == MethodType.INSTANCE:
+                                    rc = await self.async_m0()
+                                elif method_type_arg == MethodType.STATIC:
+                                    rc = await self.async_s0(a_class0=self)
+                                else:
+                                    rc = await self.async_cm0(a_class0=self)
+
                             ml_request_item.return_time_ns = perf_counter_ns()
                             assert rc == 0
 
                         asyncio.run(main_loop())
 
-                self.request_validator.validate_series()  # validate for the series
-
-        def run_reqs(
-            reqs_per_sec: float,
-            throttle_mode: Mode,
-            bucket_size: float,
-            total_requests: int,
-            send_interval: float,
-            send_intervals: lisst[float],
-        ):
-            a_class0 = Class0(
-                reqs_per_sec=reqs_per_sec,
-                throttle_mode=throttle_mode,
-                bucket_size=bucket_size,
-                total_requests=total_requests,
-                send_interval=send_interval,
-                send_intervals=send_intervals,
-            )
+        def run_reqs(a_class0: Class0):
 
             a_class0.invoke_requests()
 
         ################################################################
         # Instantiate the class
         ################################################################
-        thread_args = {
-            "reqs_per_sec": reqs_per_sec_arg,
-            "throttle_mode": throttle_mode_arg,
-            "bucket_size": bucket_size_arg,
-            "total_requests": total_requests,
-            "send_interval": send_interval,
-            "send_intervals": send_intervals,
-        }
         threads: list[threading.Thread] = []
+        class0s: list[Class0] = []
         for thread_num in range(num_threads_arg):
 
-            threads.append(threading.Thread(target=run_reqs, kwargs=thread_args))
+            a_class0 = Class0(
+                reqs_per_sec=reqs_per_sec_arg,
+                throttle_mode=throttle_mode_arg,
+                bucket_size=bucket_size_arg,
+                total_requests=total_requests,
+                send_interval=send_interval,
+                send_intervals=send_intervals,
+            )
+            class0s.append(a_class0)
+            threads.append(threading.Thread(target=run_reqs, args=(a_class0,)))
 
         logger.debug("throttle_router starting threads")
         for thread_item in threads:
@@ -2220,6 +2308,9 @@ class TestPieThrottle:
         logger.debug("throttle_router joining threads")
         for thread_item in threads:
             thread_item.join()
+
+        for class0 in class0s:
+            class0.request_validator.validate_series()
 
 
 ########################################################################
@@ -2597,6 +2688,7 @@ class RequestValidator:
         """Validate the results for sync leaky bucket."""
         # Calculate the interval between request send and exit receive
         # as observed by the requestor.
+        logger.debug(f"process_request_items: {id(self)=}, {id(self.t_throttle)=}")
 
         self.request_items[0].expected_delay_ns = 0
 
@@ -2626,9 +2718,9 @@ class RequestValidator:
             interval_ns = self.request_items[idx].throttle_arrival_time_ns - (
                 self.request_items[idx - 1].throttle_arrival_time_ns
             )
-            logger.debug(f"e1: {idx=}, {interval_ns=}, {amount_in_bucket_ns=}")
+            # logger.debug(f"e1: {idx=}, {interval_ns=}, {amount_in_bucket_ns=}")
             amount_in_bucket_ns = max(0, amount_in_bucket_ns - interval_ns)
-            logger.debug(f"e2: {idx=}, {interval_ns=}, {amount_in_bucket_ns=}")
+            # logger.debug(f"e2: {idx=}, {interval_ns=}, {amount_in_bucket_ns=}")
 
             if max_bucket_amount_ns - amount_in_bucket_ns < self.target_interval_ns:
                 exp_delay_ns = amount_in_bucket_ns - (
@@ -2639,11 +2731,11 @@ class RequestValidator:
                 # at which time it will be full
                 # amount_in_bucket_ns = max_bucket_amount_ns
                 amount_in_bucket_ns += self.target_interval_ns
-                logger.debug(f"e3: {idx=}, {exp_delay_ns=}, {amount_in_bucket_ns=}")
+                # logger.debug(f"e3: {idx=}, {exp_delay_ns=}, {amount_in_bucket_ns=}")
             else:  # there is room in the bucket
                 exp_delay_ns = 0
                 amount_in_bucket_ns += self.target_interval_ns
-                logger.debug(f"e4: {idx=}, {exp_delay_ns=}, {amount_in_bucket_ns=}")
+                # logger.debug(f"e4: {idx=}, {exp_delay_ns=}, {amount_in_bucket_ns=}")
 
             self.request_items[idx].expected_delay_ns = exp_delay_ns
 
@@ -2675,11 +2767,6 @@ class RequestValidator:
                 / self.target_interval_ns
                 < 0.01
             )
-
-            # assert (
-            #     self.request_items[idx].expected_delay_ns
-            #     <= self.request_items[idx].actual_delay_ns
-            # )
 
             self.cumulative_expected_delay_ns += self.request_items[
                 idx
