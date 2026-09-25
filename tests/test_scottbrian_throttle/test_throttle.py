@@ -2012,7 +2012,7 @@ class TestPieThrottle:
     # test_pie_throttle_methods
     ####################################################################
     @pytest.mark.parametrize(
-        "throttle_mode_arg", (Mode.SYNC,)  # Mode.SYNC_CONVERT, Mode.ASYNC)
+        "throttle_mode_arg", (Mode.SYNC, Mode.SYNC_CONVERT, Mode.ASYNC)
     )
     @pytest.mark.parametrize(
         "method_type_arg", (MethodType.INSTANCE, MethodType.STATIC, MethodType.CLASS)
@@ -2055,14 +2055,7 @@ class TestPieThrottle:
             send_interval, num_reqs_to_do
         )
 
-        if method_type_arg == MethodType.INSTANCE:
-            # since each thread is a separate throttle, the
-            # total_requests is not a multiple of the number of threads
-            total_requests = num_reqs_to_do
-        else:
-            # for static and class methods, we use the samee validator
-            # and will have total_requests as a multiple of threads
-            total_requests = num_reqs_to_do * num_threads_arg
+        total_requests = num_reqs_to_do * num_threads_arg
 
         ################################################################
         # set sync_convert
@@ -2117,10 +2110,22 @@ class TestPieThrottle:
                     else:
                         a_throttle = self.cm0.throttle
 
-                # logger.debug(f"Class0 init: {id(self)=}, {id(a_throttle)=}")
+                time.sleep(0.01)
+                logger.debug(f"Class0 init: {id(self)=}, {id(a_throttle)=}")
+                m0_throttle = self.m0.throttle
+                time.sleep(0.01)
+                logger.debug(f"Class0 init: {id(m0_throttle)=}")
+
+                s0_throttle = self.s0.throttle
+                time.sleep(0.01)
+                logger.debug(f"Class0 init: {id(s0_throttle)=}")
+
+                cm0_throttle = self.cm0.throttle
+                time.sleep(0.01)
+                logger.debug(f"Class0 init: {id(cm0_throttle)=}")
 
                 with self.validator_lock:
-                    if method_type_arg == MethodType.INSTANCE or Class0.num_class0 == 0:
+                    if Class0.num_class0 == 0:
                         self.request_validator = RequestValidator(
                             reqs_per_sec=reqs_per_sec,
                             throttle_mode=throttle_mode,
@@ -2130,15 +2135,15 @@ class TestPieThrottle:
                             send_intervals=send_intervals,
                             t_throttle=a_throttle,
                         )
-                        if Class0.num_class0 == 0:
-                            Class0.class0_validator = self.request_validator
+                        # if Class0.num_class0 == 0:
+                        Class0.class0_validator = self.request_validator
                         Class0.num_class0 += 1
-                    else:
-                        self.request_validator = Class0.class0_validator
+                    # else:
+                    #     self.request_validator = Class0.class0_validator
 
-                # logger.debug(
-                #     f"Class0 init: {id(self.request_validator)=}, {id(Class0.class0_validator)=}"
-                # )
+                logger.debug(
+                    f"Class0 init: {id(self.request_validator)=}, {id(Class0.class0_validator)=}"
+                )
                 self.pauser = Pauser()
 
             @throttle(
@@ -2158,40 +2163,40 @@ class TestPieThrottle:
                 self.set_idx_and_times()
                 return 0
 
-            @staticmethod
             @throttle(
                 reqs_per_sec=reqs_per_sec_arg,
                 bucket_size=bucket_size_arg,
             )
-            async def async_s0(a_class0: Class0):
+            @staticmethod
+            async def async_s0(a_class0: Class0) -> int:
                 a_class0.set_idx_and_times()
                 return 0
 
-            @staticmethod
             @throttle(
                 reqs_per_sec=reqs_per_sec_arg,
                 bucket_size=bucket_size_arg,
                 convert_to_async=sync_convert,
             )
-            def s0(a_class0: Class0):
+            @staticmethod
+            def s0(a_class0: Class0) -> int:
                 a_class0.set_idx_and_times()
                 return 0
 
-            @classmethod
             @throttle(
                 reqs_per_sec=reqs_per_sec_arg,
                 bucket_size=bucket_size_arg,
             )
+            @classmethod
             async def async_cm0(cls, a_class0: Class0):
                 a_class0.set_idx_and_times()
                 return 0
 
-            @classmethod
             @throttle(
                 reqs_per_sec=reqs_per_sec_arg,
                 bucket_size=bucket_size_arg,
                 convert_to_async=sync_convert,
             )
+            @classmethod
             def cm0(cls: Class0, a_class0: Class0):
                 a_class0.set_idx_and_times()
                 return 0
@@ -2200,7 +2205,10 @@ class TestPieThrottle:
             # set_idx_and_times
             ################################################################
             def set_idx_and_times(self) -> None:
-                # print(f"set_idx_and_times: {self=}")
+                logger.debug(
+                    f"set_idx_and_times: {self=}, "
+                    f"{id(self.request_validator)=}, {id(self.request_validator.t_throttle)=}"
+                )
                 self.request_validator.idx += 1
                 request_item = self.request_validator.request_deque.pop()
                 if self.method_type == MethodType.INSTANCE:
@@ -2216,7 +2224,9 @@ class TestPieThrottle:
                 request_item.throttle_wait_time_ns = (
                     self.request_validator.t_throttle._wait_time_ns
                 )
-                # print(f"set_idx_and_times: {request_item.throttle_wait_time_ns=}")
+                logger.debug(
+                    f"set_idx_and_times: {request_item.throttle_wait_time_ns=}"
+                )
                 request_item.throttle_sent_time_ns = (
                     self.request_validator.t_throttle.sent_time_ns
                 )
@@ -2279,9 +2289,9 @@ class TestPieThrottle:
 
                         asyncio.run(main_loop())
 
-        def run_reqs(a_class0: Class0):
-
-            a_class0.invoke_requests()
+        # def run_reqs(a_class0: Class0):
+        #
+        #     a_class0.invoke_requests()
 
         ################################################################
         # Instantiate the class
@@ -2299,7 +2309,10 @@ class TestPieThrottle:
                 send_intervals=send_intervals,
             )
             class0s.append(a_class0)
-            threads.append(threading.Thread(target=run_reqs, args=(a_class0,)))
+            threads.append(threading.Thread(target=a_class0.invoke_requests))
+            # threads.append(
+            #     threading.Thread(target=a_class0.invoke_requests, args=(a_class0,))
+            # )
 
         logger.debug("throttle_router starting threads")
         for thread_item in threads:
@@ -3452,3 +3465,72 @@ class TestThrottleDocstrings:
             f" {funky2.func7b.throttle.call_count=}, "
             f"{funky2.funky_var=}, {id(funky2.func7b.throttle)=}\n"
         )
+
+    ####################################################################
+    # test_throttle_example_8
+    ####################################################################
+    def test_throttle_example_8(self, capsys: Any) -> None:
+        """Method test_throttle_example_8.
+
+        Args:
+            capsys: pytest fixture to capture print output
+
+        """
+
+        hdr_str = ":Example 7: get length for an asynchronous throttle"
+        flowers(hdr_str)
+
+        from scottbrian_throttle.throttle import throttle
+
+        class Funky:
+            def __init__(self, a_var: int) -> None:
+                self.funky_var = a_var
+
+            # @throttle
+            # @staticmethod
+            # def func7a() -> None:
+            #     pass
+
+            @throttle
+            @classmethod
+            def func7b(cls) -> None:
+                pass
+
+        funky1 = Funky(a_var=2)
+        funky2 = Funky(a_var=102)
+
+        # funky1.func7a()
+        #
+        # # funky1.func7b()
+        # funky1.func7b()
+        #
+        # funky2.func7a()
+        # funky2.func7a()
+        # funky2.func7a()
+
+        # funky2.func7b()
+        # funky2.func7b()
+        # funky2.func7b()
+        # funky2.func7b()
+
+        # print(
+        #     f"\n{funky1.func7a.throttle.reqs_per_sec=},"
+        #     f" {funky1.func7a.throttle.call_count=}, "
+        #     f"{funky1.funky_var=}, {id(funky1.func7a.throttle)=}\n"
+        # )
+        # print(
+        #     f"\n{funky1.func7b.throttle.reqs_per_sec=},"
+        #     f" {funky1.func7b.throttle.call_count=},"
+        #     f" {funky1.funky_var=}, {id(funky1.func7b.throttle)=}\n"
+        # )
+        #
+        # print(
+        #     f"\n{funky2.func7a.throttle.reqs_per_sec=},"
+        #     f" {funky2.func7a.throttle.call_count=}, "
+        #     f"{funky2.funky_var=}, {id(funky2.func7a.throttle)=}\n"
+        # )
+        # print(
+        #     f"\n{funky2.func7b.throttle.reqs_per_sec=},"
+        #     f" {funky2.func7b.throttle.call_count=}, "
+        #     f"{funky2.funky_var=}, {id(funky2.func7b.throttle)=}\n"
+        # )
