@@ -98,7 +98,6 @@ import contextvars  # Native context tracking
 import logging
 import threading
 import time
-from enum import Enum, auto
 from typing import (
     Any,
     Callable,
@@ -108,85 +107,114 @@ from typing import (
 )
 
 import scottbrian_locking.se_lock as selk  # noqa F401
-from pydantic import BaseModel, Field, ConfigDict
 from scottbrian_utils.pauser import Pauser
 
 
 ########################################################################
 # Local
 ########################################################################
+class Throttle:
+    """Throttle class."""
 
-
-class Throttle(BaseModel):
-    """Throttle class.
-
-
-    Args:
-        reqs_per_sec: The number of requests that can be made in
-                      one second.
-        bucket_size: Specifies the number of requests that can be
-                     conceptually placed into the bucket for the
-                     leaky bucket algorithm. As requests arrive,
-                     the bucket is checked to determine if it has
-                     room for the request. If so, it is placed into
-                     the bucket and sent without delay. If not, the
-                     request is delayed until enough time has
-                     elapsed for the bucket to leak out enough to
-                     allow the request to fit. A specification of
-                     one for the bucket_size will effectively
-                     cause non-leaky bucket behavior, meaning that
-                     each request that arrives before the previous
-                     request interval has elapsed will be delayed.
-                     The bucket_size must be greater than or equal
-                     to 1.
-        convert_to_async: If the function being throttled is
-                          synchronous and the user is in an asyncio
-                          environment, the user can specify
-                          *convert_to_async=True* to request that
-                          asyncio.sleep be used for delay if needed
-                          and the function is to be run in a
-                          separate thread using asyncio.to_thread.
-                          Otherwise, if *convert_to_async=False*,
-                          the use can use asyncio.to_thread to
-                          run the synchronous function is a separate
-                          thread and time.sleep will be used for
-                          any delay as needed. Note that
-                          *convert_to_async* has no meaning is a
-                          non-asyncio environment.
-        name: The name of the function that was wrapped by the
-              throttle decorator, meaning the function that is being
-              throttled.
-
-
-    """
-
-    model_config = ConfigDict(extra="allow")
-
-    reqs_per_sec: float = Field(
-        gt=0, default=1, description="Number of requests allowed per second"
-    )
-    bucket_size: float = Field(ge=1, default=1, description="Size of leaky bucket")
-    convert_to_async: bool = False
-    name: str | None = None
-
-    class Mode(Enum):
-        SYNC = auto()
-        ASYNC = auto()
+    # class Mode(Enum):
+    #     SYNC = auto()
+    #     ASYNC = auto()
 
     SECS_2_NS: Final[int] = 1000000000
     NS_2_SECS: Final[float] = 0.000000001
 
-    def model_post_init(self, context: Any) -> None:
+    __slots__ = (
+        "_arrival_time_ns",
+        "_next_target_time_ns",
+        "_target_interval",
+        "_target_interval_ns",
+        "_wait_time_ns",
+        "async_lock",
+        "call_count",
+        "convert_to_async",
+        "bucket_size",
+        "lb_adjustment",
+        "lb_adjustment_ns",
+        "lb_with_one_request",
+        "logger",
+        "pauser",
+        "reqs_per_sec",
+        "sent_time_ns",
+        "sync_lock",
+        "t_name",
+    )
+
+    ####################################################################
+    # __init__
+    ####################################################################
+    def __init__(
+        self,
+        *,
+        reqs_per_sec: float,
+        bucket_size: float,
+        convert_to_async: bool,
+        name: str,
+    ) -> None:
+        """Initialize an instance of the Throttle class.
+
+        Args:
+            reqs_per_sec: The number of requests that can be made in
+                          one second.
+            bucket_size: Specifies the number of requests that can be
+                         conceptually placed into the bucket for the
+                         leaky bucket algorithm. As requests arrive,
+                         the bucket is checked to determine if it has
+                         room for the request. If so, it is placed into
+                         the bucket and sent without delay. If not, the
+                         request is delayed until enough time has
+                         elapsed for the bucket to leak out enough to
+                         allow the request to fit. A specification of
+                         one for the bucket_size will effectively
+                         cause non-leaky bucket behavior, meaning that
+                         each request that arrives before the previous
+                         request interval has elapsed will be delayed.
+                         The bucket_size must be greater than or equal
+                         to 1.
+            convert_to_async: If the function being throttled is
+                              synchronous and the user is in an asyncio
+                              environment, the user can specify
+                              *convert_to_async=True* to request that
+                              asyncio.sleep be used for delay if needed
+                              and the function is to be run in a
+                              separate thread using asyncio.to_thread.
+                              Otherwise, if *convert_to_async=False*,
+                              the use can use asyncio.to_thread to
+                              run the synchronous function is a separate
+                              thread and time.sleep will be used for
+                              any delay as needed. Note that
+                              *convert_to_async* has no meaning is a
+                              non-asyncio environment.
+            name: The name of the function that was wrapped by the
+                  throttle decorator, meaning the function that is being
+                  throttled.
+
+        """
 
         ################################################################
         # set up logging
         ################################################################
-        # self.logger = logging.getLogger(__name__)
+        self.logger = logging.getLogger(__name__)
+
+        ################################################################
+        # set input vars
+        ################################################################
+        self.reqs_per_sec = reqs_per_sec
+
+        self.bucket_size = bucket_size
+
+        self.convert_to_async = convert_to_async
+
+        self.t_name = name
 
         ################################################################
         # Set remainder of vars
         ################################################################
-        self._target_interval = 1 / self.reqs_per_sec
+        self._target_interval = 1 / reqs_per_sec
         self._target_interval_ns: float = self._target_interval * Throttle.SECS_2_NS
         self.sync_lock = threading.Lock()
         self.async_lock = asyncio.Lock()
@@ -246,8 +274,7 @@ class Throttle(BaseModel):
             f"reqs_per_sec={self.reqs_per_sec}, "
             f"bucket_size={self.bucket_size}, "
             f"convert_to_async={str(self.convert_to_async)}, "
-            # f"name={self.t_name}"
-            f"name={self.name}"
+            f"name={self.t_name}"
         )
 
         return f"{classname}({parms})"
@@ -348,9 +375,6 @@ class Throttle(BaseModel):
             self._arrival_time_ns = time.perf_counter_ns()
             self._wait_time_ns = max(
                 0.0, self._next_target_time_ns - self._arrival_time_ns
-            )
-            self.logger.debug(
-                f"sync_send_req: {self=}, {id(self)=}, {self._wait_time_ns=}"
             )
             if (
                 self._next_target_time_ns + self.lb_adjustment_ns
@@ -466,10 +490,10 @@ class Throttle(BaseModel):
     def _capture_apm_error(self, e: Exception, context_name: str) -> None:
         # 1. Standard structured logging (parsed cleanly by Datadog/ELK)
         self.logger.debug(
-            msg=f"Exception in {context_name} for '{self.name}': {e}",
+            msg=f"Exception in {context_name} for '{self.t_name}': {e}",
             exc_info=True,
             extra={
-                "function_name": self.name,
+                "function_name": self.t_name,
                 "throttle_delay": self._wait_time_ns * Throttle.NS_2_SECS,
             },
         )

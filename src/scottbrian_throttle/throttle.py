@@ -53,7 +53,6 @@ the throttle maintains a limit of 1 call per second.
 ########################################################################
 # Standard Library
 ########################################################################
-# import contextvars
 import inspect
 import logging
 from collections.abc import Coroutine
@@ -69,7 +68,7 @@ from typing import (
     TypeVar,
 )
 
-from pydantic import validate_call, Field
+from pydantic import Field, validate_call, InstanceOf
 from wrapt import PartialCallableObjectProxy
 ########################################################################
 # Third Party
@@ -82,11 +81,6 @@ logger = logging.getLogger(__name__)
 ########################################################################
 # Local
 ########################################################################
-
-
-# active_state_ctx: contextvars.ContextVar[Throttle] = contextvars.ContextVar(
-#     "active_state"
-# )
 
 ########################################################################
 # Pie Throttle Decorator
@@ -196,7 +190,7 @@ def add_throttle_sync_attr(func: F) -> FuncWithThrottleAttr[F]:
 
 @validate_call
 def throttle(
-    _wrapped: Callable[..., Any] | None = None,  # F | None = None,
+    _wrapped: InstanceOf[classmethod] | InstanceOf[staticmethod] | F | None = None,
     *,
     reqs_per_sec: float = Field(gt=0, default=1),
     bucket_size: float = Field(ge=1, default=1),
@@ -300,170 +294,40 @@ def throttle(
         name=_wrapped.__name__,
     )
 
-    # @decorator
-    # def t_decorator(wrapped: F) -> Callable[P, R] | Coroutine[Any, Any, R]:
-    #     is_async_func = inspect.iscoroutinefunction(wrapped)
-    #     logger.debug(
-    #         f"t_decorator: {wrapped=}, {inspect.isclass(wrapped)=}  {is_async_func=}"
-    #     )
-    #
-    #     # @decorator
-    #     def sync__core_execution_logic(
-    #         wrapped_func: F,
-    #         instance: object,
-    #         args: tuple[Any, ...],
-    #         kwargs: dict[str, Any],
-    #     ) -> Any:
-    #         if instance is None:
-    #             if inspect.isclass(wrapped):
-    #                 # Decorator was applied to a class.
-    #                 logger.debug(
-    #                     f"sync_core_execcution_logic: class: {instance=}, {inspect.isclass(wrapped)=}  "
-    #                 )
-    #             else:
-    #                 # Decorator was applied to a function or staticmethod.
-    #                 logger.debug(
-    #                     f"sync_core_execcution_logic: function or staticmethod: {instance=}, {inspect.isclass(wrapped)=}  "
-    #                 )
-    #         else:
-    #             if inspect.isclass(instance):
-    #                 # Decorator was applied to a classmethod.
-    #                 logger.debug(
-    #                     f"sync_core_execcution_logic: classmethod: {instance=}, {inspect.isclass(instance)=}  "
-    #                 )
-    #             else:
-    #                 # Decorator was applied to an instancemethod.
-    #                 logger.debug(
-    #                     f"sync_core_execcution_logic: instancemethod: {instance=}, {inspect.isclass(instance)=}  "
-    #                 )
-    #
-    #         return a_throttle.sync_send_request(wrapped_func, *args, **kwargs)
-    #
-    #     # @decorator
-    #     async def async__core_execution_logic(
-    #         wrapped_func: F,
-    #         instance: object,
-    #         args: tuple[Any, ...],
-    #         kwargs: dict[str, Any],
-    #     ) -> Any:
-    #         if instance is None:
-    #             if inspect.isclass(wrapped):
-    #                 # Decorator was applied to a class.
-    #                 logger.debug(
-    #                     f"async_core_execcution_logic: class: {instance=}, {inspect.isclass(wrapped)=}  "
-    #                 )
-    #             else:
-    #                 # Decorator was applied to a function or staticmethod.
-    #                 logger.debug(
-    #                     f"async_core_execcution_logic: function or staticmethod: {instance=}, {inspect.isclass(wrapped)=}  "
-    #                 )
-    #         else:
-    #             if inspect.isclass(instance):
-    #                 # Decorator was applied to a classmethod.
-    #                 logger.debug(
-    #                     f"*** async_core_execcution_logic: classmethod: {instance=}, {inspect.isclass(instance)=}  "
-    #                 )
-    #             else:
-    #                 # Decorator was applied to an instancemethod.
-    #                 logger.debug(
-    #                     f"*** async_core_execcution_logic: instancemethod: {instance=}, {inspect.isclass(instance)=}  "
-    #                 )
-    #         return await a_throttle.async_send_request(wrapped_func, *args, **kwargs)
-
-    # def t_decorator(wrapped: F,
-    #         instance: object,
-    #         args: tuple[Any, ...],
-    #         kwargs: dict[str, Any],
-    #     ) -> Callable[P, R] | Coroutine[Any, Any, R]:
     def t_decorator(wrapped: F) -> Callable[P, R] | Coroutine[Any, Any, R]:
         is_async_func = inspect.iscoroutinefunction(wrapped)
-        logger.debug(
-            f"t_decorator: {wrapped=}, {inspect.isclass(wrapped)=}  {is_async_func=}"
-        )
 
         @decorator
-        def sync__core_execution_logic(
+        def sync_wrapper(
             wrapped_func: F,
             instance: object,
             args: tuple[Any, ...],
             kwargs: dict[str, Any],
         ) -> Any:
-            if instance is None:
-                if inspect.isclass(wrapped):
-                    # Decorator was applied to a class.
-                    logger.debug(
-                        f"sync_core_execcution_logic: class: {instance=}, {inspect.isclass(wrapped)=}  "
-                    )
-                else:
-                    # Decorator was applied to a function or staticmethod.
-                    logger.debug(
-                        f"sync_core_execcution_logic: function or staticmethod: {instance=}, {inspect.isclass(wrapped)=}  "
-                    )
-            else:
-                if inspect.isclass(instance):
-                    # Decorator was applied to a classmethod.
-                    logger.debug(
-                        f"sync_core_execcution_logic: classmethod: {instance=}, {inspect.isclass(instance)=}  "
-                    )
-                else:
-                    # Decorator was applied to an instancemethod.
-                    logger.debug(
-                        f"sync_core_execcution_logic: instancemethod: {instance=}, {inspect.isclass(instance)=}  "
-                    )
 
             return a_throttle.sync_send_request(wrapped_func, *args, **kwargs)
 
         @decorator
-        async def async__core_execution_logic(
+        async def async_wrapper(
             wrapped_func: F,
             instance: object,
             args: tuple[Any, ...],
             kwargs: dict[str, Any],
         ) -> Any:
-            if instance is None:
-                if inspect.isclass(wrapped):
-                    # Decorator was applied to a class.
-                    logger.debug(
-                        f"async_core_execcution_logic: class: {instance=}, {inspect.isclass(wrapped)=}  "
-                    )
-                else:
-                    # Decorator was applied to a function or staticmethod.
-                    logger.debug(
-                        f"async_core_execcution_logic: function or staticmethod: {instance=}, {inspect.isclass(wrapped)=}  "
-                    )
-            else:
-                if inspect.isclass(instance):
-                    # Decorator was applied to a classmethod.
-                    logger.debug(
-                        f"*** async_core_execcution_logic: classmethod: {instance=}, {inspect.isclass(instance)=}  "
-                    )
-                else:
-                    # Decorator was applied to an instancemethod.
-                    logger.debug(
-                        f"*** async_core_execcution_logic: instancemethod: {instance=}, {inspect.isclass(instance)=}  "
-                    )
+
             return await a_throttle.async_send_request(wrapped_func, *args, **kwargs)
 
         if is_async_func or convert_to_async:
-            return async__core_execution_logic(wrapped)
+            return async_wrapper(wrapped)
         else:
-            return sync__core_execution_logic(wrapped)
+            return sync_wrapper(wrapped)
 
     wrapper = t_decorator(_wrapped)
-    logger.debug(f"after wrapper = t_decorator(_wrapped): {wrapper=}")
 
     wrapper = add_throttle_sync_attr(wrapper)
 
-    logger.debug(f"after wrapper = add_throttle_sync_attr(wrapper): {wrapper=}")
-
     wrapper.throttle = a_throttle
-
-    logger.debug(
-        f"after wrapper.throttle = a_throttle: {wrapper=}, {wrapper.throttle=}"
-    )
 
     return wrapper
 
     # return cast(FuncWithThrottleAttr[F], wrapper)
-
-    # return t_decorator(_wrapped)

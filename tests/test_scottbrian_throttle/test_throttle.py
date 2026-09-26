@@ -171,168 +171,23 @@ class TestThrottleCorrectSource:
 ########################################################################
 # TestThrottleBasic class to test Throttle methods
 ########################################################################
-class TestThrottleErrors:
-    """TestThrottle class."""
-
-    def test_throttle_bad_args(self) -> None:
-        """test_throttle using bad arguments."""
-
-        ################################################################
-        # mainline
-        ################################################################
-
-        ################################################################
-        # bad reqs_per_sec
-        ################################################################
-        ml_error_msg = re.escape(
-            "1 validation error for Throttle\nreqs_per_sec\n  "
-            "Input should be greater than 0 "
-            "[type=greater_than, input_value=-1, input_type=int]"
-        )
-
-        with pytest.raises(ValidationError, match=ml_error_msg):
-            _ = Throttle(reqs_per_sec=-1)
-
-        ml_error_msg = re.escape(
-            "1 validation error for Throttle\nreqs_per_sec\n  "
-            "Input should be greater than 0 "
-            "[type=greater_than, input_value=0, input_type=int]"
-        )
-        with pytest.raises(ValidationError, match=ml_error_msg):
-            _ = Throttle(reqs_per_sec=0)
-
-        ml_error_msg = re.escape(
-            "1 validation error for Throttle\nreqs_per_sec\n  "
-            "Input should be a valid number, unable to parse string as a number "
-            "[type=float_parsing, input_value='one', input_type=str]"
-        )
-        with pytest.raises(ValidationError, match=ml_error_msg):
-            _ = Throttle(reqs_per_sec="one")  # type: ignore
-
-        # the following are valid
-        _ = Throttle(reqs_per_sec=0.1)
-        _ = Throttle(reqs_per_sec=1)
-        _ = Throttle(reqs_per_sec=1.1)
-        ################################################################
-        # bad bucket_size SYNC
-        ################################################################
-        ml_error_msg = re.escape(
-            "1 validation error for Throttle\nbucket_size\n  "
-            "Input should be greater than or equal to 1 "
-            "[type=greater_than_equal, input_value=-1, input_type=int]"
-        )
-
-        with pytest.raises(ValidationError, match=ml_error_msg):
-            _ = Throttle(bucket_size=-1)
-
-        ml_error_msg = re.escape(
-            "1 validation error for Throttle\nbucket_size\n  "
-            "Input should be greater than or equal to 1 "
-            "[type=greater_than_equal, input_value=0, input_type=int]"
-        )
-        with pytest.raises(ValidationError, match=ml_error_msg):
-            _ = Throttle(bucket_size=0)
-
-        ml_error_msg = re.escape(
-            "1 validation error for Throttle\nbucket_size\n  "
-            "Input should be greater than or equal to 1 "
-            "[type=greater_than_equal, input_value=0.3, input_type=float]"
-        )
-        with pytest.raises(ValidationError, match=ml_error_msg):
-            _ = Throttle(bucket_size=0.3)
-
-        ml_error_msg = re.escape(
-            "1 validation error for Throttle\nbucket_size\n  "
-            "Input should be a valid number, unable to parse string as a number "
-            "[type=float_parsing, input_value='two', input_type=str]"
-        )
-        with pytest.raises(ValidationError, match=ml_error_msg):
-            _ = Throttle(bucket_size="two")  # type: ignore
-
-        # the following are valid
-        _ = Throttle(bucket_size=1)
-        _ = Throttle(bucket_size=1.1)
-        ################################################################
-        # bad convert_to_async
-        ################################################################
-        ml_error_msg = re.escape(
-            "1 validation error for Throttle\nconvert_to_async\n  "
-            "Input should be a valid boolean, unable to interpret input "
-            "[type=bool_parsing, input_value='blue', input_type=str]"
-        )
-        with pytest.raises(ValidationError, match=ml_error_msg):
-            _ = Throttle(convert_to_async="blue")  # type: ignore
-
-        ml_error_msg = re.escape(
-            "1 validation error for Throttle\nconvert_to_async\n  "
-            "Input should be a valid boolean, unable to interpret input "
-            "[type=bool_parsing, input_value=2, input_type=int]"
-        )
-        with pytest.raises(ValidationError, match=ml_error_msg):
-            _ = Throttle(convert_to_async=2)  # type: ignore
-
-        # the following are valid
-        _ = Throttle(convert_to_async=True)
-        _ = Throttle(convert_to_async=False)
-        _ = Throttle(convert_to_async="True")  # type: ignore
-        _ = Throttle(convert_to_async="False")  # type: ignore
-        _ = Throttle(convert_to_async=1)  # type: ignore
-        _ = Throttle(convert_to_async=0)  # type: ignore
-        _ = Throttle(convert_to_async="yEs")  # type: ignore
-        _ = Throttle(convert_to_async="No")  # type: ignore
-
-        ################################################################
-        # bad name
-        ################################################################
-        ml_error_msg = re.escape(
-            "1 validation error for Throttle\nname\n  "
-            "Input should be a valid string "
-            "[type=string_type, input_value=0, input_type=int]"
-        )
-        with pytest.raises(ValidationError, match=ml_error_msg):
-            _ = Throttle(name=0)  # type: ignore
-
-        ml_error_msg = re.escape(
-            "1 validation error for Throttle\nname\n  "
-            "Input should be a valid string "
-            "[type=string_type, input_value=1.1, input_type=float]"
-        )
-        with pytest.raises(ValidationError, match=ml_error_msg):
-            _ = Throttle(name=1.1)  # type: ignore
-
-        ml_error_msg = re.escape(
-            "1 validation error for Throttle\nname\n  "
-            "Input should be a valid string "
-            "[type=string_type, input_value=True, input_type=bool]"
-        )
-        with pytest.raises(ValidationError, match=ml_error_msg):
-            _ = Throttle(name=True)  # type: ignore
-
-        # the following are valid
-        _ = Throttle(name="blue")
-        _ = Throttle(name=b"blue")  # type: ignore
-
-
-########################################################################
-# TestThrottleBasic class to test Throttle methods
-########################################################################
 class TestThrottleBasic:
     """Test basic functions of Throttle."""
 
     ####################################################################
     # repr
     ####################################################################
-    @pytest.mark.parametrize("reqs_per_sec_arg", (None, 0.5, 1, 2))
-    @pytest.mark.parametrize("bucket_size_arg", (None, 1, 2.2))
-    @pytest.mark.parametrize("convert_to_async_arg", (None, True, False))
-    @pytest.mark.parametrize("name_arg", (None, "t1", "t2"))
+    @pytest.mark.parametrize("reqs_per_sec_arg", (0.5, 1, 2))
+    @pytest.mark.parametrize("bucket_size_arg", (1, 2.2))
+    @pytest.mark.parametrize("convert_to_async_arg", (True, False))
+    @pytest.mark.parametrize("name_arg", ("t1", "t2"))
     @etrace(omit_caller=True)
     def test_throttle_repr(
         self,
-        reqs_per_sec_arg: None | float,
-        bucket_size_arg: None | float,
-        convert_to_async_arg: None | bool,
-        name_arg: None | str,
+        reqs_per_sec_arg: float,
+        bucket_size_arg: float,
+        convert_to_async_arg: bool,
+        name_arg: str,
     ) -> None:
         """test_throttle repr with various reqs_per_sec.
 
@@ -346,300 +201,22 @@ class TestThrottleBasic:
         ################################################################
         # throttle
         ################################################################
+        a_throttle = Throttle(
+            reqs_per_sec=reqs_per_sec_arg,
+            bucket_size=bucket_size_arg,
+            convert_to_async=convert_to_async_arg,
+            name=name_arg,
+        )
 
-        if bucket_size_arg is not None:
-            bucket_size_arg = float(bucket_size_arg)
-        # 0 0 0 0
-        if (
-            reqs_per_sec_arg is None
-            and bucket_size_arg is None
-            and convert_to_async_arg is None
-            and name_arg is None
-        ):
-            a_throttle = Throttle()
-            expected_repr_str = (
-                "Throttle("
-                "reqs_per_sec=1, "
-                "bucket_size=1, "
-                "convert_to_async=False, "
-                "name=None)"
-            )
-        # 0 0 0 1
-        elif (
-            reqs_per_sec_arg is None
-            and bucket_size_arg is None
-            and convert_to_async_arg is None
-            and name_arg is not None
-        ):
-            a_throttle = Throttle(name=name_arg)
+        expected_repr_str = (
+            f"Throttle("
+            f"reqs_per_sec={reqs_per_sec_arg}, "
+            f"bucket_size={bucket_size_arg}, "
+            f"convert_to_async={convert_to_async_arg}, "
+            f"name={name_arg})"
+        )
 
-            expected_repr_str = (
-                "Throttle("
-                "reqs_per_sec=1, "
-                "bucket_size=1, "
-                "convert_to_async=False, "
-                f"name={name_arg})"
-            )
-        # 0 0 1 0
-        elif (
-            reqs_per_sec_arg is None
-            and bucket_size_arg is None
-            and convert_to_async_arg is not None
-            and name_arg is None
-        ):
-            a_throttle = Throttle(convert_to_async=convert_to_async_arg)
-
-            expected_repr_str = (
-                "Throttle("
-                "reqs_per_sec=1, "
-                "bucket_size=1, "
-                f"convert_to_async={convert_to_async_arg}, "
-                "name=None)"
-            )
-        # 0 0 1 1
-        elif (
-            reqs_per_sec_arg is None
-            and bucket_size_arg is None
-            and convert_to_async_arg is not None
-            and name_arg is not None
-        ):
-            a_throttle = Throttle(convert_to_async=convert_to_async_arg, name=name_arg)
-
-            expected_repr_str = (
-                f"Throttle("
-                f"reqs_per_sec=1, "
-                f"bucket_size=1, "
-                f"convert_to_async={convert_to_async_arg}, "
-                f"name={name_arg})"
-            )
-        # 0 1 0 0
-        elif (
-            reqs_per_sec_arg is None
-            and bucket_size_arg is not None
-            and convert_to_async_arg is None
-            and name_arg is None
-        ):
-            a_throttle = Throttle(bucket_size=bucket_size_arg)
-
-            expected_repr_str = (
-                f"Throttle("
-                f"reqs_per_sec=1, "
-                f"bucket_size={bucket_size_arg}, "
-                f"convert_to_async=False, "
-                f"name=None)"
-            )
-        # 0 1 0 1
-        elif (
-            reqs_per_sec_arg is None
-            and bucket_size_arg is not None
-            and convert_to_async_arg is None
-            and name_arg is not None
-        ):
-            a_throttle = Throttle(bucket_size=bucket_size_arg, name=name_arg)
-
-            expected_repr_str = (
-                f"Throttle("
-                f"reqs_per_sec=1, "
-                f"bucket_size={bucket_size_arg}, "
-                f"convert_to_async=False, "
-                f"name={name_arg})"
-            )
-        # 0 1 1 0
-        elif (
-            reqs_per_sec_arg is None
-            and bucket_size_arg is not None
-            and convert_to_async_arg is not None
-            and name_arg is None
-        ):
-            a_throttle = Throttle(
-                bucket_size=bucket_size_arg, convert_to_async=convert_to_async_arg
-            )
-
-            expected_repr_str = (
-                f"Throttle("
-                f"reqs_per_sec=1, "
-                f"bucket_size={bucket_size_arg}, "
-                f"convert_to_async={convert_to_async_arg}, "
-                f"name=None)"
-            )
-        # 0 1 1 1
-        elif (
-            reqs_per_sec_arg is None
-            and bucket_size_arg is not None
-            and convert_to_async_arg is not None
-            and name_arg is not None
-        ):
-            a_throttle = Throttle(
-                bucket_size=bucket_size_arg,
-                convert_to_async=convert_to_async_arg,
-                name=name_arg,
-            )
-
-            expected_repr_str = (
-                f"Throttle("
-                f"reqs_per_sec=1, "
-                f"bucket_size={bucket_size_arg}, "
-                f"convert_to_async={convert_to_async_arg}, "
-                f"name={name_arg})"
-            )
-        # 1 0 0 0
-        elif (
-            reqs_per_sec_arg is not None
-            and bucket_size_arg is None
-            and convert_to_async_arg is None
-            and name_arg is None
-        ):
-            a_throttle = Throttle(reqs_per_sec=reqs_per_sec_arg)
-            expected_repr_str = (
-                f"Throttle("
-                f"reqs_per_sec={reqs_per_sec_arg}, "
-                f"bucket_size=1, "
-                f"convert_to_async=False, "
-                f"name=None)"
-            )
-        # 1 0 0 1
-        elif (
-            reqs_per_sec_arg is not None
-            and bucket_size_arg is None
-            and convert_to_async_arg is None
-            and name_arg is not None
-        ):
-            a_throttle = Throttle(reqs_per_sec=reqs_per_sec_arg, name=name_arg)
-
-            expected_repr_str = (
-                f"Throttle("
-                f"reqs_per_sec={reqs_per_sec_arg}, "
-                f"bucket_size=1, "
-                f"convert_to_async=False, "
-                f"name={name_arg})"
-            )
-        # 1 0 1 0
-        elif (
-            reqs_per_sec_arg is not None
-            and bucket_size_arg is None
-            and convert_to_async_arg is not None
-            and name_arg is None
-        ):
-            a_throttle = Throttle(
-                reqs_per_sec=reqs_per_sec_arg, convert_to_async=convert_to_async_arg
-            )
-
-            expected_repr_str = (
-                f"Throttle("
-                f"reqs_per_sec={reqs_per_sec_arg}, "
-                f"bucket_size=1, "
-                f"convert_to_async={convert_to_async_arg}, "
-                f"name=None)"
-            )
-        # 1 0 1 1
-        elif (
-            reqs_per_sec_arg is not None
-            and bucket_size_arg is None
-            and convert_to_async_arg is not None
-            and name_arg is not None
-        ):
-            a_throttle = Throttle(
-                reqs_per_sec=reqs_per_sec_arg,
-                convert_to_async=convert_to_async_arg,
-                name=name_arg,
-            )
-
-            expected_repr_str = (
-                f"Throttle("
-                f"reqs_per_sec={reqs_per_sec_arg}, "
-                f"bucket_size=1, "
-                f"convert_to_async={convert_to_async_arg}, "
-                f"name={name_arg})"
-            )
-        # 1 1 0 0
-        elif (
-            reqs_per_sec_arg is not None
-            and bucket_size_arg is not None
-            and convert_to_async_arg is None
-            and name_arg is None
-        ):
-            a_throttle = Throttle(
-                reqs_per_sec=reqs_per_sec_arg, bucket_size=bucket_size_arg
-            )
-
-            expected_repr_str = (
-                f"Throttle("
-                f"reqs_per_sec={reqs_per_sec_arg}, "
-                f"bucket_size={bucket_size_arg}, "
-                f"convert_to_async=False, "
-                f"name=None)"
-            )
-        # 1 1 0 1
-        elif (
-            reqs_per_sec_arg is not None
-            and bucket_size_arg is not None
-            and convert_to_async_arg is None
-            and name_arg is not None
-        ):
-            a_throttle = Throttle(
-                reqs_per_sec=reqs_per_sec_arg,
-                bucket_size=bucket_size_arg,
-                name=name_arg,
-            )
-
-            expected_repr_str = (
-                f"Throttle("
-                f"reqs_per_sec={reqs_per_sec_arg}, "
-                f"bucket_size={bucket_size_arg}, "
-                f"convert_to_async=False, "
-                f"name={name_arg})"
-            )
-        # 1 1 1 0
-        elif (
-            reqs_per_sec_arg is not None
-            and bucket_size_arg is not None
-            and convert_to_async_arg is not None
-            and name_arg is None
-        ):
-            a_throttle = Throttle(
-                reqs_per_sec=reqs_per_sec_arg,
-                bucket_size=bucket_size_arg,
-                convert_to_async=convert_to_async_arg,
-            )
-
-            expected_repr_str = (
-                f"Throttle("
-                f"reqs_per_sec={reqs_per_sec_arg}, "
-                f"bucket_size={bucket_size_arg}, "
-                f"convert_to_async={convert_to_async_arg}, "
-                f"name=None)"
-            )
-        # 1 1 1 1
-        elif (
-            reqs_per_sec_arg is not None
-            and bucket_size_arg is not None
-            and convert_to_async_arg is not None
-            and name_arg is not None
-        ):
-            a_throttle = Throttle(
-                reqs_per_sec=reqs_per_sec_arg,
-                bucket_size=bucket_size_arg,
-                convert_to_async=convert_to_async_arg,
-                name=name_arg,
-            )
-
-            expected_repr_str = (
-                f"Throttle("
-                f"reqs_per_sec={reqs_per_sec_arg}, "
-                f"bucket_size={bucket_size_arg}, "
-                f"convert_to_async={convert_to_async_arg}, "
-                f"name={name_arg})"
-            )
-
-        else:
-            # cause failure since we should never reach this else
-            a_throttle = Throttle(reqs_per_sec=-1)
-            expected_repr_str = (
-                "Throttle(" "reqs_per_sec=None, " "bucket_size=None, " "name=None, "
-            )
-
-        if reqs_per_sec_arg is None:
-            assert repr(a_throttle) == expected_repr_str
+        assert repr(a_throttle) == expected_repr_str
 
 
 ########################################################################
@@ -1240,6 +817,7 @@ class TestThrottle:
             reqs_per_sec=reqs_per_sec,
             bucket_size=bucket_size,
             convert_to_async=sync_convert,
+            name="test_name",
         )
 
         ################################################################
@@ -2379,7 +1957,12 @@ class TestThrottleMisc:
         ################################################################
         # create a sync throttle_mode throttle
         ################################################################
-        a_throttle1 = Throttle(reqs_per_sec=reqs_per_sec_arg)
+        a_throttle1 = Throttle(
+            reqs_per_sec=reqs_per_sec_arg,
+            bucket_size=1,
+            convert_to_async=False,
+            name="test_name",
+        )
 
         interval = 1 / reqs_per_sec_arg
         interval_ns = interval * SECS_2_NS
@@ -2401,7 +1984,12 @@ class TestThrottleMisc:
         ################################################################
         # create a sync throttle_mode throttle
         ################################################################
-        a_throttle1 = Throttle(reqs_per_sec=reqs_per_sec_arg)
+        a_throttle1 = Throttle(
+            reqs_per_sec=reqs_per_sec_arg,
+            bucket_size=1,
+            convert_to_async=False,
+            name="test_name",
+        )
 
         interval = 1 / reqs_per_sec_arg
         for num_reqs in range(1, 10):
@@ -3486,10 +3074,10 @@ class TestThrottleDocstrings:
             def __init__(self, a_var: int) -> None:
                 self.funky_var = a_var
 
-            # @throttle
-            # @staticmethod
-            # def func7a() -> None:
-            #     pass
+            @throttle
+            @staticmethod
+            def func7a() -> None:
+                pass
 
             @throttle
             @classmethod
@@ -3499,38 +3087,38 @@ class TestThrottleDocstrings:
         funky1 = Funky(a_var=2)
         funky2 = Funky(a_var=102)
 
-        # funky1.func7a()
-        #
-        # # funky1.func7b()
+        funky1.func7a()
+
         # funky1.func7b()
-        #
-        # funky2.func7a()
-        # funky2.func7a()
-        # funky2.func7a()
+        funky1.func7b()
 
-        # funky2.func7b()
-        # funky2.func7b()
-        # funky2.func7b()
-        # funky2.func7b()
+        funky2.func7a()
+        funky2.func7a()
+        funky2.func7a()
 
-        # print(
-        #     f"\n{funky1.func7a.throttle.reqs_per_sec=},"
-        #     f" {funky1.func7a.throttle.call_count=}, "
-        #     f"{funky1.funky_var=}, {id(funky1.func7a.throttle)=}\n"
-        # )
-        # print(
-        #     f"\n{funky1.func7b.throttle.reqs_per_sec=},"
-        #     f" {funky1.func7b.throttle.call_count=},"
-        #     f" {funky1.funky_var=}, {id(funky1.func7b.throttle)=}\n"
-        # )
-        #
-        # print(
-        #     f"\n{funky2.func7a.throttle.reqs_per_sec=},"
-        #     f" {funky2.func7a.throttle.call_count=}, "
-        #     f"{funky2.funky_var=}, {id(funky2.func7a.throttle)=}\n"
-        # )
-        # print(
-        #     f"\n{funky2.func7b.throttle.reqs_per_sec=},"
-        #     f" {funky2.func7b.throttle.call_count=}, "
-        #     f"{funky2.funky_var=}, {id(funky2.func7b.throttle)=}\n"
-        # )
+        funky2.func7b()
+        funky2.func7b()
+        funky2.func7b()
+        funky2.func7b()
+
+        print(
+            f"\n{funky1.func7a.throttle.reqs_per_sec=},"
+            f" {funky1.func7a.throttle.call_count=}, "
+            f"{funky1.funky_var=}, {id(funky1.func7a.throttle)=}\n"
+        )
+        print(
+            f"\n{funky1.func7b.throttle.reqs_per_sec=},"
+            f" {funky1.func7b.throttle.call_count=},"
+            f" {funky1.funky_var=}, {id(funky1.func7b.throttle)=}\n"
+        )
+
+        print(
+            f"\n{funky2.func7a.throttle.reqs_per_sec=},"
+            f" {funky2.func7a.throttle.call_count=}, "
+            f"{funky2.funky_var=}, {id(funky2.func7a.throttle)=}\n"
+        )
+        print(
+            f"\n{funky2.func7b.throttle.reqs_per_sec=},"
+            f" {funky2.func7b.throttle.call_count=}, "
+            f"{funky2.funky_var=}, {id(funky2.func7b.throttle)=}\n"
+        )
