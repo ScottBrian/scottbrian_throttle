@@ -55,14 +55,15 @@ the throttle maintains a limit of 1 call per second.
 ########################################################################
 import inspect
 import logging
-from collections.abc import Coroutine
+from collections.abc import Callable  # , Coroutine
 from typing import (
     Any,
-    Callable,
     cast,
-    # Concatenate,
-    # Literal,
-    # overload,
+    Coroutine,
+    Concatenate,
+    Literal,
+    # Never,
+    overload,
     ParamSpec,
     Protocol,
     TypeVar,
@@ -70,12 +71,15 @@ from typing import (
 
 from pydantic import Field, validate_call, InstanceOf
 from wrapt import PartialCallableObjectProxy
+
 ########################################################################
 # Third Party
 ########################################################################
 from wrapt import decorator
 
 from scottbrian_throttle.throttle_blocks import Throttle
+
+# from typing import Any, Callable, Coroutine, Literal, ParamSpec, TypeVar, overload
 
 logger = logging.getLogger(__name__)
 ########################################################################
@@ -88,11 +92,12 @@ logger = logging.getLogger(__name__)
 P = ParamSpec("P")
 R = TypeVar("R")
 F = TypeVar("F", bound=Callable[..., Any])
-
+# F = TypeVar("F")
 _T = TypeVar("_T")
 _P2 = ParamSpec("_P2")
 _R2 = TypeVar("_R2")
 
+SelfT = TypeVar("SelfT")  # Tracks the class instance type
 ########################################################################
 # back to wrapt
 ########################################################################
@@ -106,14 +111,28 @@ _R2 = TypeVar("_R2")
 ########################################################################
 # FuncWithThrottleAttr[F] class
 ########################################################################
-class FuncWithThrottleAttr[F](Protocol[F]):
-    """Class to allow type checking on function with attribute."""
+class FuncWithThrottleAttr(Protocol[F]):
+    """Intersection type: acts like function F but has a .throttle attribute
+
+    and correctly mimics Python's descriptor protocol for methods.
+    """
 
     throttle: Throttle
     __call__: F
 
+    # This magic method tells mypy how to handle class method binding
+    @overload
+    def __get__(self, instance: None, owner: Any) -> "FuncWithThrottleAttr[F]": ...
 
-def add_throttle_sync_attr(func: F) -> FuncWithThrottleAttr[F]:
+    @overload
+    def __get__(self, instance: object, owner: Any) -> "FuncWithThrottleAttr[Any]": ...
+
+    def __get__(self, instance: Any, owner: Any) -> Any: ...
+
+
+def add_throttle_sync_attr(
+    func: Any,
+) -> FuncWithThrottleAttr[Any]:
     """Wrapper to add throttle attribute to function.
 
     Args:
@@ -123,74 +142,115 @@ def add_throttle_sync_attr(func: F) -> FuncWithThrottleAttr[F]:
         input function with throttle attached as attribute
 
     """
-    return cast(FuncWithThrottleAttr[F], func)
+    return cast(FuncWithThrottleAttr[Any], func)
 
 
-# @overload
-# def throttle(
-#     _wrapped: Callable[P, R],
-#     *,
-#     reqs_per_sec: float = 1,
-#     bucket_size: float = 1,
-#     convert_to_async: Literal[True],
-# ) -> _StatefulFunctionWrapper[P, Coroutine[Any, Any, R]]: ...
-#
-#
-# @overload
-# def throttle(
-#     _wrapped: Callable[P, R],
-#     *,
-#     reqs_per_sec: float = 1,
-#     bucket_size: float = 1,
-#     convert_to_async: Literal[False] = False,
-# ) -> _StatefulFunctionWrapper[P, R]: ...
-#
-#
-# @overload
-# def throttle(
-#     _wrapped: Callable[P, R],
-#     *,
-#     reqs_per_sec: float = 1,
-#     bucket_size: float = 1,
-#     convert_to_async: bool = False,
-# ) -> _StatefulFunctionWrapper[P, Any]: ...
-#
-#
-# @overload
-# def throttle(
-#     _wrapped: None = None,
-#     *,
-#     reqs_per_sec: float = 1,
-#     bucket_size: float = 1,
-#     convert_to_async: Literal[True],
-# ) -> Callable[
-#     [Callable[P, R]], [P, Coroutine[Any, Any, R]]
-# ]: ...
-#
-#
-# @overload
-# def throttle(
-#     _wrapped: None = None,
-#     *,
-#     reqs_per_sec: float = 1,
-#     bucket_size: float = 1,
-#     convert_to_async: Literal[False] = False,
-# ) -> Callable[[Callable[P, R]], FuncWithThrottleAttr[F]]: ...
-#
-#
-# @overload
-# def throttle(
-#     _wrapped: None = None,
-#     *,
-#     reqs_per_sec: float = 1,
-#     bucket_size: float = 1,
-#     convert_to_async: bool = False,
-# ) -> Callable[[Callable[P, R]], FuncWithThrottleAttr[F]]: ...
+# ==============================================================================
+# GROUP 1: Direct Decoration via `@throttle` (No parentheses)
+# ==============================================================================
+
+
+# 1a. Standard Functions / Class & Static Methods -> Async Conversion
+@overload
+def throttle(
+    _wrapped: Callable[P, R],
+    *,
+    reqs_per_sec: float = 1,
+    bucket_size: float = 1,
+    convert_to_async: Literal[True],
+) -> FuncWithThrottleAttr[Callable[P, Coroutine[Any, Any, R]]]: ...
+
+
+# 1b. Standard Functions / Class & Static Methods -> Keep Sync behavior
+@overload
+def throttle(
+    _wrapped: F,
+    *,
+    reqs_per_sec: float = 1,
+    bucket_size: float = 1,
+    convert_to_async: Literal[False] = False,
+) -> FuncWithThrottleAttr[F]: ...
+
+
+# 1c. Instance Methods -> Async Conversion
+@overload
+def throttle(
+    _wrapped: Callable[Concatenate[SelfT, P], R],
+    *,
+    reqs_per_sec: float = 1,
+    bucket_size: float = 1,
+    convert_to_async: Literal[True],
+) -> FuncWithThrottleAttr[Callable[P, Coroutine[Any, Any, R]]]: ...
+
+
+# 1d. Instance Methods -> Keep Sync behavior
+@overload
+def throttle(
+    _wrapped: Callable[Concatenate[SelfT, P], R],
+    *,
+    reqs_per_sec: float = 1,
+    bucket_size: float = 1,
+    convert_to_async: Literal[False] = False,
+) -> FuncWithThrottleAttr[Callable[P, R]]: ...
+
+
+# 1e. Fallback for dynamic booleans (Direct decoration)
+@overload
+def throttle(
+    _wrapped: F,
+    *,
+    reqs_per_sec: float = 1,
+    bucket_size: float = 1,
+    convert_to_async: bool = False,
+) -> FuncWithThrottleAttr[Any]: ...
+
+
+# ==============================================================================
+# GROUP 2: Factory Decoration via `@throttle(reqs_per_sec=2)`
+# ==============================================================================
+
+
+# 2a. Factory -> Async Conversion (Handles both functions and methods seamlessly)
+@overload
+def throttle(
+    _wrapped: None = None,
+    *,
+    reqs_per_sec: float = 1,
+    bucket_size: float = 1,
+    convert_to_async: Literal[True],
+) -> Callable[[F], FuncWithThrottleAttr[Any]]: ...
+
+
+# 2b. Factory -> Keep Sync behavior (Preserves original F signature accurately)
+@overload
+def throttle(
+    _wrapped: None = None,
+    *,
+    reqs_per_sec: float = 1,
+    bucket_size: float = 1,
+    convert_to_async: Literal[False] = False,
+) -> Callable[[F], FuncWithThrottleAttr[F]]: ...
+
+
+# 2c. Fallback for dynamic booleans (Factory style)
+@overload
+def throttle(
+    _wrapped: None = None,
+    *,
+    reqs_per_sec: float = 1,
+    bucket_size: float = 1,
+    convert_to_async: bool = False,
+) -> Callable[[F], FuncWithThrottleAttr[Any]]: ...
 
 
 @validate_call
 def throttle(
-    _wrapped: InstanceOf[classmethod] | InstanceOf[staticmethod] | F | None = None,
+    _wrapped: (
+        InstanceOf[classmethod[Any, Any, Any]]
+        | InstanceOf[staticmethod[Any, Any]]
+        | F
+        | None
+    ) = None,
     *,
     reqs_per_sec: float = Field(gt=0, default=1),
     bucket_size: float = Field(ge=1, default=1),
@@ -287,19 +347,36 @@ def throttle(
             convert_to_async=convert_to_async,
         )
 
+    wrapped_func = getattr(_wrapped, "__func__", _wrapped)
+    func_name = getattr(wrapped_func, "__name__", "unknown_callable")
     a_throttle = Throttle(
         reqs_per_sec=reqs_per_sec,
         bucket_size=bucket_size,
         convert_to_async=convert_to_async,
-        name=_wrapped.__name__,
+        name=func_name,
     )
+    # a_throttle = Throttle(
+    #     reqs_per_sec=reqs_per_sec,
+    #     bucket_size=bucket_size,
+    #     convert_to_async=convert_to_async,
+    #     name=_wrapped.__name__,
+    # )
 
-    def t_decorator(wrapped: F) -> Callable[P, R] | Coroutine[Any, Any, R]:
+    def t_decorator(
+        wrapped: Any,
+        #     InstanceOf[classmethod]
+        #     | InstanceOf[staticmethod]
+        #     | Coroutine[Any, Any, R]
+        #     | F
+        # ),
+    ) -> (
+        Any
+    ):  # FunctionWrapper[Never, Any]:  # Callable[P, R] | Coroutine[Any, Any, R]:
         is_async_func = inspect.iscoroutinefunction(wrapped)
 
         @decorator
         def sync_wrapper(
-            wrapped_func: F,
+            wrapped_func: Any,  # InstanceOf[classmethod] | InstanceOf[staticmethod] | F,
             instance: object,
             args: tuple[Any, ...],
             kwargs: dict[str, Any],
@@ -309,7 +386,7 @@ def throttle(
 
         @decorator
         async def async_wrapper(
-            wrapped_func: F,
+            wrapped_func: Any,  # InstanceOf[classmethod] | InstanceOf[staticmethod] | F,
             instance: object,
             args: tuple[Any, ...],
             kwargs: dict[str, Any],
@@ -322,12 +399,14 @@ def throttle(
         else:
             return sync_wrapper(wrapped)
 
-    wrapper = t_decorator(_wrapped)
+    raw_wrapper = t_decorator(_wrapped)
 
-    wrapper = add_throttle_sync_attr(wrapper)
+    # wrapper = add_throttle_sync_attr(wrapper)
+    wrapper = cast(FuncWithThrottleAttr[Any], raw_wrapper)
 
     wrapper.throttle = a_throttle
 
-    return wrapper
+    # return wrapper
+    return cast(Any, wrapper)
 
     # return cast(FuncWithThrottleAttr[F], wrapper)

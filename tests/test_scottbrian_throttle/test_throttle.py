@@ -11,6 +11,7 @@ import threading
 import time
 from collections import deque
 from dataclasses import dataclass, field
+
 ########################################################################
 # Standard Library
 ########################################################################
@@ -20,6 +21,7 @@ from typing import Any, Final
 from unittest.mock import patch
 
 import pytest
+
 ########################################################################
 # Third Party
 ########################################################################
@@ -1765,7 +1767,7 @@ class TestPieThrottle:
                 bucket_size=bucket_size_arg,
             )
             @classmethod
-            async def async_cm0(cls, a_class0: Class0):
+            async def async_cm0(cls, a_class0: Class0) -> int:
                 a_class0.set_idx_and_times()
                 return 0
 
@@ -1775,7 +1777,7 @@ class TestPieThrottle:
                 convert_to_async=sync_convert,
             )
             @classmethod
-            def cm0(cls: Class0, a_class0: Class0):
+            def cm0(cls: Class0, a_class0: Class0) -> int:
                 a_class0.set_idx_and_times()
                 return 0
 
@@ -3074,13 +3076,13 @@ class TestThrottleDocstrings:
             def __init__(self, a_var: int) -> None:
                 self.funky_var = a_var
 
-            @throttle
             @staticmethod
+            @throttle
             def func7a() -> None:
                 pass
 
-            @throttle
             @classmethod
+            @throttle
             def func7b(cls) -> None:
                 pass
 
@@ -3089,17 +3091,11 @@ class TestThrottleDocstrings:
 
         funky1.func7a()
 
-        # funky1.func7b()
-        funky1.func7b()
+        Funky.func7b()
 
         funky2.func7a()
         funky2.func7a()
         funky2.func7a()
-
-        funky2.func7b()
-        funky2.func7b()
-        funky2.func7b()
-        funky2.func7b()
 
         print(
             f"\n{funky1.func7a.throttle.reqs_per_sec=},"

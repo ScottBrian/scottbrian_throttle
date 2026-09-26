@@ -24,6 +24,7 @@ dependencies = [
     "scottbrian-utils ~=7.1",
     "wrapt ~=2.4",
     "tox>=4.64.1",
+    "mypy>=2.3.1",
 ]
 
 #[tool.setuptools]
@@ -32,6 +33,13 @@ dependencies = [
 
 [tool.mypy]
 mypy_path = "typings"
+strict_optional = "True"
+no_implicit_optional = "True"
+disallow_untyped_calls = "True"
+warn_unused_configs = "True"
+strict = "True"
+implicit_reexport = "True"
+show_error_codes = "True"
 
 
 [project.urls]
@@ -45,6 +53,12 @@ Source = "https://github.com/ScottBrian/scottbrian_throttle.git"
 [build-system]
 requires = ["hatchling"]
 build-backend = 'hatchling.build'
+
+[dependency-groups]
+dev = [
+    "tox>=4.64.1",
+    "tox-uv>=1.36.0",
+]
 
 # Ensure your py.typed marker and Mypy plugin are included in the build
 [tool.hatch.build.targets.wheel]
