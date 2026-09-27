@@ -112,22 +112,14 @@ SelfT = TypeVar("SelfT")  # Tracks the class instance type
 # FuncWithThrottleAttr[F] class
 ########################################################################
 class FuncWithThrottleAttr(Protocol[F]):
-    """Intersection type: acts like function F but has a .throttle attribute
-
-    and correctly mimics Python's descriptor protocol for methods.
-    """
+    """Class to allow type checking on function with attribute."""
 
     throttle: Throttle
     __call__: F
 
-    # This magic method tells mypy how to handle class method binding
-    @overload
-    def __get__(self, instance: None, owner: Any) -> "FuncWithThrottleAttr[F]": ...
-
-    @overload
-    def __get__(self, instance: object, owner: Any) -> "FuncWithThrottleAttr[Any]": ...
-
-    def __get__(self, instance: Any, owner: Any) -> Any: ...
+    def __get__(
+        self, instance: Any, owner: Any = None
+    ) -> "FuncWithThrottleAttr[Any]": ...
 
 
 def add_throttle_sync_attr(
@@ -146,14 +138,14 @@ def add_throttle_sync_attr(
 
 
 # ==============================================================================
-# GROUP 1: Direct Decoration via `@throttle` (No parentheses)
+# GROUP 1: Direct Decoration via `@throttle` (On the OUTSIDE/ABOVE)
 # ==============================================================================
 
 
-# 1a. Standard Functions / Class & Static Methods -> Async Conversion
+# 1a. Explicitly handle @classmethod descriptors
 @overload
 def throttle(
-    _wrapped: Callable[P, R],
+    _wrapped: classmethod[Any, P, R],
     *,
     reqs_per_sec: float = 1,
     bucket_size: float = 1,
@@ -161,7 +153,38 @@ def throttle(
 ) -> FuncWithThrottleAttr[Callable[P, Coroutine[Any, Any, R]]]: ...
 
 
-# 1b. Standard Functions / Class & Static Methods -> Keep Sync behavior
+@overload
+def throttle(
+    _wrapped: classmethod[Any, P, R],
+    *,
+    reqs_per_sec: float = 1,
+    bucket_size: float = 1,
+    convert_to_async: Literal[False] = False,
+) -> FuncWithThrottleAttr[Callable[P, R]]: ...
+
+
+# 1b. Explicitly handle @staticmethod descriptors
+@overload
+def throttle(
+    _wrapped: staticmethod[P, R],
+    *,
+    reqs_per_sec: float = 1,
+    bucket_size: float = 1,
+    convert_to_async: Literal[True],
+) -> FuncWithThrottleAttr[Callable[P, Coroutine[Any, Any, R]]]: ...
+
+
+@overload
+def throttle(
+    _wrapped: staticmethod[P, R],
+    *,
+    reqs_per_sec: float = 1,
+    bucket_size: float = 1,
+    convert_to_async: Literal[False] = False,
+) -> FuncWithThrottleAttr[Callable[P, R]]: ...
+
+
+# 1d. Standard Functions -> Keep Sync behavior
 @overload
 def throttle(
     _wrapped: F,
@@ -172,7 +195,7 @@ def throttle(
 ) -> FuncWithThrottleAttr[F]: ...
 
 
-# 1c. Instance Methods -> Async Conversion
+# 1e. Instance Methods -> Async Conversion
 @overload
 def throttle(
     _wrapped: Callable[Concatenate[SelfT, P], R],
@@ -183,7 +206,7 @@ def throttle(
 ) -> FuncWithThrottleAttr[Callable[P, Coroutine[Any, Any, R]]]: ...
 
 
-# 1d. Instance Methods -> Keep Sync behavior
+# 1f. Instance Methods -> Keep Sync behavior
 @overload
 def throttle(
     _wrapped: Callable[Concatenate[SelfT, P], R],
@@ -194,7 +217,7 @@ def throttle(
 ) -> FuncWithThrottleAttr[Callable[P, R]]: ...
 
 
-# 1e. Fallback for dynamic booleans (Direct decoration)
+# 1g. Fallback for dynamic booleans (Direct decoration)
 @overload
 def throttle(
     _wrapped: F,

@@ -3076,13 +3076,13 @@ class TestThrottleDocstrings:
             def __init__(self, a_var: int) -> None:
                 self.funky_var = a_var
 
-            @staticmethod
             @throttle
+            @staticmethod
             def func7a() -> None:
                 pass
 
-            @classmethod
             @throttle
+            @classmethod
             def func7b(cls) -> None:
                 pass
 
