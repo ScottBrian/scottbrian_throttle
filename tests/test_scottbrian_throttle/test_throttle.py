@@ -42,6 +42,8 @@ from scottbrian_throttle.throttle_blocks import Throttle
 ########################################################################
 # set up logging
 ########################################################################
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -1317,7 +1319,7 @@ class TestPieThrottle:
         async_call_list.append(
             (
                 "async_f6",
-                "(request_id, reqs_per_sec_arg, bucket_size=1, " "interval=s_interval)",
+                "(request_id, reqs_per_sec_arg, bucket_size=1, interval=s_interval)",
                 "request_id + 42 + 6",
             )
         )
@@ -1338,7 +1340,7 @@ class TestPieThrottle:
         call_list.append(
             (
                 "f6",
-                "(request_id, reqs_per_sec_arg, bucket_size=1, " "interval=s_interval)",
+                "(request_id, reqs_per_sec_arg, bucket_size=1, interval=s_interval)",
                 "request_id + 42 + 6",
             )
         )
@@ -1363,7 +1365,6 @@ class TestPieThrottle:
         # Invoke the functions
         ################################################################
         for request_id, s_interval in enumerate(send_intervals):
-
             ml_request_item = RequestItem(
                 req_id=request_id,
                 create_time_ns=perf_counter_ns(),
@@ -1646,6 +1647,52 @@ class TestPieThrottle:
             sync_convert = False
 
         ################################################################
+        # invoke_async_requests
+        ################################################################
+        def invoke_async_requests(
+            s_interval: float,
+            ml_request_item: RequestItem,
+            request_validator: RequestValidator,
+            a_class0: Class0,
+        ) -> None:
+            async def main_loop(
+                s_interval: float, ml_request_item: RequestItem
+            ) -> None:
+                if s_interval > 0.0:
+                    await asyncio.sleep(s_interval)
+                ml_request_item.send_time_ns = perf_counter_ns()
+                request_validator.request_deque.appendleft(ml_request_item)
+                if throttle_mode_arg == Mode.SYNC_CONVERT:
+                    if method_type_arg == MethodType.INSTANCE:
+                        logger.debug(
+                            f"about to invoke m0: {a_class0=}, {id(a_class0)=}, {a_class0.m0.throttle=}, {id(a_class0.m0.throttle)=}"
+                        )
+                        rc = await a_class0.m0()
+                    elif method_type_arg == MethodType.STATIC:
+                        rc = await a_class0.s0(a_class0=a_class0)
+                    else:
+                        rc = await a_class0.cm0(a_class0=a_class0)
+                else:
+                    if method_type_arg == MethodType.INSTANCE:
+                        rc = await a_class0.async_m0()
+                    elif method_type_arg == MethodType.STATIC:
+                        logger.debug(
+                            f"about to invoke async_s0: {a_class0=}, {id(a_class0)=}, {a_class0.async_s0.throttle=}, {id(a_class0.async_s0.throttle)=}"
+                        )
+                        rc = await a_class0.async_s0(a_class0=a_class0)
+                    else:
+                        rc = await a_class0.async_cm0(a_class0=a_class0)
+
+                ml_request_item.return_time_ns = perf_counter_ns()
+                assert rc == 0
+
+            logger.debug(f"about to invoke asyncio.run: {a_class0=}, {id(a_class0)=}")
+            asyncio.run(
+                main_loop(s_interval=s_interval, ml_request_item=ml_request_item)
+            )
+            logger.debug(f"back frrom asyncio.run: {a_class0=}, {id(a_class0)=}")
+
+        ################################################################
         # Decorate methods with throttle
         ################################################################
         class Class0:
@@ -1692,17 +1739,17 @@ class TestPieThrottle:
 
                 time.sleep(0.01)
                 logger.debug(f"Class0 init: {id(self)=}, {id(a_throttle)=}")
-                m0_throttle = self.m0.throttle
-                time.sleep(0.01)
-                logger.debug(f"Class0 init: {id(m0_throttle)=}")
-
-                s0_throttle = self.s0.throttle
-                time.sleep(0.01)
-                logger.debug(f"Class0 init: {id(s0_throttle)=}")
-
-                cm0_throttle = self.cm0.throttle
-                time.sleep(0.01)
-                logger.debug(f"Class0 init: {id(cm0_throttle)=}")
+                # m0_throttle = self.m0.throttle
+                # time.sleep(0.01)
+                # logger.debug(f"Class0 init: {id(m0_throttle)=}")
+                #
+                # s0_throttle = self.s0.throttle
+                # time.sleep(0.01)
+                # logger.debug(f"Class0 init: {id(s0_throttle)=}")
+                #
+                # cm0_throttle = self.cm0.throttle
+                # time.sleep(0.01)
+                # logger.debug(f"Class0 init: {id(cm0_throttle)=}")
 
                 with self.validator_lock:
                     if Class0.num_class0 == 0:
@@ -1718,8 +1765,8 @@ class TestPieThrottle:
                         # if Class0.num_class0 == 0:
                         Class0.class0_validator = self.request_validator
                         Class0.num_class0 += 1
-                    # else:
-                    #     self.request_validator = Class0.class0_validator
+                    else:
+                        self.request_validator = Class0.class0_validator
 
                 logger.debug(
                     f"Class0 init: {id(self.request_validator)=}, {id(Class0.class0_validator)=}"
@@ -1785,14 +1832,8 @@ class TestPieThrottle:
             # set_idx_and_times
             ################################################################
             def set_idx_and_times(self) -> None:
-                logger.debug(
-                    f"set_idx_and_times: {self=}, "
-                    f"{id(self.request_validator)=}, {id(self.request_validator.t_throttle)=}"
-                )
                 self.request_validator.idx += 1
                 request_item = self.request_validator.request_deque.pop()
-                if self.method_type == MethodType.INSTANCE:
-                    assert request_item.req_id == self.request_validator.idx
                 request_item.arrival_idx = self.request_validator.idx
                 request_item.actual_func_arrival_time_ns = perf_counter_ns()
                 request_item.throttle_arrival_time_ns = (
@@ -1804,9 +1845,6 @@ class TestPieThrottle:
                 request_item.throttle_wait_time_ns = (
                     self.request_validator.t_throttle._wait_time_ns
                 )
-                logger.debug(
-                    f"set_idx_and_times: {request_item.throttle_wait_time_ns=}"
-                )
                 request_item.throttle_sent_time_ns = (
                     self.request_validator.t_throttle.sent_time_ns
                 )
@@ -1816,7 +1854,7 @@ class TestPieThrottle:
             # invoke_requests
             ################################################################
             def invoke_requests(self) -> None:
-                # print(f"invoke_requests entered: {self=}")
+                logger.debug(f"invoke_requests entered: {self=}, {id(self)=}")
                 for req_id, s_interval in enumerate(
                     self.request_validator.send_intervals
                 ):
@@ -1840,70 +1878,99 @@ class TestPieThrottle:
                             rc = self.cm0(a_class0=self)
                         ml_request_item.return_time_ns = perf_counter_ns()
                         assert rc == 0
+
+            ################################################################
+            # async_invoke_requests
+            ################################################################
+            async def async_invoke_requests(self) -> None:
+                logger.debug(f"async_invoke_requests entered: {self=}, {id(self)=}")
+                for req_id, s_interval in enumerate(
+                    self.request_validator.send_intervals
+                ):
+                    ml_request_item = RequestItem(
+                        req_id=req_id,
+                        create_time_ns=perf_counter_ns(),
+                        throttle_mode=self.request_validator.throttle_mode,
+                        send_interval=s_interval,
+                    )
+                    if s_interval > 0.0:
+                        await asyncio.sleep(s_interval)
+
+                    ml_request_item.send_time_ns = perf_counter_ns()
+                    self.request_validator.request_deque.appendleft(ml_request_item)
+                    if throttle_mode_arg == Mode.SYNC_CONVERT:
+                        if method_type_arg == MethodType.INSTANCE:
+                            # logger.debug(
+                            #     f"about to invoke m0: {a_class0=}, {id(a_class0)=}, {a_class0.m0.throttle=}, {id(a_class0.m0.throttle)=}"
+                            # )
+                            rc = await self.m0()
+                        elif method_type_arg == MethodType.STATIC:
+                            rc = await self.s0(a_class0=self)
+                        else:
+                            rc = await type(self).cm0(a_class0=self)
                     else:
+                        if method_type_arg == MethodType.INSTANCE:
+                            rc = await self.async_m0()
+                        elif method_type_arg == MethodType.STATIC:
+                            # logger.debug(
+                            #     f"about to invoke async_s0: {a_class0=}, {id(a_class0)=}, {a_class0.async_s0.throttle=}, {id(a_class0.async_s0.throttle)=}"
+                            # )
+                            rc = await self.async_s0(a_class0=self)
+                        else:
+                            rc = await type(self).async_cm0(a_class0=self)
 
-                        async def main_loop() -> None:
-                            if s_interval > 0.0:
-                                await asyncio.sleep(s_interval)
-                            ml_request_item.send_time_ns = perf_counter_ns()
-                            self.request_validator.request_deque.appendleft(
-                                ml_request_item
-                            )
-                            if throttle_mode_arg == Mode.SYNC_CONVERT:
-                                if method_type_arg == MethodType.INSTANCE:
-                                    rc = await self.m0()
-                                elif method_type_arg == MethodType.STATIC:
-                                    rc = await self.s0(a_class0=self)
-                                else:
-                                    rc = await self.cm0(a_class0=self)
-                            else:
-                                if method_type_arg == MethodType.INSTANCE:
-                                    rc = await self.async_m0()
-                                elif method_type_arg == MethodType.STATIC:
-                                    rc = await self.async_s0(a_class0=self)
-                                else:
-                                    rc = await self.async_cm0(a_class0=self)
-
-                            ml_request_item.return_time_ns = perf_counter_ns()
-                            assert rc == 0
-
-                        asyncio.run(main_loop())
-
-        # def run_reqs(a_class0: Class0):
-        #
-        #     a_class0.invoke_requests()
+                    ml_request_item.return_time_ns = perf_counter_ns()
 
         ################################################################
         # Instantiate the class
         ################################################################
-        threads: list[threading.Thread] = []
-        class0s: list[Class0] = []
-        for thread_num in range(num_threads_arg):
+        if throttle_mode_arg == Mode.SYNC:
+            threads: list[threading.Thread] = []
+            class0s: list[Class0] = []
+            for thread_num in range(num_threads_arg):
+                a_class0 = Class0(
+                    reqs_per_sec=reqs_per_sec_arg,
+                    throttle_mode=throttle_mode_arg,
+                    bucket_size=bucket_size_arg,
+                    total_requests=total_requests,
+                    send_interval=send_interval,
+                    send_intervals=send_intervals,
+                )
+                class0s.append(a_class0)
+                threads.append(threading.Thread(target=a_class0.invoke_requests))
 
-            a_class0 = Class0(
-                reqs_per_sec=reqs_per_sec_arg,
-                throttle_mode=throttle_mode_arg,
-                bucket_size=bucket_size_arg,
-                total_requests=total_requests,
-                send_interval=send_interval,
-                send_intervals=send_intervals,
-            )
-            class0s.append(a_class0)
-            threads.append(threading.Thread(target=a_class0.invoke_requests))
-            # threads.append(
-            #     threading.Thread(target=a_class0.invoke_requests, args=(a_class0,))
-            # )
+            logger.debug("throttle_router starting threads")
+            for thread_item in threads:
+                thread_item.start()
 
-        logger.debug("throttle_router starting threads")
-        for thread_item in threads:
-            thread_item.start()
+            logger.debug("throttle_router joining threads")
+            for thread_item in threads:
+                thread_item.join()
 
-        logger.debug("throttle_router joining threads")
-        for thread_item in threads:
-            thread_item.join()
+            for class0 in class0s:
+                class0.request_validator.validate_series()
 
-        for class0 in class0s:
-            class0.request_validator.validate_series()
+        else:
+
+            async def main_loop() -> None:
+                class0s: list[Class0] = []
+                for thread_num in range(num_threads_arg):
+                    a_class0 = Class0(
+                        reqs_per_sec=reqs_per_sec_arg,
+                        throttle_mode=throttle_mode_arg,
+                        bucket_size=bucket_size_arg,
+                        total_requests=total_requests,
+                        send_interval=send_interval,
+                        send_intervals=send_intervals,
+                    )
+                    class0s.append(a_class0)
+                tasks = [
+                    asyncio.create_task(class0.async_invoke_requests())
+                    for class0 in class0s
+                ]
+                await asyncio.gather(*tasks)
+
+            asyncio.run(main_loop())
 
 
 ########################################################################

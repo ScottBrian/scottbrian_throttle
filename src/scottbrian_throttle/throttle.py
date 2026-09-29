@@ -62,7 +62,6 @@ from typing import (
     Coroutine,
     Concatenate,
     Literal,
-    # Never,
     overload,
     ParamSpec,
     Protocol,
@@ -78,8 +77,6 @@ from wrapt import PartialCallableObjectProxy
 from wrapt import decorator
 
 from scottbrian_throttle.throttle_blocks import Throttle
-
-# from typing import Any, Callable, Coroutine, Literal, ParamSpec, TypeVar, overload
 
 logger = logging.getLogger(__name__)
 ########################################################################
@@ -233,7 +230,8 @@ def throttle(
 # ==============================================================================
 
 
-# 2a. Factory -> Async Conversion (Handles both functions and methods seamlessly)
+# 2a. Factory -> Async Conversion (Handles both functions and methods
+# seamlessly)
 @overload
 def throttle(
     _wrapped: None = None,
@@ -244,7 +242,8 @@ def throttle(
 ) -> Callable[[F], FuncWithThrottleAttr[Any]]: ...
 
 
-# 2b. Factory -> Keep Sync behavior (Preserves original F signature accurately)
+# 2b. Factory -> Keep Sync behavior (Preserves original F signature
+# accurately)
 @overload
 def throttle(
     _wrapped: None = None,
@@ -279,7 +278,7 @@ def throttle(
     bucket_size: float = Field(ge=1, default=1),
     convert_to_async: bool = Field(default=False),
 ) -> Any:
-    """Decorator to wrap a function in a throttle.
+    """Wrap function in a throttle.
 
     The throttle wraps code around a function to limit the rate that it
     can be called.
@@ -378,12 +377,6 @@ def throttle(
         convert_to_async=convert_to_async,
         name=func_name,
     )
-    # a_throttle = Throttle(
-    #     reqs_per_sec=reqs_per_sec,
-    #     bucket_size=bucket_size,
-    #     convert_to_async=convert_to_async,
-    #     name=_wrapped.__name__,
-    # )
 
     def t_decorator(
         wrapped: Any,
@@ -395,26 +388,35 @@ def throttle(
     ) -> (
         Any
     ):  # FunctionWrapper[Never, Any]:  # Callable[P, R] | Coroutine[Any, Any, R]:
-        is_async_func = inspect.iscoroutinefunction(wrapped)
+        target = getattr(wrapped, "__func__", wrapped)
+        is_async_func = inspect.iscoroutinefunction(target)
+        # is_async_func = inspect.iscoroutinefunction(wrapped)
+        logger.debug(f"t_decorator: {is_async_func=}, {id(a_throttle)=} ")
 
         @decorator
         def sync_wrapper(
-            wrapped_func: Any,  # InstanceOf[classmethod] | InstanceOf[staticmethod] | F,
+            wrapped_func: Any,
             instance: object,
             args: tuple[Any, ...],
             kwargs: dict[str, Any],
         ) -> Any:
 
+            logger.debug(
+                f"sync_wrapper calling sync_send_request {a_throttle=}, {id(a_throttle)=} "
+            )
             return a_throttle.sync_send_request(wrapped_func, *args, **kwargs)
 
         @decorator
         async def async_wrapper(
-            wrapped_func: Any,  # InstanceOf[classmethod] | InstanceOf[staticmethod] | F,
+            wrapped_func: Any,
             instance: object,
             args: tuple[Any, ...],
             kwargs: dict[str, Any],
         ) -> Any:
 
+            logger.debug(
+                f"async_wrapper awaiting async_send_request {a_throttle=}, {id(a_throttle)=} "
+            )
             return await a_throttle.async_send_request(wrapped_func, *args, **kwargs)
 
         if is_async_func or convert_to_async:

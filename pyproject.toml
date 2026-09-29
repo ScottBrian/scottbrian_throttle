@@ -41,6 +41,10 @@ strict = "True"
 implicit_reexport = "True"
 show_error_codes = "True"
 
+[tool.ruff]
+lint.extend-select = ["ALL"]
+lint.ignore = ["T201"]
+
 
 [project.urls]
 Documentation = "https://scottbrian-throttle.readthedocs.io/en/latest/"

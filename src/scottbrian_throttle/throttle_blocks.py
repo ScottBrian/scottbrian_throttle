@@ -92,6 +92,7 @@ calling the requested function.
 ########################################################################
 import asyncio
 import contextvars  # Native context tracking
+
 ########################################################################
 # Third Party
 ########################################################################
@@ -116,10 +117,6 @@ from scottbrian_utils.pauser import Pauser
 class Throttle:
     """Throttle class."""
 
-    # class Mode(Enum):
-    #     SYNC = auto()
-    #     ASYNC = auto()
-
     SECS_2_NS: Final[int] = 1000000000
     NS_2_SECS: Final[float] = 0.000000001
 
@@ -130,9 +127,9 @@ class Throttle:
         "_target_interval_ns",
         "_wait_time_ns",
         "async_lock",
+        "bucket_size",
         "call_count",
         "convert_to_async",
-        "bucket_size",
         "lb_adjustment",
         "lb_adjustment_ns",
         "lb_with_one_request",
@@ -194,7 +191,6 @@ class Throttle:
                   throttled.
 
         """
-
         ################################################################
         # set up logging
         ################################################################
@@ -221,7 +217,6 @@ class Throttle:
         self._arrival_time_ns = 0.0
         self.sent_time_ns = time.perf_counter_ns()
         self._wait_time_ns: float = 0.0
-        self.logger = logging.getLogger(__name__)
         self.pauser = Pauser()
 
         ################################################################
@@ -321,8 +316,7 @@ class Throttle:
         """
         if from_start:
             return (num_requests - 1) * self._target_interval
-        else:
-            return num_requests * self._target_interval
+        return num_requests * self._target_interval
 
     ####################################################################
     # get_completion_time_ns
@@ -343,15 +337,14 @@ class Throttle:
         """
         if from_start:
             return (num_requests - 1) * self._target_interval_ns
-        else:
-            return num_requests * self._target_interval_ns
+        return num_requests * self._target_interval_ns
 
     ####################################################################
     # sync_send_request
     ####################################################################
     def sync_send_request(
         self, func: Callable[..., Any], *args: Any, **kwargs: Any
-    ) -> Any:
+    ) -> Any | None:
         """Send the request.
 
         Args:
@@ -362,6 +355,7 @@ class Throttle:
         Returns:
               The return value from the request function which may be
               any value or None.
+
         Raises:
             Exception: An exception occurred in the request target. It
                 will be logged and re-raised.
@@ -371,6 +365,9 @@ class Throttle:
         ############################################################
         # SYNC mode
         ############################################################
+        self.logger.debug(
+            f"sync_send_request about to acquire lock: {self=}, {id(self)=}"
+        )
         with self.sync_lock:
             self._arrival_time_ns = time.perf_counter_ns()
             self._wait_time_ns = max(
@@ -433,7 +430,11 @@ class Throttle:
         ############################################################
         # ASYNC mode
         ############################################################
+        self.logger.debug(
+            f"async_send_request about to acquire lock: {self=}, {id(self)=}"
+        )
         async with self.async_lock:
+            self.logger.debug(f"async_send_request locked: {self=}, {id(self)=}")
             self._arrival_time_ns = time.perf_counter_ns()
             self._wait_time_ns = max(
                 0.0, self._next_target_time_ns - self._arrival_time_ns
@@ -476,7 +477,17 @@ class Throttle:
 
                 # Run the worker thread using the captured main-thread
                 # context
-                return await asyncio.to_thread(lambda: ctx.run(worker_thread_target))
+                self.logger.debug(
+                    f"async_send_request about to await to_thread: {self=}, {id(self)=}"
+                )
+                ret_code = await asyncio.to_thread(
+                    lambda: ctx.run(worker_thread_target)
+                )
+                self.logger.debug(
+                    f"async_send_request about to return: {self=}, {id(self)=}"
+                )
+                return ret_code
+                # return await asyncio.to_thread(lambda: ctx.run(worker_thread_target))
             else:
                 try:
                     return await func(*args, **kwargs)

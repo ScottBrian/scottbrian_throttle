@@ -33,7 +33,12 @@ from scottbrian_utils.exc_hook import ExcHook
 #     "%(message)s",
 # )
 
-logger = logging.getLogger(__name__)
+# logging.basicConfig(
+#     level=logging.DEBUG,
+#     format="%(asctime)s [%(levelname)s] (Thread ID: %(thread)d) (Name: %(threadName)s) -> %(message)s",
+#     datefmt="%H:%M:%S",
+# )
+# logger = logging.getLogger(__name__)
 
 
 ########################################################################
