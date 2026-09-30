@@ -365,9 +365,6 @@ class Throttle:
         ############################################################
         # SYNC mode
         ############################################################
-        self.logger.debug(
-            f"sync_send_request about to acquire lock: {self=}, {id(self)=}"
-        )
         with self.sync_lock:
             self._arrival_time_ns = time.perf_counter_ns()
             self._wait_time_ns = max(
@@ -430,11 +427,7 @@ class Throttle:
         ############################################################
         # ASYNC mode
         ############################################################
-        self.logger.debug(
-            f"async_send_request about to acquire lock: {self=}, {id(self)=}"
-        )
         async with self.async_lock:
-            self.logger.debug(f"async_send_request locked: {self=}, {id(self)=}")
             self._arrival_time_ns = time.perf_counter_ns()
             self._wait_time_ns = max(
                 0.0, self._next_target_time_ns - self._arrival_time_ns
@@ -477,17 +470,7 @@ class Throttle:
 
                 # Run the worker thread using the captured main-thread
                 # context
-                self.logger.debug(
-                    f"async_send_request about to await to_thread: {self=}, {id(self)=}"
-                )
-                ret_code = await asyncio.to_thread(
-                    lambda: ctx.run(worker_thread_target)
-                )
-                self.logger.debug(
-                    f"async_send_request about to return: {self=}, {id(self)=}"
-                )
-                return ret_code
-                # return await asyncio.to_thread(lambda: ctx.run(worker_thread_target))
+                return await asyncio.to_thread(lambda: ctx.run(worker_thread_target))
             else:
                 try:
                     return await func(*args, **kwargs)

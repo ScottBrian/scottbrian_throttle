@@ -78,7 +78,7 @@ from wrapt import decorator
 
 from scottbrian_throttle.throttle_blocks import Throttle
 
-logger = logging.getLogger(__name__)
+# logger = logging.getLogger(__name__)
 ########################################################################
 # Local
 ########################################################################
@@ -390,8 +390,6 @@ def throttle(
     ):  # FunctionWrapper[Never, Any]:  # Callable[P, R] | Coroutine[Any, Any, R]:
         target = getattr(wrapped, "__func__", wrapped)
         is_async_func = inspect.iscoroutinefunction(target)
-        # is_async_func = inspect.iscoroutinefunction(wrapped)
-        logger.debug(f"t_decorator: {is_async_func=}, {id(a_throttle)=} ")
 
         @decorator
         def sync_wrapper(
@@ -401,9 +399,6 @@ def throttle(
             kwargs: dict[str, Any],
         ) -> Any:
 
-            logger.debug(
-                f"sync_wrapper calling sync_send_request {a_throttle=}, {id(a_throttle)=} "
-            )
             return a_throttle.sync_send_request(wrapped_func, *args, **kwargs)
 
         @decorator
@@ -414,9 +409,6 @@ def throttle(
             kwargs: dict[str, Any],
         ) -> Any:
 
-            logger.debug(
-                f"async_wrapper awaiting async_send_request {a_throttle=}, {id(a_throttle)=} "
-            )
             return await a_throttle.async_send_request(wrapped_func, *args, **kwargs)
 
         if is_async_func or convert_to_async:

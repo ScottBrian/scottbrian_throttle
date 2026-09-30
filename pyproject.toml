@@ -45,6 +45,10 @@ show_error_codes = "True"
 lint.extend-select = ["ALL"]
 lint.ignore = ["T201"]
 
+[tool.ruff.lint.per-file-ignores]
+# Ignore `S101` (assert) in test_throttle.py
+"tests/**/*.py" = ["S101"]
+
 
 [project.urls]
 Documentation = "https://scottbrian-throttle.readthedocs.io/en/latest/"
