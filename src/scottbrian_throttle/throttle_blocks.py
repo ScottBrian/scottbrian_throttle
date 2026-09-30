@@ -123,14 +123,12 @@ class Throttle:
     __slots__ = (
         "_arrival_time_ns",
         "_next_target_time_ns",
-        "_target_interval",
         "_target_interval_ns",
         "_wait_time_ns",
         "async_lock",
         "bucket_size",
         "call_count",
         "convert_to_async",
-        "lb_adjustment",
         "lb_adjustment_ns",
         "lb_with_one_request",
         "logger",
@@ -210,8 +208,7 @@ class Throttle:
         ################################################################
         # Set remainder of vars
         ################################################################
-        self._target_interval = 1 / reqs_per_sec
-        self._target_interval_ns: float = self._target_interval * Throttle.SECS_2_NS
+        self._target_interval_ns: float = (1 / reqs_per_sec) * Throttle.SECS_2_NS
         self.sync_lock = threading.Lock()
         self.async_lock = asyncio.Lock()
         self._arrival_time_ns = 0.0
@@ -222,10 +219,10 @@ class Throttle:
         ################################################################
         # Set leaky bucket vars
         ################################################################
-        self.lb_adjustment: float = max(
-            0.0, (self._target_interval * self.bucket_size) - self._target_interval
+        self.lb_adjustment_ns: float = max(
+            0.0,
+            self._target_interval_ns * (self.bucket_size - 1),
         )
-        self.lb_adjustment_ns: float = self.lb_adjustment * Throttle.SECS_2_NS
 
         self.lb_with_one_request = -self.lb_adjustment_ns + self._target_interval_ns
 
@@ -283,7 +280,7 @@ class Throttle:
         Returns:
             The target interval in seconds.
         """
-        return self._target_interval
+        return self._target_interval_ns * Throttle.NS_2_SECS
 
     ####################################################################
     # get_interval
@@ -315,8 +312,8 @@ class Throttle:
 
         """
         if from_start:
-            return (num_requests - 1) * self._target_interval
-        return num_requests * self._target_interval
+            return (num_requests - 1) * (self._target_interval_ns * Throttle.NS_2_SECS)
+        return num_requests * (self._target_interval_ns * Throttle.NS_2_SECS)
 
     ####################################################################
     # get_completion_time_ns

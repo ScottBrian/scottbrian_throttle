@@ -119,19 +119,19 @@ class FuncWithThrottleAttr(Protocol[F]):
     ) -> "FuncWithThrottleAttr[Any]": ...
 
 
-def add_throttle_sync_attr(
-    func: Any,
-) -> FuncWithThrottleAttr[Any]:
-    """Wrapper to add throttle attribute to function.
-
-    Args:
-        func: function that has the attribute added
-
-    Returns:
-        input function with throttle attached as attribute
-
-    """
-    return cast(FuncWithThrottleAttr[Any], func)
+# def add_throttle_sync_attr(
+#     func: Any,
+# ) -> FuncWithThrottleAttr[Any]:
+#     """Wrapper to add throttle attribute to function.
+#
+#     Args:
+#         func: function that has the attribute added
+#
+#     Returns:
+#         input function with throttle attached as attribute
+#
+#     """
+#     return cast(FuncWithThrottleAttr[Any], func)
 
 
 # ==============================================================================
