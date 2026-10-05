@@ -1,5 +1,9 @@
 """Module throttle.
 
+Copyright (C) 2026 Scott Tuttle
+All rights reserved
+Licensed under the MIT License. See LICENSE file in the project root for details
+
 ========
 throttle
 ========
@@ -54,27 +58,27 @@ the throttle maintains a limit of 1 call per second.
 # Standard Library
 ########################################################################
 import inspect
-import logging
-from collections.abc import Callable  # , Coroutine
+from collections.abc import (
+    Callable,  # , Coroutine
+    Coroutine,
+)
 from typing import (
     Any,
-    cast,
-    Coroutine,
     Concatenate,
     Literal,
-    overload,
     ParamSpec,
     Protocol,
     TypeVar,
+    cast,
+    overload,
 )
 
-from pydantic import Field, validate_call, InstanceOf
-from wrapt import PartialCallableObjectProxy
+from pydantic import Field, InstanceOf, validate_call
 
 ########################################################################
 # Third Party
 ########################################################################
-from wrapt import decorator
+from wrapt import PartialCallableObjectProxy, decorator
 
 from scottbrian_throttle.throttle_blocks import Throttle
 
@@ -115,8 +119,10 @@ class FuncWithThrottleAttr(Protocol[F]):
     __call__: F
 
     def __get__(
-        self, instance: Any, owner: Any = None
-    ) -> "FuncWithThrottleAttr[Any]": ...
+        self,
+        instance: Any,
+        owner: Any = None,
+    ) -> FuncWithThrottleAttr[Any]: ...
 
 
 # def add_throttle_sync_attr(
@@ -413,17 +419,16 @@ def throttle(
 
         if is_async_func or convert_to_async:
             return async_wrapper(wrapped)
-        else:
-            return sync_wrapper(wrapped)
+        return sync_wrapper(wrapped)
 
     raw_wrapper = t_decorator(_wrapped)
 
     # wrapper = add_throttle_sync_attr(wrapper)
-    wrapper = cast(FuncWithThrottleAttr[Any], raw_wrapper)
+    wrapper = cast("FuncWithThrottleAttr[Any]", raw_wrapper)
 
     wrapper.throttle = a_throttle
 
     # return wrapper
-    return cast(Any, wrapper)
+    return cast("Any", wrapper)
 
     # return cast(FuncWithThrottleAttr[F], wrapper)

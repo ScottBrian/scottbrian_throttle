@@ -22,8 +22,8 @@ dependencies = [
     "sentry-sdk ~=2.69",
     "scottbrian-locking ~=3.0",
     "scottbrian-utils ~=7.1",
-    "wrapt ~=2.4",
-    "tox>=4.64.1",
+    "wrapt ~=2.5",
+    "tox>=4.64.4",
     "mypy>=2.3.1",
 ]
 
@@ -41,13 +41,27 @@ strict = "True"
 implicit_reexport = "True"
 show_error_codes = "True"
 
+[tool.mypy.pytest]
+ignore_missing_imports = "True"
+
 [tool.ruff]
-lint.extend-select = ["ALL"]
-lint.ignore = ["T201"]
+# 1. Global max line length for CODE (used by ruff format and ruff check)
+line-length = 88
+
+[tool.ruff.lint]
+# Enable the E501 (line-too-long) and W505 (doc-line-too-long) rules
+select = ["E501", "W505"]
+extend-select = ["ALL"]
+ignore = ["T201", ]
+
+[tool.ruff.lint.pycodestyle]
+# 2. Max line length for DOCSTRINGS and STANDALONE COMMENTS
+max-doc-length = 72
+
 
 [tool.ruff.lint.per-file-ignores]
-# Ignore `S101` (assert) in test_throttle.py
-"tests/**/*.py" = ["S101"]
+# Ignore ruff errors in test_throttle.py
+"tests/**/*.py" = ["S101", "PLC0415", "SLF001", "D102", "SIM300", "G004"]
 
 
 [project.urls]

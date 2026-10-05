@@ -2122,7 +2122,7 @@ class RequestValidator:
             else:
                 return True
 
-        caller_frame = inspect.currentframe().f_back.f_back  # type: ignore
+        caller_frame = inspect.currentframe().f_back.f_back  # type: ignore [union-attr]
         assert caller_frame is not None
         if request_item.throttle_mode in (Mode.SYNC, Mode.SYNC_CONVERT):
             assert is_async_environment() is False
@@ -2163,7 +2163,7 @@ class RequestValidator:
         print("Interval Times:\n")
         print(
             "\nreq_ID | arrival idx |    send | t arrival | exp arrival | "
-            "act arrival | exp delay | act delay |        diff ratio |"
+            "act arrival | exp delay | act delay |        diff ratio |",
         )
 
         first_send_time = self.request_items[0].send_time_ns
@@ -2193,7 +2193,7 @@ class RequestValidator:
                 f"|     {line6_val:7.4f} "
                 f"|   {req_item.expected_delay_ns * NS_2_SECS:7.4f} "
                 f"|   {req_item.actual_delay_ns * NS_2_SECS:7.4f} "
-                f"|    {expected_actual_diff_ratio * NS_2_SECS:7.12f} |"
+                f"|    {expected_actual_diff_ratio * NS_2_SECS:7.12f} |",
             )
 
         print(f"{self.cumulative_expected_delay_ns=}")
@@ -2258,10 +2258,11 @@ class RequestValidator:
                 - self.request_items[idx].throttle_arrival_time_ns
             )
 
+            tolerance_ratio = 0.01
             assert (
-                abs((self.request_items[idx].throttle_wait_time_ns - exp_delay_ns))
+                abs(self.request_items[idx].throttle_wait_time_ns - exp_delay_ns)
                 / self.target_interval_ns
-                < 0.01
+                < tolerance_ratio
             )
 
             self.cumulative_expected_delay_ns += self.request_items[
@@ -2287,8 +2288,8 @@ class RequestValidator:
 
         Notes:
               1) this code is serialized by the throttle lock
-        """
 
+        """
         self.idx += 1
         request_item.arrival_idx = self.idx  # first is zero
         request_item.actual_func_arrival_time_ns = perf_counter_ns()
@@ -2314,6 +2315,7 @@ class RequestValidator:
 
         Notes:
               1) this code is serialized by the throttle lock
+
         """
         self.idx += 1
         request_item = self.request_deque.pop()
@@ -2342,6 +2344,7 @@ class RequestValidator:
 
         Returns:
             the index reflected back
+
         """
         self.idx += 1
         request_item = self.request_deque.pop()
@@ -2373,6 +2376,7 @@ class RequestValidator:
 
         Returns:
             the index reflected back
+
         """
         self.idx += 1
         request_item = self.request_deque.pop()
@@ -2402,6 +2406,7 @@ class RequestValidator:
 
         Returns:
             the index reflected back
+
         """
         self.idx += 1
         request_item = self.request_deque.pop()
@@ -2432,6 +2437,7 @@ class RequestValidator:
 
         Returns:
             the index reflected back
+
         """
         self.idx += 1
         request_item = self.request_deque.pop()
@@ -2462,6 +2468,7 @@ class RequestValidator:
 
         Returns:
             the index reflected back
+
         """
         self.idx += 1
         request_item = self.request_deque.pop()
@@ -2489,7 +2496,10 @@ class RequestValidator:
         send_interval: float,
     ) -> int:
         return self.request6b(
-            req_id, reqs_per_sec, bucket_size=bucket_size, send_interval=send_interval
+            req_id,
+            reqs_per_sec,
+            bucket_size=bucket_size,
+            send_interval=send_interval,
         )
 
     def request6b(
@@ -2502,7 +2512,7 @@ class RequestValidator:
     ) -> int:
         """Request5 target.
 
-         Args:
+        Args:
             req_id: the req_id in the request
             reqs_per_sec: number of requests per second for the throttle
             bucket_size: bucket size for throttle
@@ -2510,6 +2520,7 @@ class RequestValidator:
 
         Returns:
             the index reflected back
+
         """
         self.idx += 1
         request_item = self.request_deque.pop()
@@ -2537,7 +2548,7 @@ class TestThrottleDocstrings:
     ####################################################################
     # test_throttle_example_1
     ####################################################################
-    def test_throttle_example_1(self, capsys: Any) -> None:
+    def test_throttle_example_1(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Method test_throttle_example_1.
 
         Args:
@@ -2547,16 +2558,16 @@ class TestThrottleDocstrings:
         hdr_str = ":Example 1: Throttle at 1 requests per second:"
         flowers(hdr_str)
 
-        from scottbrian_throttle.throttle import throttle
         import time
+
+        from scottbrian_throttle.throttle import throttle
 
         @throttle
         def func1(request_number: int, time_of_start: float) -> str:
-            ret_value = (
+            return (
                 f"request {request_number} sent at elapsed time: "
                 f"{time.time() - time_of_start:0.1f}"
             )
-            return ret_value
 
         start_time = time.time()
         for idx in range(10):
@@ -2586,27 +2597,26 @@ class TestThrottleDocstrings:
     ####################################################################
     # test_throttle_example_2
     ####################################################################
-    def test_throttle_example_2(self, capsys: Any) -> None:
+    def test_throttle_example_2(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Method test_throttle_example_2.
 
         Args:
             capsys: pytest fixture to capture print output
 
         """
-
         hdr_str = ":Example 2: Throttle at 2 requests per second:"
         flowers(hdr_str)
 
-        from scottbrian_throttle.throttle import throttle
         import time
+
+        from scottbrian_throttle.throttle import throttle
 
         @throttle(reqs_per_sec=2)
         def func2(request_number: int, time_of_start: float) -> str:
-            ret_value = (
+            return (
                 f"request {request_number} sent at elapsed time: "
                 f"{time.time() - time_of_start:0.1f}"
             )
-            return ret_value
 
         start_time = time.time()
         for idx in range(10):
@@ -2637,26 +2647,26 @@ class TestThrottleDocstrings:
     ####################################################################
     # test_throttle_example_3
     ####################################################################
-    def test_throttle_example_3(self, capsys: Any) -> None:
+    def test_throttle_example_3(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Method test_throttle_example_3.
 
         Args:
             capsys: pytest fixture to capture print output
 
         """
-
         hdr_str = ":Example 3: throttle with async function in asyncio environment:"
         flowers(hdr_str)
 
-        from scottbrian_throttle.throttle import throttle
         import asyncio
         import time
+
+        from scottbrian_throttle.throttle import throttle
 
         @throttle(reqs_per_sec=2)
         async def func3(request_number: int, time_of_start: float) -> None:
             print(
                 f"request {request_number} sent at elapsed time: "
-                f"{time.time() - time_of_start:0.1f}"
+                f"{time.time() - time_of_start:0.1f}",
             )
 
         async def main_loop() -> None:
@@ -2690,26 +2700,26 @@ class TestThrottleDocstrings:
     ####################################################################
     # test_throttle_example_4
     ####################################################################
-    def test_throttle_example_4(self, capsys: Any) -> None:
+    def test_throttle_example_4(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Method test_throttle_example_4.
 
         Args:
             capsys: pytest fixture to capture print output
 
         """
-
         hdr_str = ":Example 4: throttle with non-async function in asyncio environment:"
         flowers(hdr_str)
 
-        from scottbrian_throttle.throttle import throttle
         import asyncio
         import time
+
+        from scottbrian_throttle.throttle import throttle
 
         @throttle(reqs_per_sec=2)
         def func4(request_number: int, time_of_start: float) -> None:
             print(
                 f"request {request_number} sent at elapsed time: "
-                f"{time.time() - time_of_start:0.1f}"
+                f"{time.time() - time_of_start:0.1f}",
             )
 
         async def main_loop() -> None:
@@ -2743,26 +2753,26 @@ class TestThrottleDocstrings:
     ####################################################################
     # test_throttle_example_5
     ####################################################################
-    def test_throttle_example_5(self, capsys: Any) -> None:
+    def test_throttle_example_5(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Method test_throttle_example_5.
 
         Args:
             capsys: pytest fixture to capture print output
 
         """
-
         hdr_str = ":Example 5: throttle with convert to async in asyncio environment:"
         flowers(hdr_str)
 
-        from scottbrian_throttle.throttle import throttle
         import asyncio
         import time
+
+        from scottbrian_throttle.throttle import throttle
 
         @throttle(reqs_per_sec=2, convert_to_async=True)
         def func5(request_number: int, time_of_start: float) -> None:
             print(
                 f"request {request_number} sent at elapsed time: "
-                f"{time.time() - time_of_start:0.1f}"
+                f"{time.time() - time_of_start:0.1f}",
             )
 
         async def main_loop() -> None:
@@ -2796,25 +2806,25 @@ class TestThrottleDocstrings:
     ####################################################################
     # test_throttle_example_6
     ####################################################################
-    def test_throttle_example_6(self, capsys: Any) -> None:
+    def test_throttle_example_6(self, capsys: pytest.CaptureFixture[str]) -> None:
         """Method test_throttle_example_6.
 
         Args:
             capsys: pytest fixture to capture print output
 
         """
-
         hdr_str = ":Example 6: Throttle with a *bucket_size* of 3:"
         flowers(hdr_str)
 
-        from scottbrian_throttle.throttle import throttle
         import time
+
+        from scottbrian_throttle.throttle import throttle
 
         @throttle(reqs_per_sec=2, bucket_size=3)
         def func4(request_number: int, time_of_start: float) -> None:
             print(
                 f"request {request_number} sent at elapsed time: "
-                f"{time.time() - time_of_start:0.1f}"
+                f"{time.time() - time_of_start:0.1f}",
             )
 
         start_time = time.time()
@@ -2842,16 +2852,15 @@ class TestThrottleDocstrings:
         assert captured == expected_result
 
     ####################################################################
-    # test_throttle_example_T1
+    # test_throttle_example_t1
     ####################################################################
-    def test_throttle_example_T1(self, capsys: Any) -> None:
-        """Method test_throttle_example_T1.
+    def test_throttle_example_t1(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """Method test_throttle_example_t1.
 
         Args:
             capsys: pytest fixture to capture print output
 
         """
-
         hdr_str = ":Example 1: call __repr__ for Throttle"
         flowers(hdr_str)
 
@@ -2880,14 +2889,13 @@ class TestThrottleDocstrings:
     ####################################################################
     # test_throttle_example_7
     ####################################################################
-    def test_throttle_example_7(self, capsys: Any) -> None:
+    def test_throttle_example_7(self) -> None:
         """Method test_throttle_example_7.
 
         Args:
             capsys: pytest fixture to capture print output
 
         """
-
         hdr_str = ":Example 7: get length for an asynchronous throttle"
         flowers(hdr_str)
 
@@ -2925,36 +2933,35 @@ class TestThrottleDocstrings:
         print(
             f"\n{funky1.func7a.throttle.reqs_per_sec=},"
             f" {funky1.func7a.throttle.call_count=}, "
-            f"{funky1.funky_var=}, {id(funky1.func7a.throttle)=}\n"
+            f"{funky1.funky_var=}, {id(funky1.func7a.throttle)=}\n",
         )
         print(
             f"\n{funky1.func7b.throttle.reqs_per_sec=},"
             f" {funky1.func7b.throttle.call_count=},"
-            f" {funky1.funky_var=}, {id(funky1.func7b.throttle)=}\n"
+            f" {funky1.funky_var=}, {id(funky1.func7b.throttle)=}\n",
         )
 
         print(
             f"\n{funky2.func7a.throttle.reqs_per_sec=},"
             f" {funky2.func7a.throttle.call_count=}, "
-            f"{funky2.funky_var=}, {id(funky2.func7a.throttle)=}\n"
+            f"{funky2.funky_var=}, {id(funky2.func7a.throttle)=}\n",
         )
         print(
             f"\n{funky2.func7b.throttle.reqs_per_sec=},"
             f" {funky2.func7b.throttle.call_count=}, "
-            f"{funky2.funky_var=}, {id(funky2.func7b.throttle)=}\n"
+            f"{funky2.funky_var=}, {id(funky2.func7b.throttle)=}\n",
         )
 
     ####################################################################
     # test_throttle_example_8
     ####################################################################
-    def test_throttle_example_8(self, capsys: Any) -> None:
+    def test_throttle_example_8(self) -> None:
         """Method test_throttle_example_8.
 
         Args:
             capsys: pytest fixture to capture print output
 
         """
-
         hdr_str = ":Example 7: get length for an asynchronous throttle"
         flowers(hdr_str)
 
@@ -2988,21 +2995,21 @@ class TestThrottleDocstrings:
         print(
             f"\n{funky1.func7a.throttle.reqs_per_sec=},"
             f" {funky1.func7a.throttle.call_count=}, "
-            f"{funky1.funky_var=}, {id(funky1.func7a.throttle)=}\n"
+            f"{funky1.funky_var=}, {id(funky1.func7a.throttle)=}\n",
         )
         print(
             f"\n{funky1.func7b.throttle.reqs_per_sec=},"
             f" {funky1.func7b.throttle.call_count=},"
-            f" {funky1.funky_var=}, {id(funky1.func7b.throttle)=}\n"
+            f" {funky1.funky_var=}, {id(funky1.func7b.throttle)=}\n",
         )
 
         print(
             f"\n{funky2.func7a.throttle.reqs_per_sec=},"
             f" {funky2.func7a.throttle.call_count=}, "
-            f"{funky2.funky_var=}, {id(funky2.func7a.throttle)=}\n"
+            f"{funky2.funky_var=}, {id(funky2.func7a.throttle)=}\n",
         )
         print(
             f"\n{funky2.func7b.throttle.reqs_per_sec=},"
             f" {funky2.func7b.throttle.call_count=}, "
-            f"{funky2.funky_var=}, {id(funky2.func7b.throttle)=}\n"
+            f"{funky2.funky_var=}, {id(funky2.func7b.throttle)=}\n",
         )

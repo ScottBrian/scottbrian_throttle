@@ -1,5 +1,9 @@
 """Module throttle_blocks.
 
+Copyright (C) 2026 Scott Tuttle
+All rights reserved
+Licensed under the MIT License. See LICENSE file in the project root for details
+
 ===============
 throttle_blocks
 ===============
@@ -100,15 +104,16 @@ import logging
 import threading
 import time
 from typing import (
-    Any,
-    Callable,
-    Final,
     TYPE_CHECKING,
-    Type,
+    Any,
+    Final,
 )
 
-import scottbrian_locking.se_lock as selk  # noqa F401
+import scottbrian_locking.se_lock as selk  # noqa: F401
 from scottbrian_utils.pauser import Pauser
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 ########################################################################
@@ -260,12 +265,12 @@ class Throttle:
 
         """
         if TYPE_CHECKING:
-            __class__: Type[Throttle]  # noqa: F842
+            __class__: type[Throttle]  # noqa: F842
         classname = self.__class__.__name__
         parms = (
             f"reqs_per_sec={self.reqs_per_sec}, "
             f"bucket_size={self.bucket_size}, "
-            f"convert_to_async={str(self.convert_to_async)}, "
+            f"convert_to_async={self.convert_to_async!s}, "
             f"name={self.t_name}"
         )
 
@@ -279,6 +284,7 @@ class Throttle:
 
         Returns:
             The target interval in seconds.
+
         """
         return self._target_interval_ns * Throttle.NS_2_SECS
 
@@ -340,7 +346,10 @@ class Throttle:
     # sync_send_request
     ####################################################################
     def sync_send_request(
-        self, func: Callable[..., Any], *args: Any, **kwargs: Any
+        self,
+        func: Callable[..., Any],
+        *args: Any,
+        **kwargs: Any,
     ) -> Any | None:
         """Send the request.
 
@@ -365,7 +374,8 @@ class Throttle:
         with self.sync_lock:
             self._arrival_time_ns = time.perf_counter_ns()
             self._wait_time_ns = max(
-                0.0, self._next_target_time_ns - self._arrival_time_ns
+                0.0,
+                self._next_target_time_ns - self._arrival_time_ns,
             )
             if (
                 self._next_target_time_ns + self.lb_adjustment_ns
@@ -403,7 +413,10 @@ class Throttle:
     # async_send_request
     ####################################################################
     async def async_send_request(
-        self, func: Callable[..., Any], *args: Any, **kwargs: Any
+        self,
+        func: Callable[..., Any],
+        *args: Any,
+        **kwargs: Any,
     ) -> Any:
         """Send the request.
 
@@ -415,6 +428,7 @@ class Throttle:
         Returns:
               The return value from the request function which may be
               any value or None.
+
         Raises:
             Exception: An exception occurred in the request target. It
                 will be logged and re-raised.
@@ -427,7 +441,8 @@ class Throttle:
         async with self.async_lock:
             self._arrival_time_ns = time.perf_counter_ns()
             self._wait_time_ns = max(
-                0.0, self._next_target_time_ns - self._arrival_time_ns
+                0.0,
+                self._next_target_time_ns - self._arrival_time_ns,
             )
             if (
                 self._next_target_time_ns + self.lb_adjustment_ns
@@ -468,12 +483,11 @@ class Throttle:
                 # Run the worker thread using the captured main-thread
                 # context
                 return await asyncio.to_thread(lambda: ctx.run(worker_thread_target))
-            else:
-                try:
-                    return await func(*args, **kwargs)
-                except Exception as e:
-                    self._capture_apm_error(e, "async context")
-                    raise
+            try:
+                return await func(*args, **kwargs)
+            except Exception as e:
+                self._capture_apm_error(e, "async context")
+                raise
 
     ####################################################################
     # _capture_apm_error
