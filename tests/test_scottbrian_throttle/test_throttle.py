@@ -2037,6 +2037,7 @@ class RequestValidator:
     ####################################################################
     def __init__(
         self,
+        *,
         reqs_per_sec: float,
         throttle_mode: Mode,
         bucket_size: float,

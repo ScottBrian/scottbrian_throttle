@@ -2,7 +2,8 @@
 
 Copyright (C) 2026 Scott Tuttle
 All rights reserved
-Licensed under the MIT License. See LICENSE file in the project root for details
+Licensed under the MIT License. See LICENSE file in the project root for
+details
 
 ========
 throttle
@@ -82,7 +83,6 @@ from wrapt import PartialCallableObjectProxy, decorator
 
 from scottbrian_throttle.throttle_blocks import Throttle
 
-# logger = logging.getLogger(__name__)
 ########################################################################
 # Local
 ########################################################################
@@ -93,10 +93,6 @@ from scottbrian_throttle.throttle_blocks import Throttle
 P = ParamSpec("P")
 R = TypeVar("R")
 F = TypeVar("F", bound=Callable[..., Any])
-# F = TypeVar("F")
-_T = TypeVar("_T")
-_P2 = ParamSpec("_P2")
-_R2 = TypeVar("_R2")
 
 SelfT = TypeVar("SelfT")  # Tracks the class instance type
 ########################################################################
@@ -106,7 +102,6 @@ SelfT = TypeVar("SelfT")  # Tracks the class instance type
 ########################################################################
 # Pie Throttle Decorator
 ########################################################################
-# F = TypeVar("F", bound=Callable[..., Any])
 
 
 ########################################################################
@@ -120,34 +115,21 @@ class FuncWithThrottleAttr(Protocol[F]):
 
     def __get__(
         self,
-        instance: Any,
-        owner: Any = None,
-    ) -> FuncWithThrottleAttr[Any]: ...
+        instance: Any,  # noqa: ANN401
+        owner: type[Any],
+    ) -> FuncWithThrottleAttr[Any]:
+        """Satisfy typing."""
+        ...
 
 
-# def add_throttle_sync_attr(
-#     func: Any,
-# ) -> FuncWithThrottleAttr[Any]:
-#     """Wrapper to add throttle attribute to function.
-#
-#     Args:
-#         func: function that has the attribute added
-#
-#     Returns:
-#         input function with throttle attached as attribute
-#
-#     """
-#     return cast(FuncWithThrottleAttr[Any], func)
-
-
-# ==============================================================================
+# ======================================================================
 # GROUP 1: Direct Decoration via `@throttle` (On the OUTSIDE/ABOVE)
-# ==============================================================================
+# ======================================================================
 
 
 # 1a. Explicitly handle @classmethod descriptors
 @overload
-def throttle(
+def throttle[**P, R](
     _wrapped: classmethod[Any, P, R],
     *,
     reqs_per_sec: float = 1,
@@ -157,7 +139,7 @@ def throttle(
 
 
 @overload
-def throttle(
+def throttle[**P, R](
     _wrapped: classmethod[Any, P, R],
     *,
     reqs_per_sec: float = 1,
@@ -168,7 +150,7 @@ def throttle(
 
 # 1b. Explicitly handle @staticmethod descriptors
 @overload
-def throttle(
+def throttle[**P, R](
     _wrapped: staticmethod[P, R],
     *,
     reqs_per_sec: float = 1,
@@ -178,7 +160,7 @@ def throttle(
 
 
 @overload
-def throttle(
+def throttle[**P, R](
     _wrapped: staticmethod[P, R],
     *,
     reqs_per_sec: float = 1,
@@ -189,7 +171,7 @@ def throttle(
 
 # 1d. Standard Functions -> Keep Sync behavior
 @overload
-def throttle(
+def throttle[F: Callable[..., Any]](
     _wrapped: F,
     *,
     reqs_per_sec: float = 1,
@@ -200,7 +182,7 @@ def throttle(
 
 # 1e. Instance Methods -> Async Conversion
 @overload
-def throttle(
+def throttle[SelfT, **P, R](
     _wrapped: Callable[Concatenate[SelfT, P], R],
     *,
     reqs_per_sec: float = 1,
@@ -211,7 +193,7 @@ def throttle(
 
 # 1f. Instance Methods -> Keep Sync behavior
 @overload
-def throttle(
+def throttle[SelfT, **P, R](
     _wrapped: Callable[Concatenate[SelfT, P], R],
     *,
     reqs_per_sec: float = 1,
@@ -222,7 +204,7 @@ def throttle(
 
 # 1g. Fallback for dynamic booleans (Direct decoration)
 @overload
-def throttle(
+def throttle[F: Callable[..., Any]](
     _wrapped: F,
     *,
     reqs_per_sec: float = 1,
@@ -231,9 +213,9 @@ def throttle(
 ) -> FuncWithThrottleAttr[Any]: ...
 
 
-# ==============================================================================
+# ======================================================================
 # GROUP 2: Factory Decoration via `@throttle(reqs_per_sec=2)`
-# ==============================================================================
+# ======================================================================
 
 
 # 2a. Factory -> Async Conversion (Handles both functions and methods
@@ -272,7 +254,7 @@ def throttle(
 
 
 @validate_call
-def throttle(
+def throttle[F: Callable[..., Any]](
     _wrapped: (
         InstanceOf[classmethod[Any, Any, Any]]
         | InstanceOf[staticmethod[Any, Any]]
@@ -337,24 +319,25 @@ def throttle(
     #  does not have parameters.
     #
     #     Here's an example of throttle with a function that has no
-    #         args:
-    #         @throttle
-    #         def a_func():
-    #             print('42')
+    #     args:
+    #
+    # >> line 1:  @throttle
+    # >> line 2:  def a_func():
+    # >> line 3:      print('42')
     #
     #     This is what essentially happens under the covers:
-    #         def a_func():
-    #             print('42')
-    #         a_func = throttle()(a_func)
+    # >> line 1:  def a_func():
+    # >> line 2:      print('42')
+    # >> line 3:  a_func = throttle()(a_func)
     #
     #     The call to throttle results in a function being returned that
     #     takes as its first argument the a_func specification that we
     #     see in parens immediately following the throttle call.
     #
     #     Here's another variation will accomplish the same thing:
-    #         def a_func():
-    #             print('42')
-    #         a_func = throttle(a_func)
+    # >> line 1:  def a_func():
+    # >> line 2:      print('42')
+    # >> line 1:  a_func = throttle(a_func)
     #
     #     What happens is throttle gets control and tests whether a_func
     #     was specified, and if not returns a call to functools.partial
