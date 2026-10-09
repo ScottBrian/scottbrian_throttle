@@ -79,7 +79,7 @@ from pydantic import Field, InstanceOf, validate_call
 ########################################################################
 # Third Party
 ########################################################################
-from wrapt import PartialCallableObjectProxy, decorator
+from wrapt import FunctionWrapper, PartialCallableObjectProxy, decorator
 
 from scottbrian_throttle.throttle_blocks import Throttle
 
@@ -93,6 +93,9 @@ from scottbrian_throttle.throttle_blocks import Throttle
 P = ParamSpec("P")
 R = TypeVar("R")
 F = TypeVar("F", bound=Callable[..., Any])
+
+_P1 = ParamSpec("_P1")
+_R1_co = TypeVar("_R1_co", covariant=True)
 
 SelfT = TypeVar("SelfT")  # Tracks the class instance type
 ########################################################################
@@ -368,35 +371,31 @@ def throttle[F: Callable[..., Any]](
     )
 
     def t_decorator(
-        wrapped: Any,
-        #     InstanceOf[classmethod]
-        #     | InstanceOf[staticmethod]
-        #     | Coroutine[Any, Any, R]
-        #     | F
-        # ),
-    ) -> (
-        Any
-    ):  # FunctionWrapper[Never, Any]:  # Callable[P, R] | Coroutine[Any, Any, R]:
+        wrapped: classmethod[Any, Any, Any] | staticmethod[Any, Any] | F,
+    ) -> FunctionWrapper[
+        _P1,
+        _R1_co,
+    ]:
         target = getattr(wrapped, "__func__", wrapped)
         is_async_func = inspect.iscoroutinefunction(target)
 
         @decorator
         def sync_wrapper(
-            wrapped_func: Any,
-            instance: object,
+            wrapped_func: Callable[P, Any],
+            instance: Any,  # noqa: ANN401, ARG001
             args: tuple[Any, ...],
             kwargs: dict[str, Any],
-        ) -> Any:
+        ) -> Any:  # noqa: ANN401
 
             return a_throttle.sync_send_request(wrapped_func, *args, **kwargs)
 
         @decorator
         async def async_wrapper(
-            wrapped_func: Any,
-            instance: object,
+            wrapped_func: Callable[P, Coroutine[Any, Any, Any]],
+            instance: Any,  # noqa: ANN401, ARG001
             args: tuple[Any, ...],
             kwargs: dict[str, Any],
-        ) -> Any:
+        ) -> Any:  # noqa: ANN401
 
             return await a_throttle.async_send_request(wrapped_func, *args, **kwargs)
 
@@ -404,14 +403,8 @@ def throttle[F: Callable[..., Any]](
             return async_wrapper(wrapped)
         return sync_wrapper(wrapped)
 
-    raw_wrapper = t_decorator(_wrapped)
-
-    # wrapper = add_throttle_sync_attr(wrapper)
-    wrapper = cast("FuncWithThrottleAttr[Any]", raw_wrapper)
+    wrapper = cast("FuncWithThrottleAttr[Any]", t_decorator(_wrapped))
 
     wrapper.throttle = a_throttle
 
-    # return wrapper
-    return cast("Any", wrapper)
-
-    # return cast(FuncWithThrottleAttr[F], wrapper)
+    return wrapper

@@ -2,7 +2,8 @@
 
 Copyright (C) 2026 Scott Tuttle
 All rights reserved
-Licensed under the MIT License. See LICENSE file in the project root for details
+Licensed under the MIT License. See LICENSE file in the project root for
+details
 
 ===============
 throttle_blocks
@@ -107,13 +108,19 @@ from typing import (
     TYPE_CHECKING,
     Any,
     Final,
+    ParamSpec,
+    TypeVar,
+    cast,
+    overload,
 )
 
+if TYPE_CHECKING:
+    from collections.abc import Awaitable, Callable
 import scottbrian_locking.se_lock as selk  # noqa: F401
 from scottbrian_utils.pauser import Pauser
 
-if TYPE_CHECKING:
-    from collections.abc import Callable
+P = ParamSpec("P")
+R = TypeVar("R")
 
 
 ########################################################################
@@ -245,6 +252,7 @@ class Throttle:
         Returns:
             The representation as how the class is instantiated
 
+
         :Example 1: call __repr__ for Throttle
 
         .. code-block:: python
@@ -261,7 +269,10 @@ class Throttle:
 
         .. code-block:: text
 
-            'Throttle(reqs_per_sec=0.5, bucket_size=1, convert_to_async=False, name=func1)'  # noqa: E501, W505
+            'Throttle(reqs_per_sec=0.5,
+                      bucket_size=1,
+                      convert_to_async=False,
+                      name=func1)'
 
         """
         if TYPE_CHECKING:
@@ -303,7 +314,7 @@ class Throttle:
     ####################################################################
     # get_completion_time_secs
     ####################################################################
-    def get_completion_time_secs(self, num_requests: int, from_start: bool) -> float:
+    def get_completion_time_secs(self, *, num_requests: int, from_start: bool) -> float:
         """Calculate completion time secs for given number requests.
 
         Args:
@@ -324,7 +335,7 @@ class Throttle:
     ####################################################################
     # get_completion_time_ns
     ####################################################################
-    def get_completion_time_ns(self, num_requests: int, from_start: bool) -> float:
+    def get_completion_time_ns(self, *, num_requests: int, from_start: bool) -> float:
         """Calculate completion time ns for given number requests.
 
         Args:
@@ -347,10 +358,10 @@ class Throttle:
     ####################################################################
     def sync_send_request(
         self,
-        func: Callable[..., Any],
-        *args: Any,
-        **kwargs: Any,
-    ) -> Any | None:
+        func: Callable[P, R],
+        *args: P.args,
+        **kwargs: P.kwargs,
+    ) -> Any:  # noqa: ANN401
         """Send the request.
 
         Args:
@@ -412,12 +423,33 @@ class Throttle:
     ####################################################################
     # async_send_request
     ####################################################################
+    # Overload 1: When a coroutine/async function is provided, R is the
+    # unpacked value
+    @overload
     async def async_send_request(
         self,
-        func: Callable[..., Any],
-        *args: Any,
-        **kwargs: Any,
-    ) -> Any:
+        func: Callable[P, Awaitable[R]],
+        *args: P.args,
+        **kwargs: P.kwargs,
+    ) -> R: ...
+
+    # Overload 2: When a normal sync function is provided, R is the
+    # direct return value
+    @overload
+    async def async_send_request(
+        self,
+        func: Callable[P, R],
+        *args: P.args,
+        **kwargs: P.kwargs,
+    ) -> R: ...
+    async def async_send_request(
+        self,
+        func: Callable[..., object],
+        *args: object,
+        **kwargs: object,
+        # *args: P.args,
+        # **kwargs: P.kwargs,
+    ) -> object:
         """Send the request.
 
         Args:
@@ -473,7 +505,7 @@ class Throttle:
             ctx = contextvars.copy_context()
             if self.convert_to_async:
 
-                def worker_thread_target() -> Any:
+                def worker_thread_target() -> Any:  # noqa: ANN401
                     try:
                         return func(*args, **kwargs)
                     except Exception as e:
@@ -483,8 +515,9 @@ class Throttle:
                 # Run the worker thread using the captured main-thread
                 # context
                 return await asyncio.to_thread(lambda: ctx.run(worker_thread_target))
+
             try:
-                return await func(*args, **kwargs)
+                return await cast("Awaitable[object]", func(*args, **kwargs))
             except Exception as e:
                 self._capture_apm_error(e, "async context")
                 raise
@@ -495,8 +528,8 @@ class Throttle:
     def _capture_apm_error(self, e: Exception, context_name: str) -> None:
         # 1. Standard structured logging (parsed cleanly by Datadog/ELK)
         self.logger.debug(
-            msg=f"Exception in {context_name} for '{self.t_name}': {e}",
-            exc_info=True,
+            msg=f"Exception in {context_name} for '{self.t_name}': {e}",  # noqa: G004
+            exc_info=True,  # noqa: LOG014
             extra={
                 "function_name": self.t_name,
                 "throttle_delay": self._wait_time_ns * Throttle.NS_2_SECS,
@@ -507,7 +540,7 @@ class Throttle:
         # inside background threads, explicit capture guarantees it
         # isn't dropped.
         try:
-            import sentry_sdk
+            import sentry_sdk  # noqa: PLC0415
 
             sentry_sdk.capture_exception(e)
         except ImportError:

@@ -1038,11 +1038,13 @@ class TestThrottle:
             request_item.send_time_ns = perf_counter_ns()
             if throttle_mode == Mode.SYNC_CONVERT:
                 await a_throttle.async_send_request(
-                    request_validator.request0c, request_item=request_item
+                    request_validator.request0c,
+                    request_item=request_item,
                 )
             else:
                 await a_throttle.async_send_request(
-                    request_validator.async_request0c, request_item=request_item
+                    request_validator.async_request0c,
+                    request_item=request_item,
                 )
 
             request_item.return_time_ns = perf_counter_ns()
