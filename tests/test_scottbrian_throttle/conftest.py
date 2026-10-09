@@ -1,10 +1,19 @@
-"""conftest.py module for testing."""
+"""Module _conftest.
+
+Copyright (C) 2026 Scott Tuttle
+All rights reserved
+Licensed under the MIT License. See LICENSE file in the project root for
+details
+"""
 
 ########################################################################
 # Standard Library
 ########################################################################
 import logging
-from typing import Generator
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Generator
 
 import pytest
 
@@ -20,29 +29,25 @@ from scottbrian_utils.exc_hook import ExcHook
 ########################################################################
 # logging
 ########################################################################
-# logging.basicConfig(
-#     filename="MyLogFile.log",
-#     filemode="w",
-#     level=logging.DEBUG,
-#     format="%(asctime)s "
-#     "[%(levelname)8s] "
-#     "%(name)s "
-#     "%(filename)s:"
-#     "%(funcName)s:"
-#     "%(lineno)d "
-#     "%(message)s",
-# )
+logging.basicConfig(
+    filename="MyLogFile.log",
+    filemode="w",
+    level=logging.DEBUG,
+    format=(
+        "%(asctime)s "
+        "[%(levelname)8s] "
+        "(Thread ID: %(thread)d) "
+        "(Name: %(threadName)s) "
+        "%(name)s "
+        "%(filename)s:"
+        "%(funcName)s:"
+        "%(lineno)d -> "
+        "%(message)s"
+    ),
+    datefmt="%H:%M:%S",
+)
 
-# logging.basicConfig(
-#     level=logging.DEBUG,
-#     format=(
-#         "%(asctime)s [%(levelname)s]"
-#         " (Thread ID: %(thread)d) (Name: %(threadName)s) -> %(message)s"
-#     ),
-#     datefmt="%H:%M:%S",
-# )
-#
-# logger = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 ########################################################################
@@ -56,18 +61,13 @@ from scottbrian_utils.exc_hook import ExcHook
 # cleanup processing for the mainline to ensure the test case fails.
 # Without thread_exc, any uncaptured thread failure will appear in the
 # output, but the test case itself will not fail.
-# Also, if you need to issue the thread error earlier, before cleanup,
-# then specify thread_exc as an argument on the test method and then in
-# mainline issue:
-#     thread_exc.raise_exc_if_one()
-#
-# When the above is done, cleanup will not raise the error again.
 #
 ########################################################################
 @pytest.fixture(autouse=True)
 def thread_exc(
-    monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest
-) -> Generator[ExcHook, None, None]:
+    monkeypatch: pytest.MonkeyPatch,
+    request: pytest.FixtureRequest,
+) -> Generator[ExcHook]:
     """Instantiate and return a ThreadExc for testing.
 
     Args:
@@ -78,5 +78,6 @@ def thread_exc(
         a thread exception handler
 
     """
+    logger.debug(f"thread_exc established for {request.node=}")
     with ExcHook(monkeypatch) as exc_hook:
         yield exc_hook

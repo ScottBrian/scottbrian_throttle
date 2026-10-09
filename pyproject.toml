@@ -65,6 +65,9 @@ max-doc-length = 72
     "SLF001", "D102",
     "SIM300", "G004", "PLR0913"]
 
+[tool.ruff.lint.flake8-pytest-style]
+parametrize-values-type = "tuple"
+parametrize-values-row-type = "tuple"
 
 [project.urls]
 Documentation = "https://scottbrian-throttle.readthedocs.io/en/latest/"

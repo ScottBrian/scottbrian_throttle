@@ -1,10 +1,14 @@
-"""test_throttle.py module."""
+"""Module test_throttle.
 
-# import gc
+Copyright (C) 2026 Scott Tuttle
+All rights reserved
+Licensed under the MIT License. See LICENSE file in the project root for
+details
+"""
 
 import asyncio
-
 import concurrent.futures
+import gc
 import inspect
 import logging
 import os
@@ -30,7 +34,6 @@ import pytest
 ########################################################################
 from pydantic import ValidationError
 from scottbrian_utils.diag_msg import get_caller_info
-from scottbrian_utils.diag_msg import get_formatted_call_sequence as call_seq
 from scottbrian_utils.entry_trace import etrace
 from scottbrian_utils.flower_box import print_flower_box_msg as flowers
 from scottbrian_utils.log_verifier import LogVer
@@ -44,8 +47,6 @@ from scottbrian_throttle.throttle import throttle
 from scottbrian_throttle.throttle_blocks import Throttle
 
 ########################################################################
-# set up logging
-########################################################################
 
 
 logger = logging.getLogger(__name__)
@@ -54,37 +55,25 @@ logger = logging.getLogger(__name__)
 ########################################################################
 # Throttle test exceptions
 ########################################################################
-class ErrorTstThrottle(Exception):
+class TestThrottleError(Exception):
     """Base class for exception in this module."""
 
-    pass
 
-
-class InvalidRouteNum(ErrorTstThrottle):
-    """InvalidRouteNum exception class."""
-
-    pass
-
-
-class BadRequestStyleArg(ErrorTstThrottle):
-    """BadRequestStyleArg exception class."""
-
-    pass
-
-
-class IncorrectWhichThrottle(ErrorTstThrottle):
-    """IncorrectWhichThrottle exception class."""
-
-    pass
+class BadRequestStyleArgError(TestThrottleError):
+    """BadRequestStyleArgError exception class."""
 
 
 class Mode(Enum):
+    """Choose the test mode for sync or async."""
+
     SYNC = auto()
     SYNC_CONVERT = auto()
     ASYNC = auto()
 
 
 class MethodType(Enum):
+    """Choose the method type used for test."""
+
     INSTANCE = auto()
     STATIC = auto()
     CLASS = auto()
@@ -192,6 +181,7 @@ class TestThrottleBasic:
     @etrace(omit_caller=True)
     def test_throttle_repr(
         self,
+        *,
         reqs_per_sec_arg: float,
         bucket_size_arg: float,
         convert_to_async_arg: bool,
@@ -202,6 +192,7 @@ class TestThrottleBasic:
         Args:
             reqs_per_sec_arg: request per second
             bucket_size_arg: leaky bucket size
+            convert_to_async_arg: choose whether to convert
             name_arg: throttle name
 
 
@@ -233,16 +224,15 @@ class TestThrottleBasic:
 class TestThrottleDecoratorErrors:
     """TestThrottleDecoratorErrors class."""
 
-    def test_pie_throttle_bad_args(self) -> None:
-        """test_throttle using bad arguments."""
-
+    def test_pie_reqs_to_sec_args(self) -> None:
+        """test_throttle using reqs_to_sec arguments."""
         ################################################################
         # bad reqs_per_sec
         ################################################################
         ml_error_msg = re.escape(
             "1 validation error for throttle\nreqs_per_sec\n  "
             "Input should be greater than 0 "
-            "[type=greater_than, input_value=-1, input_type=int]"
+            "[type=greater_than, input_value=-1, input_type=int]",
         )
 
         with pytest.raises(ValidationError, match=ml_error_msg):
@@ -254,7 +244,7 @@ class TestThrottleDecoratorErrors:
         ml_error_msg = re.escape(
             "1 validation error for throttle\nreqs_per_sec\n  "
             "Input should be greater than 0 "
-            "[type=greater_than, input_value=0, input_type=int]"
+            "[type=greater_than, input_value=0, input_type=int]",
         )
         with pytest.raises(ValidationError, match=ml_error_msg):
 
@@ -275,13 +265,15 @@ class TestThrottleDecoratorErrors:
         def f5() -> None:
             pass
 
+    def test_pie_bucket_size_args(self) -> None:
+        """test_throttle using bucket_size arguments."""
         ################################################################
         # bad bucket_size
         ################################################################
         ml_error_msg = re.escape(
             "1 validation error for throttle\nbucket_size\n  "
             "Input should be greater than or equal to 1 "
-            "[type=greater_than_equal, input_value=-1, input_type=int]"
+            "[type=greater_than_equal, input_value=-1, input_type=int]",
         )
         with pytest.raises(ValidationError, match=ml_error_msg):
 
@@ -292,7 +284,7 @@ class TestThrottleDecoratorErrors:
         ml_error_msg = re.escape(
             "1 validation error for throttle\nbucket_size\n  "
             "Input should be greater than or equal to 1 "
-            "[type=greater_than_equal, input_value=0, input_type=int]"
+            "[type=greater_than_equal, input_value=0, input_type=int]",
         )
         with pytest.raises(ValidationError, match=ml_error_msg):
 
@@ -303,7 +295,7 @@ class TestThrottleDecoratorErrors:
         ml_error_msg = re.escape(
             "1 validation error for throttle\nbucket_size\n  "
             "Input should be greater than or equal to 1 "
-            "[type=greater_than_equal, input_value=0.3, input_type=float]"
+            "[type=greater_than_equal, input_value=0.3, input_type=float]",
         )
         with pytest.raises(ValidationError, match=ml_error_msg):
 
@@ -320,28 +312,30 @@ class TestThrottleDecoratorErrors:
         def f11() -> None:
             pass
 
+    def test_pie_convert_to_async_args(self) -> None:  # noqa: C901
+        """test_throttle using convert_to_async arguments."""
         ################################################################
         # bad convert_to_async
         ################################################################
         ml_error_msg = re.escape(
             "1 validation error for throttle\nconvert_to_async\n  "
             "Input should be a valid boolean, unable to interpret input "
-            "[type=bool_parsing, input_value='blue', input_type=str]"
+            "[type=bool_parsing, input_value='blue', input_type=str]",
         )
         with pytest.raises(ValidationError, match=ml_error_msg):
 
-            @throttle(convert_to_async="blue")  # type: ignore
+            @throttle(convert_to_async="blue")  # type: ignore [call-overload, untyped-decorator]
             def f12() -> None:
                 pass
 
         ml_error_msg = re.escape(
             "1 validation error for throttle\nconvert_to_async\n  "
             "Input should be a valid boolean, unable to interpret input "
-            "[type=bool_parsing, input_value=2, input_type=int]"
+            "[type=bool_parsing, input_value=2, input_type=int]",
         )
         with pytest.raises(ValidationError, match=ml_error_msg):
 
-            @throttle(convert_to_async=2)  # type: ignore
+            @throttle(convert_to_async=2)  # type: ignore [call-overload, untyped-decorator]
             def f13() -> None:
                 pass
 
@@ -354,27 +348,27 @@ class TestThrottleDecoratorErrors:
         def f15() -> None:
             pass
 
-        @throttle(convert_to_async="True")  # type: ignore
+        @throttle(convert_to_async="True")  # type: ignore [call-overload, untyped-decorator]
         def f16() -> None:
             pass
 
-        @throttle(convert_to_async="False")  # type: ignore
+        @throttle(convert_to_async="False")  # type: ignore [call-overload, untyped-decorator]
         def f17() -> None:
             pass
 
-        @throttle(convert_to_async=1)  # type: ignore
+        @throttle(convert_to_async=1)  # type: ignore [call-overload, untyped-decorator]
         def f18() -> None:
             pass
 
-        @throttle(convert_to_async=0)  # type: ignore
+        @throttle(convert_to_async=0)  # type: ignore [call-overload, untyped-decorator]
         def f19() -> None:
             pass
 
-        @throttle(convert_to_async="yes")  # type: ignore
+        @throttle(convert_to_async="yes")  # type: ignore [call-overload, untyped-decorator]
         def f20() -> None:
             pass
 
-        @throttle(convert_to_async="no")  # type: ignore
+        @throttle(convert_to_async="no")  # type: ignore [call-overload, untyped-decorator]
         def f21() -> None:
             pass
 
@@ -417,13 +411,13 @@ class TestThrottleDecoratorRequestErrors:
             level=logging.DEBUG,
             pattern=log_msg,
         )
+
+        @throttle(reqs_per_sec=1)
+        def f1() -> None:
+            ans = 42 / 0
+            print(f"{ans=}")
+
         with pytest.raises(ZeroDivisionError):
-
-            @throttle(reqs_per_sec=1)
-            def f1() -> None:
-                ans = 42 / 0
-                print(f"{ans=}")
-
             f1()
 
         ################################################################
@@ -435,13 +429,13 @@ class TestThrottleDecoratorRequestErrors:
             level=logging.DEBUG,
             pattern=log_msg,
         )
+
+        @throttle(reqs_per_sec=1, bucket_size=2)
+        def f2() -> None:
+            ans = 42 / 0
+            print(f"{ans=}")
+
         with pytest.raises(ZeroDivisionError):
-
-            @throttle(reqs_per_sec=1, bucket_size=2)
-            def f2() -> None:
-                ans = 42 / 0
-                print(f"{ans=}")
-
             f2()
 
         ################################################################
@@ -453,13 +447,13 @@ class TestThrottleDecoratorRequestErrors:
             level=logging.DEBUG,
             pattern=log_msg,
         )
+
+        @throttle(reqs_per_sec=1, convert_to_async=True)
+        def f3() -> None:
+            ans = 42 / 0
+            print(f"{ans=}")
+
         with pytest.raises(ZeroDivisionError):
-
-            @throttle(reqs_per_sec=1, convert_to_async=True)
-            def f3() -> None:
-                ans = 42 / 0
-                print(f"{ans=}")
-
             asyncio.run(f3())
 
         ################################################################
@@ -471,13 +465,13 @@ class TestThrottleDecoratorRequestErrors:
             level=logging.DEBUG,
             pattern=log_msg,
         )
+
+        @throttle(reqs_per_sec=1, bucket_size=2, convert_to_async=True)
+        def f4() -> None:
+            ans = 42 / 0
+            print(f"{ans=}")
+
         with pytest.raises(ZeroDivisionError):
-
-            @throttle(reqs_per_sec=1, bucket_size=2, convert_to_async=True)
-            def f4() -> None:
-                ans = 42 / 0
-                print(f"{ans=}")
-
             asyncio.run(f4())
 
         ################################################################
@@ -489,13 +483,13 @@ class TestThrottleDecoratorRequestErrors:
             level=logging.DEBUG,
             pattern=log_msg,
         )
+
+        @throttle(reqs_per_sec=1)
+        async def f5() -> None:
+            ans = 42 / 0
+            print(f"{ans=}")
+
         with pytest.raises(ZeroDivisionError):
-
-            @throttle(reqs_per_sec=1)
-            async def f5() -> None:
-                ans = 42 / 0
-                print(f"{ans=}")
-
             asyncio.run(f5())
 
         ################################################################
@@ -507,13 +501,13 @@ class TestThrottleDecoratorRequestErrors:
             level=logging.DEBUG,
             pattern=log_msg,
         )
+
+        @throttle(reqs_per_sec=1, bucket_size=2)
+        async def f6() -> None:
+            ans = 42 / 0
+            print(f"{ans=}")
+
         with pytest.raises(ZeroDivisionError):
-
-            @throttle(reqs_per_sec=1, bucket_size=2)
-            async def f6() -> None:
-                ans = 42 / 0
-                print(f"{ans=}")
-
             asyncio.run(f6())
 
         match_results = log_ver.get_match_results(caplog=caplog)
@@ -527,92 +521,99 @@ class TestThrottleDecoratorRequestErrors:
         """Test sentry_sdk.capture_exception across contexts."""
         with patch("sentry_sdk.capture_exception") as mock_capture:
             # 1. Sync context
-            with pytest.raises(ValueError) as exc_info_sync:
 
-                @throttle(reqs_per_sec=1)
-                def f_sync() -> None:
-                    raise ValueError("sync error")
+            exc_msg = "sync error"
 
+            @throttle(reqs_per_sec=1)
+            def f_sync() -> None:
+                raise ValueError(exc_msg)
+
+            with pytest.raises(ValueError, match=exc_msg) as exc_info_sync:
                 f_sync()
 
             mock_capture.assert_called_with(exc_info_sync.value)
 
             # 2. Sync converted to async (to_thread) context
             mock_capture.reset_mock()
+
+            @throttle(reqs_per_sec=1, convert_to_async=True)
+            def f_to_thread() -> None:
+                exc_msg = "to_thread error"
+                raise RuntimeError(exc_msg)
+
             with pytest.raises(RuntimeError) as exc_info_to_thread:
-
-                @throttle(reqs_per_sec=1, convert_to_async=True)
-                def f_to_thread() -> None:
-                    raise RuntimeError("to_thread error")
-
                 asyncio.run(f_to_thread())
 
             mock_capture.assert_called_with(exc_info_to_thread.value)
 
             # 3. Pure async context
             mock_capture.reset_mock()
+
+            @throttle(reqs_per_sec=1)
+            async def f_async() -> None:
+                exc_msg = "async error"
+                raise KeyError(exc_msg)
+
             with pytest.raises(KeyError) as exc_info_async:
-
-                @throttle(reqs_per_sec=1)
-                async def f_async() -> None:
-                    raise KeyError("async error")
-
                 asyncio.run(f_async())
 
             mock_capture.assert_called_with(exc_info_async.value)
 
     ####################################################################
-    # test_sentry_import_error
+    # define test_sentry_import_error
     ####################################################################
     def test_sentry_import_error(self) -> None:
         """Test graceful fallback when sentry_sdk is not installed."""
         with patch.dict("sys.modules", {"sentry_sdk": None}):
             # Verify exception is still raised properly in sync context
+
+            @throttle(reqs_per_sec=1)
+            def f_sync() -> None:
+                _ = 1 / 0
+
             with pytest.raises(ZeroDivisionError):
-
-                @throttle(reqs_per_sec=1)
-                def f_sync() -> None:
-                    _ = 1 / 0
-
                 f_sync()
 
             # Verify exception in to_thread context
+
+            @throttle(reqs_per_sec=1, convert_to_async=True)
+            def f_to_thread() -> None:
+                _ = 1 / 0
+
             with pytest.raises(ZeroDivisionError):
-
-                @throttle(reqs_per_sec=1, convert_to_async=True)
-                def f_to_thread() -> None:
-                    _ = 1 / 0
-
                 asyncio.run(f_to_thread())
 
             # Verify exception in async context
+
+            @throttle(reqs_per_sec=1)
+            async def f_async() -> None:
+                _ = 1 / 0
+
             with pytest.raises(ZeroDivisionError):
-
-                @throttle(reqs_per_sec=1)
-                async def f_async() -> None:
-                    _ = 1 / 0
-
                 asyncio.run(f_async())
 
     ####################################################################
     # test_capture_apm_error_structured_logging_extra
     ####################################################################
     def test_capture_apm_error_structured_logging_extra(
-        self, caplog: pytest.LogCaptureFixture
+        self,
+        caplog: pytest.LogCaptureFixture,
     ) -> None:
         """Test structured logging extra fields attached by APM capture.
 
         Args:
             caplog: pytest fixture to capture log output
+
         """
         caplog.set_level(logging.DEBUG)
 
-        with pytest.raises(ValueError):
+        exc_msg = "structured logging test"
 
-            @throttle(reqs_per_sec=2, bucket_size=1)
-            def f_extra() -> None:
-                raise ValueError("structured logging test")
+        @throttle(reqs_per_sec=2, bucket_size=1)
+        def f_extra() -> None:
+            raise ValueError(exc_msg)
 
+        with pytest.raises(ValueError, match=exc_msg):
             f_extra()
 
         matched_records = [
@@ -623,8 +624,8 @@ class TestThrottleDecoratorRequestErrors:
         ]
         assert len(matched_records) == 1
         record = matched_records[0]
-        assert getattr(record, "function_name") == "f_extra"
-        assert getattr(record, "throttle_delay") >= 0.0
+        assert record.function_name == "f_extra"
+        assert record.throttle_delay >= 0.0
         assert record.exc_info is not None
 
 
@@ -652,19 +653,23 @@ class TestThrottle:
     # test_throttle_args_style
     ####################################################################
     @pytest.mark.parametrize(
-        "throttle_mode_arg", (Mode.SYNC, Mode.SYNC_CONVERT, Mode.ASYNC)
+        "throttle_mode_arg",
+        (Mode.SYNC, Mode.SYNC_CONVERT, Mode.ASYNC),
     )
     @pytest.mark.parametrize("request_style_arg", (0, 1, 2, 3, 4, 5, 6))
     def test_throttle_args_style(
-        self, throttle_mode_arg: Mode, request_style_arg: int
+        self,
+        throttle_mode_arg: Mode,
+        request_style_arg: int,
     ) -> None:
         """Method to start throttle tests.
 
         Args:
             throttle_mode_arg: sync or async
             request_style_arg: chooses function args mix
+
         """
-        # gc.disable()
+        gc.disable()
         send_interval = 0.0
         self.throttle_router(
             reqs_per_sec=1,
@@ -673,14 +678,14 @@ class TestThrottle:
             send_interval=send_interval,
             request_style=request_style_arg,
         )
-        # gc.enable()
-        # time.sleep(4)
+        gc.enable()
 
     ####################################################################
     # test_throttle_multi_threads1
     ####################################################################
     @pytest.mark.parametrize(
-        "throttle_mode_arg", (Mode.SYNC, Mode.SYNC_CONVERT, Mode.ASYNC)
+        "throttle_mode_arg",
+        (Mode.SYNC, Mode.SYNC_CONVERT, Mode.ASYNC),
     )
     @pytest.mark.parametrize("num_threads_arg", (0, 1, 2))
     @pytest.mark.parametrize("reqs_per_sec_arg", (0.25, 0.33, 0.5))
@@ -697,9 +702,13 @@ class TestThrottle:
         """Method to start throttle tests.
 
         Args:
+            throttle_mode_arg: choose whether sync or async
+            num_threads_arg: number of threads to start
             reqs_per_sec_arg: number of requests per second from fixture
+            bucket_size_arg: bucket size for throttle
             send_interval_mult_arg: interval between each send of a
                                       request
+
         """
         send_interval = (1 / reqs_per_sec_arg) * send_interval_mult_arg
         self.throttle_router(
@@ -716,7 +725,8 @@ class TestThrottle:
     # test_throttle_multi_threads2
     ####################################################################
     @pytest.mark.parametrize(
-        "throttle_mode_arg", (Mode.SYNC, Mode.SYNC_CONVERT, Mode.ASYNC)
+        "throttle_mode_arg",
+        (Mode.SYNC, Mode.SYNC_CONVERT, Mode.ASYNC),
     )
     @pytest.mark.parametrize("num_threads_arg", (0, 2, 8))
     @pytest.mark.parametrize("reqs_per_sec_arg", (1, 2, 3))
@@ -733,9 +743,13 @@ class TestThrottle:
         """Method to start throttle tests.
 
         Args:
+            throttle_mode_arg: choose whether sync or async
+            num_threads_arg: number of threads to start
             reqs_per_sec_arg: number of requests per second from fixture
+            bucket_size_arg: bucket size for throttle
             send_interval_mult_arg: interval between each send of a
                                       request
+
         """
         send_interval = (1 / reqs_per_sec_arg) * send_interval_mult_arg
         self.throttle_router(
@@ -757,6 +771,7 @@ class TestThrottle:
 
         Args:
             send_interval: the interval between sends
+            num_reqs_to_do: number of requests to do
 
         Returns:
             a list of send intervals
@@ -896,7 +911,7 @@ class TestThrottle:
             request_style: determine the args to pass
 
         Raises:
-            BadRequestStyleArg: The request style arg must be 0 to 6
+            BadRequestStyleArgError: The request style arg must be 0 to 6
 
         """
         pauser = Pauser()
@@ -947,7 +962,7 @@ class TestThrottle:
                 "send_interval=request_validator.send_interval,)"
             )
         else:
-            raise BadRequestStyleArg("The request style arg must be 0 to 6")
+            raise BadRequestStyleArgError("The request style arg must be 0 to 6")
 
         for idx, s_interval in enumerate(request_validator.send_intervals):
             request_item = RequestItem(
@@ -2004,22 +2019,26 @@ class TestThrottleMisc:
         assert worker.work.throttle.get_interval_ns() == interval_ns
 
         comp_secs_from_start = worker.work.throttle.get_completion_time_secs(
-            num_requests=5, from_start=True
+            num_requests=5,
+            from_start=True,
         )
         assert comp_secs_from_start == 4 * interval
 
         comp_ns_from_start = worker.work.throttle.get_completion_time_ns(
-            num_requests=5, from_start=True
+            num_requests=5,
+            from_start=True,
         )
         assert comp_ns_from_start == 4 * interval_ns
 
         comp_secs_not_start = worker.work.throttle.get_completion_time_secs(
-            num_requests=5, from_start=False
+            num_requests=5,
+            from_start=False,
         )
         assert comp_secs_not_start == 5 * interval
 
         comp_ns_not_start = worker.work.throttle.get_completion_time_ns(
-            num_requests=5, from_start=False
+            num_requests=5,
+            from_start=False,
         )
         assert comp_ns_not_start == 5 * interval_ns
 
