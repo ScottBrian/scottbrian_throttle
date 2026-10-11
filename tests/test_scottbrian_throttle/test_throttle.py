@@ -24,7 +24,7 @@ from dataclasses import dataclass, field
 ########################################################################
 from enum import Enum, auto
 from time import perf_counter_ns
-from typing import Any, Final
+from typing import Final
 from unittest.mock import patch
 
 import pytest
@@ -154,6 +154,33 @@ class RequestThreadItem:
     thread_create_time_ns: float = 0.0
     num_reqs: int = 0
     send_intervals: list[float | int] = field(default_factory=list)
+
+
+req_style_map: dict[RequestStyle, tuple[str, str, str]] = {
+    RequestStyle.NO_ARGS: ("f0", "()", "request_id + 42 + 0"),
+    RequestStyle.POS_1: ("f1", "(request_id)", "request_id + 42 + 1"),
+    RequestStyle.POS_2: (
+        "f2",
+        "(request_id, reqs_per_sec_arg)",
+        "request_id + 42 + 2",
+    ),
+    RequestStyle.KW_1: ("f3", "(req_id=request_id)", "request_id + 42 + 3"),
+    RequestStyle.KW_2: (
+        "f4",
+        "(req_id=request_id, interval=s_interval)",
+        "request_id + 42 + 4",
+    ),
+    RequestStyle.POS_1_KW_1: (
+        "f5",
+        "(req_id=request_id, interval=s_interval)",
+        "request_id + 42 + 5",
+    ),
+    RequestStyle.POS_2_KW_2: (
+        "f6",
+        "(request_id, reqs_per_sec_arg, bucket_size=1, interval=s_interval)",
+        "request_id + 42 + 6",
+    ),
+}
 
 
 ########################################################################
@@ -660,10 +687,7 @@ class TestThrottle:
     ####################################################################
     # test_throttle_args_style
     ####################################################################
-    @pytest.mark.parametrize(
-        "throttle_mode_arg",
-        (Mode.SYNC, Mode.SYNC_CONVERT, Mode.ASYNC),
-    )
+    @pytest.mark.parametrize("throttle_mode_arg", tuple(Mode))
     @pytest.mark.parametrize("request_style_arg", tuple(RequestStyle))
     def test_throttle_args_style(
         self,
@@ -691,10 +715,7 @@ class TestThrottle:
     ####################################################################
     # test_throttle_multi_threads1
     ####################################################################
-    @pytest.mark.parametrize(
-        "throttle_mode_arg",
-        (Mode.SYNC, Mode.SYNC_CONVERT, Mode.ASYNC),
-    )
+    @pytest.mark.parametrize("throttle_mode_arg", tuple(Mode))
     @pytest.mark.parametrize("num_threads_arg", (0, 1, 2))
     @pytest.mark.parametrize("reqs_per_sec_arg", (0.25, 0.33, 0.5))
     @pytest.mark.parametrize("bucket_size_arg", (1, 1.25, 1.5, 2))
@@ -732,10 +753,7 @@ class TestThrottle:
     ####################################################################
     # test_throttle_multi_threads2
     ####################################################################
-    @pytest.mark.parametrize(
-        "throttle_mode_arg",
-        (Mode.SYNC, Mode.SYNC_CONVERT, Mode.ASYNC),
-    )
+    @pytest.mark.parametrize("throttle_mode_arg", tuple(Mode))
     @pytest.mark.parametrize("num_threads_arg", (0, 2, 8))
     @pytest.mark.parametrize("reqs_per_sec_arg", (1, 2, 3))
     @pytest.mark.parametrize("bucket_size_arg", (1, 1.5, 2, 3))
@@ -916,7 +934,7 @@ class TestThrottle:
     ####################################################################
     @staticmethod
     def make_reqs(
-        request_validator: "RequestValidator",
+        request_validator: RequestValidator,
         request_style: RequestStyle,
     ) -> None:
         """Make the requests.
@@ -927,22 +945,19 @@ class TestThrottle:
 
         """
         pauser = Pauser()
-        a_throttle = request_validator.t_throttle
         throttle_mode = request_validator.throttle_mode
 
         call_args: str
 
         if throttle_mode == Mode.SYNC:
-            send_req = "a_throttle.sync_send_request"
+            send_req = "request_validator.t_throttle.sync_send_request"
         else:
-            send_req = "a_throttle.async_send_request"
+            send_req = "request_validator.t_throttle.async_send_request"
 
         if throttle_mode in (Mode.SYNC, Mode.SYNC_CONVERT):
             targ_prefix = ""
         else:
             targ_prefix = "async_"
-
-        # sbt
 
         req_style_map: dict[RequestStyle, str] = {
             RequestStyle.NO_ARGS: ")",
@@ -953,7 +968,7 @@ class TestThrottle:
             "send_interval=request_validator.send_interval)",
             RequestStyle.POS_1_KW_1: ", idx, "
             "send_interval=request_validator.send_interval,)",
-            RequestStyle.POS_2_KW_2: "idx, "
+            RequestStyle.POS_2_KW_2: ", idx, "
             "request_validator.reqs_per_sec, "
             "bucket_size=request_validator.bucket_size, "
             "send_interval=request_validator.send_interval,)",
@@ -1028,7 +1043,7 @@ class TestThrottle:
     ####################################################################
     @staticmethod
     async def async_make_multi_reqs(
-        request_validator: "RequestValidator",
+        request_validator: RequestValidator,
         send_intervals: list[float],
     ) -> None:
         """Make the requests.
@@ -1036,6 +1051,7 @@ class TestThrottle:
         Args:
             request_validator: the validator for the reqs
             send_intervals: the request send intervals
+
         """
         a_throttle = request_validator.t_throttle
         throttle_mode = request_validator.throttle_mode
@@ -1075,11 +1091,9 @@ class TestPieThrottle:
     ####################################################################
     # test_pie_throttle_args_style
     ####################################################################
-    @pytest.mark.parametrize(
-        "throttle_mode_arg", (Mode.SYNC, Mode.SYNC_CONVERT, Mode.ASYNC)
-    )
+    @pytest.mark.parametrize("throttle_mode_arg", tuple(Mode))
     @pytest.mark.parametrize("request_style_arg", tuple(RequestStyle))
-    def test_pie_throttle_args_style(
+    def test_pie_throttle_args_style(  # noqa: C901, PLR0915
         self,
         throttle_mode_arg: Mode,
         request_style_arg: RequestStyle,
@@ -1103,7 +1117,8 @@ class TestPieThrottle:
         ################################################################
         num_reqs_to_do = 16
         send_intervals = TestThrottle.build_send_intervals(
-            send_interval, num_reqs_to_do
+            send_interval,
+            num_reqs_to_do,
         )
 
         ################################################################
@@ -1113,218 +1128,148 @@ class TestPieThrottle:
         ################################################################
         # Decorate functions with throttle
         ################################################################
-        call_list: list[tuple[str, str, str]] = []
-        async_call_list: list[tuple[str, str, str]] = []
 
         ################################################################
         # f0
         ################################################################
         @throttle(reqs_per_sec=reqs_per_sec_arg)
-        async def async_f0() -> Any:
+        async def async_f0() -> int:
             request_item = request_validator.set_idx_and_times()
             return request_item.req_id + 42 + 0
-
-        async_call_list.append(("async_f0", " ", "request_id + 42 + 0"))
 
         @throttle(reqs_per_sec=reqs_per_sec_arg, convert_to_async=sync_convert)
-        def f0() -> Any:
-
+        def f0() -> int:
             request_item = request_validator.set_idx_and_times()
             return request_item.req_id + 42 + 0
-
-        call_list.append(("f0", "()", "request_id + 42 + 0"))
 
         ################################################################
         # f1
         ################################################################
         @throttle(reqs_per_sec=reqs_per_sec_arg)
-        async def async_f1(req_id: int) -> Any:
+        async def async_f1(req_id: int) -> int:
             request_item = request_validator.set_idx_and_times()
             assert req_id == request_item.req_id
             return request_item.req_id + 42 + 1
-
-        async_call_list.append(("async_f1", "(request_id)", "request_id + 42 + 1"))
 
         @throttle(reqs_per_sec=reqs_per_sec_arg, convert_to_async=sync_convert)
-        def f1(req_id: int) -> Any:
-
+        def f1(req_id: int) -> int:
             request_item = request_validator.set_idx_and_times()
             assert req_id == request_item.req_id
-
             return request_item.req_id + 42 + 1
-
-        call_list.append(("f1", "(request_id)", "request_id + 42 + 1"))
 
         ################################################################
         # f2
         ################################################################
         @throttle(reqs_per_sec=reqs_per_sec_arg)
-        async def async_f2(req_id: int, reqs_per_sec: float) -> Any:
+        async def async_f2(req_id: int, reqs_per_sec: float) -> int:
             request_item = request_validator.set_idx_and_times()
             assert req_id == request_item.req_id
             assert reqs_per_sec == request_validator.reqs_per_sec
             return request_item.req_id + 42 + 2
-
-        async_call_list.append(
-            ("async_f2", "(request_id, reqs_per_sec_arg)", "request_id + 42 + 2")
-        )
 
         @throttle(reqs_per_sec=reqs_per_sec_arg, convert_to_async=sync_convert)
-        def f2(req_id: int, reqs_per_sec: float) -> Any:
-
+        def f2(req_id: int, reqs_per_sec: float) -> int:
             request_item = request_validator.set_idx_and_times()
             assert req_id == request_item.req_id
             assert reqs_per_sec == request_validator.reqs_per_sec
-
             return request_item.req_id + 42 + 2
-
-        call_list.append(
-            ("f2", "(request_id, reqs_per_sec_arg)", "request_id + 42 + 2")
-        )
 
         ################################################################
         # f3
         ################################################################
         @throttle(reqs_per_sec=reqs_per_sec_arg)
-        async def async_f3(*, req_id: int) -> Any:
+        async def async_f3(*, req_id: int) -> int:
             request_item = request_validator.set_idx_and_times()
             assert req_id == request_item.req_id
             return request_item.req_id + 42 + 3
-
-        async_call_list.append(
-            ("async_f3", "(req_id=request_id)", "request_id + 42 + 3")
-        )
 
         @throttle(reqs_per_sec=reqs_per_sec_arg, convert_to_async=sync_convert)
-        def f3(*, req_id: int) -> Any:
-
+        def f3(*, req_id: int) -> int:
             request_item = request_validator.set_idx_and_times()
             assert req_id == request_item.req_id
-
             return request_item.req_id + 42 + 3
-
-        call_list.append(("f3", "(req_id=request_id)", "request_id + 42 + 3"))
 
         ################################################################
         # f4
         ################################################################
         @throttle(reqs_per_sec=reqs_per_sec_arg)
-        async def async_f4(*, req_id: int, interval: float) -> Any:
+        async def async_f4(*, req_id: int, interval: float) -> int:
             request_item = request_validator.set_idx_and_times()
             assert req_id == request_item.req_id
             assert interval == request_item.send_interval
             return request_item.req_id + 42 + 4
-
-        async_call_list.append(
-            (
-                "async_f4",
-                "(req_id=request_id, interval=s_interval)",
-                "request_id + 42 + 4",
-            )
-        )
 
         @throttle(reqs_per_sec=reqs_per_sec_arg, convert_to_async=sync_convert)
-        def f4(*, req_id: int, interval: float) -> Any:
-
+        def f4(*, req_id: int, interval: float) -> int:
             request_item = request_validator.set_idx_and_times()
             assert req_id == request_item.req_id
             assert interval == request_item.send_interval
-
             return request_item.req_id + 42 + 4
-
-        call_list.append(
-            (
-                "f4",
-                "(req_id=request_id, interval=s_interval)",
-                "request_id + 42 + 4",
-            )
-        )
 
         ################################################################
         # f5
         ################################################################
         @throttle(reqs_per_sec=reqs_per_sec_arg)
-        async def async_f5(req_id: int, *, interval: float) -> Any:
+        async def async_f5(req_id: int, *, interval: float) -> int:
             request_item = request_validator.set_idx_and_times()
             assert req_id == request_item.req_id
             assert interval == request_item.send_interval
             return request_item.req_id + 42 + 5
-
-        async_call_list.append(
-            (
-                "async_f5",
-                "(req_id=request_id, interval=s_interval)",
-                "request_id + 42 + 5",
-            )
-        )
 
         @throttle(reqs_per_sec=reqs_per_sec_arg, convert_to_async=sync_convert)
-        def f5(req_id: int, *, interval: float) -> Any:
-
+        def f5(req_id: int, *, interval: float) -> int:
             request_item = request_validator.set_idx_and_times()
             assert req_id == request_item.req_id
             assert interval == request_item.send_interval
-
             return request_item.req_id + 42 + 5
-
-        call_list.append(
-            (
-                "f5",
-                "(req_id=request_id, interval=s_interval)",
-                "request_id + 42 + 5",
-            )
-        )
 
         ################################################################
         # f6
         ################################################################
         @throttle(reqs_per_sec=reqs_per_sec_arg)
         async def async_f6(
-            req_id: int, reqs_per_sec: float, *, bucket_size: float, interval: float
-        ) -> Any:
+            req_id: int,
+            reqs_per_sec: float,
+            *,
+            bucket_size: float,
+            interval: float,
+        ) -> int:
             request_item = request_validator.set_idx_and_times()
             assert req_id == request_item.req_id
             assert reqs_per_sec == request_validator.reqs_per_sec
             assert bucket_size == request_validator.bucket_size
             assert interval == request_item.send_interval
             return request_item.req_id + 42 + 6
-
-        async_call_list.append(
-            (
-                "async_f6",
-                "(request_id, reqs_per_sec_arg, bucket_size=1, interval=s_interval)",
-                "request_id + 42 + 6",
-            )
-        )
 
         @throttle(reqs_per_sec=reqs_per_sec_arg, convert_to_async=sync_convert)
         def f6(
-            req_id: int, reqs_per_sec: float, *, bucket_size: float, interval: float
-        ) -> Any:
+            req_id: int,
+            reqs_per_sec: float,
+            *,
+            bucket_size: float,
+            interval: float,
+        ) -> int:
 
             request_item = request_validator.set_idx_and_times()
             assert req_id == request_item.req_id
             assert reqs_per_sec == request_validator.reqs_per_sec
             assert bucket_size == request_validator.bucket_size
             assert interval == request_item.send_interval
-
             return request_item.req_id + 42 + 6
 
-        call_list.append(
-            (
-                "f6",
-                "(request_id, reqs_per_sec_arg, bucket_size=1, interval=s_interval)",
-                "request_id + 42 + 6",
-            ),
-        )
+        ################################################################
+        # Invoke the functions
+        ################################################################
+        call_args: str
+
+        targ_prefix = "async_" if throttle_mode_arg == Mode.ASYNC else ""
+
+        target_func = f"{targ_prefix}{req_style_map[request_style_arg][0]}"
+        call_args = f"{target_func}{req_style_map[request_style_arg][1]}"
 
         ################################################################
         # Instantiate the validator
         ################################################################
-        if throttle_mode_arg == Mode.SYNC or throttle_mode_arg == Mode.SYNC_CONVERT:
-            t_throttle = eval(call_list[request_style_arg.value][0]).throttle
-        else:
-            t_throttle = eval(async_call_list[request_style_arg.value][0]).throttle
         request_validator = RequestValidator(
             reqs_per_sec=reqs_per_sec_arg,
             throttle_mode=throttle_mode_arg,
@@ -1332,95 +1277,39 @@ class TestPieThrottle:
             total_requests=num_reqs_to_do,
             send_interval=send_interval,
             send_intervals=send_intervals,
-            t_throttle=t_throttle,
+            t_throttle=eval(target_func).throttle,  # noqa: S307
         )
-        ################################################################
-        # Invoke the functions
-        ################################################################
+
         for request_id, s_interval in enumerate(send_intervals):
-            ml_request_item = RequestItem(
+            request_item = RequestItem(
                 req_id=request_id,
                 create_time_ns=perf_counter_ns(),
                 throttle_mode=throttle_mode_arg,
                 send_interval=s_interval,
             )
 
-            if throttle_mode_arg == Mode.SYNC:
-                if s_interval > 0.0:
+            if s_interval > 0.0:
+                if throttle_mode_arg == Mode.SYNC:
                     pauser.pause(s_interval)
-                ml_request_item.send_time_ns = perf_counter_ns()
-                request_validator.request_deque.appendleft(ml_request_item)
-                rc = eval(
-                    call_list[request_style_arg.value][0]
-                    + call_list[request_style_arg.value][1]
-                )
-                ml_request_item.return_time_ns = perf_counter_ns()
-                assert rc == eval(call_list[request_style_arg.value][2])
+                else:
+                    asyncio.run(asyncio.sleep(s_interval))
+
+            request_item.send_time_ns = perf_counter_ns()
+            request_validator.request_deque.appendleft(request_item)
+            if throttle_mode_arg == Mode.SYNC:
+                rc = eval(call_args)  # noqa: S307
             else:
+                rc = asyncio.run(eval(call_args))  # noqa: S307
 
-                async def main_loop(request_id: int) -> None:
-                    if s_interval > 0.0:
-                        await asyncio.sleep(s_interval)
-                    ml_request_item.send_time_ns = perf_counter_ns()
-                    request_validator.request_deque.appendleft(ml_request_item)
-                    if request_style_arg == RequestStyle.NO_ARGS:
-                        if throttle_mode_arg == Mode.SYNC_CONVERT:
-                            rc = await f0()
-                        else:
-                            rc = await async_f0()
-                    elif request_style_arg == RequestStyle.POS_1:
-                        if throttle_mode_arg == Mode.SYNC_CONVERT:
-                            rc = await f1(request_id)
-                        else:
-                            rc = await async_f1(request_id)
-                    elif request_style_arg.value == RequestStyle.POS_2:
-                        if throttle_mode_arg == Mode.SYNC_CONVERT:
-                            rc = await f2(request_id, reqs_per_sec_arg)
-                        else:
-                            rc = await async_f2(request_id, reqs_per_sec_arg)
-                    elif request_style_arg == RequestStyle.KW_1:
-                        if throttle_mode_arg == Mode.SYNC_CONVERT:
-                            rc = await f3(req_id=request_id)
-                        else:
-                            rc = await async_f3(req_id=request_id)
-                    elif request_style_arg == RequestStyle.KW_2:
-                        if throttle_mode_arg == Mode.SYNC_CONVERT:
-                            rc = await f4(req_id=request_id, interval=s_interval)
-                        else:
-                            rc = await async_f4(req_id=request_id, interval=s_interval)
-                    elif request_style_arg == RequestStyle.POS_1_KW_1:
-                        if throttle_mode_arg == Mode.SYNC_CONVERT:
-                            rc = await f5(req_id=request_id, interval=s_interval)
-                        else:
-                            rc = await async_f5(req_id=request_id, interval=s_interval)
-                    else:  # request_style_arg == RequestStyle.POS_2_KW_2:
-                        if throttle_mode_arg == Mode.SYNC_CONVERT:
-                            rc = await f6(
-                                request_id,
-                                reqs_per_sec_arg,
-                                bucket_size=1,
-                                interval=s_interval,
-                            )
-                        else:
-                            rc = await async_f6(
-                                request_id,
-                                reqs_per_sec_arg,
-                                bucket_size=1,
-                                interval=s_interval,
-                            )
-                    ml_request_item.return_time_ns = perf_counter_ns()
-                    assert rc == eval(async_call_list[request_style_arg.value][2])
-
-                asyncio.run(main_loop(request_id))
+            request_item.return_time_ns = perf_counter_ns()
+            assert rc == eval(req_style_map[request_style_arg][2])  # noqa: S307
 
         request_validator.validate_series()  # validate for the series
 
     ####################################################################
     # test_pie_throttle
     ####################################################################
-    @pytest.mark.parametrize(
-        "throttle_mode_arg", (Mode.SYNC, Mode.SYNC_CONVERT, Mode.ASYNC)
-    )
+    @pytest.mark.parametrize("throttle_mode_arg", tuple(Mode))
     @pytest.mark.parametrize("reqs_per_sec_arg", (1, 2, 3))
     @pytest.mark.parametrize("bucket_size_arg", (1, 1.3, 2, 3))
     @pytest.mark.parametrize("send_interval_mult_arg", (0.0, 0.9, 1.0, 1.1))
@@ -1439,6 +1328,7 @@ class TestPieThrottle:
             bucket_size_arg: bucket size for the throttle
             send_interval_mult_arg: interval between each send of a
                                       request
+
         """
         ################################################################
         # Instantiate Request Validator
@@ -1451,7 +1341,8 @@ class TestPieThrottle:
         ################################################################
         num_reqs_to_do = 16
         send_intervals = TestThrottle.build_send_intervals(
-            send_interval, num_reqs_to_do
+            send_interval,
+            num_reqs_to_do,
         )
 
         ################################################################
@@ -1466,7 +1357,7 @@ class TestPieThrottle:
             reqs_per_sec=reqs_per_sec_arg,
             bucket_size=bucket_size_arg,
         )
-        async def async_f0() -> Any:
+        async def async_f0() -> int:
             request_validator.set_idx_and_times()
             return 0
 
@@ -1475,7 +1366,7 @@ class TestPieThrottle:
             bucket_size=bucket_size_arg,
             convert_to_async=sync_convert,
         )
-        def f0() -> Any:
+        def f0() -> int:
             request_validator.set_idx_and_times()
             return 0
 
@@ -1539,12 +1430,8 @@ class TestPieThrottle:
     ####################################################################
     # test_pie_throttle_methods
     ####################################################################
-    @pytest.mark.parametrize(
-        "throttle_mode_arg", (Mode.SYNC, Mode.SYNC_CONVERT, Mode.ASYNC)
-    )
-    @pytest.mark.parametrize(
-        "method_type_arg", (MethodType.INSTANCE, MethodType.STATIC, MethodType.CLASS)
-    )
+    @pytest.mark.parametrize("throttle_mode_arg", tuple(Mode))
+    @pytest.mark.parametrize("method_type_arg", tuple(MethodType))
     @pytest.mark.parametrize("reqs_per_sec_arg", (1, 2, 3))
     @pytest.mark.parametrize("bucket_size_arg", (1, 1.3, 2, 3))
     @pytest.mark.parametrize("send_interval_mult_arg", (0.0, 0.9, 1.0, 1.1))
@@ -2128,9 +2015,10 @@ class RequestValidator:
     ################################################################
     # set_idx_and_times
     ################################################################
-    def set_idx_and_times(self) -> RequestItem:
+    def set_idx_and_times(self, request_item: RequestItem | None = None) -> RequestItem:
         self.idx += 1
-        request_item = self.request_deque.pop()
+        if request_item is None:
+            request_item = self.request_deque.pop()
         request_item.arrival_idx = self.idx  # first is zero
         request_item.actual_func_arrival_time_ns = perf_counter_ns()
         request_item.throttle_arrival_time_ns = self.t_throttle._arrival_time_ns
@@ -2316,14 +2204,7 @@ class RequestValidator:
               1) this code is serialized by the throttle lock
 
         """
-        self.idx += 1
-        request_item.arrival_idx = self.idx  # first is zero
-        request_item.actual_func_arrival_time_ns = perf_counter_ns()
-        request_item.throttle_arrival_time_ns = self.t_throttle._arrival_time_ns
-        request_item.throttle_next_target_time_ns = self.t_throttle._next_target_time_ns
-        request_item.throttle_wait_time_ns = self.t_throttle._wait_time_ns
-        request_item.throttle_sent_time_ns = self.t_throttle.sent_time_ns
-        self.request_items.append(request_item)
+        request_item = self.set_idx_and_times(request_item=request_item)
 
         return self.idx
 
@@ -2343,17 +2224,8 @@ class RequestValidator:
               1) this code is serialized by the throttle lock
 
         """
-        self.idx += 1
-        request_item = self.request_deque.pop()
+        request_item = self.set_idx_and_times()
         assert request_item.req_id == self.idx
-        request_item.arrival_idx = self.idx  # first is zero
-        request_item.actual_func_arrival_time_ns = perf_counter_ns()
-        request_item.throttle_arrival_time_ns = self.t_throttle._arrival_time_ns
-        request_item.throttle_next_target_time_ns = self.t_throttle._next_target_time_ns
-        request_item.throttle_wait_time_ns = self.t_throttle._wait_time_ns
-        request_item.throttle_sent_time_ns = self.t_throttle.sent_time_ns
-        self.request_items.append(request_item)
-
         return request_item.req_id
 
     ####################################################################
@@ -2372,17 +2244,9 @@ class RequestValidator:
             the index reflected back
 
         """
-        self.idx += 1
-        request_item = self.request_deque.pop()
-        request_item.arrival_idx = self.idx  # first is zero
-        request_item.actual_func_arrival_time_ns = perf_counter_ns()
-        request_item.throttle_arrival_time_ns = self.t_throttle._arrival_time_ns
-        request_item.throttle_next_target_time_ns = self.t_throttle._next_target_time_ns
-        request_item.throttle_wait_time_ns = self.t_throttle._wait_time_ns
-        request_item.throttle_sent_time_ns = self.t_throttle.sent_time_ns
-        self.request_items.append(request_item)
+        request_item = self.set_idx_and_times()
+        assert request_item.req_id == self.idx
         assert req_id == request_item.req_id
-
         return request_item.req_id
 
     ####################################################################
@@ -2404,16 +2268,7 @@ class RequestValidator:
             the index reflected back
 
         """
-        self.idx += 1
-        request_item = self.request_deque.pop()
-        request_item.arrival_idx = self.idx  # first is zero
-        request_item.actual_func_arrival_time_ns = perf_counter_ns()
-        request_item.throttle_arrival_time_ns = self.t_throttle._arrival_time_ns
-        request_item.throttle_next_target_time_ns = self.t_throttle._next_target_time_ns
-        request_item.throttle_wait_time_ns = self.t_throttle._wait_time_ns
-        request_item.throttle_sent_time_ns = self.t_throttle.sent_time_ns
-        self.request_items.append(request_item)
-
+        request_item = self.set_idx_and_times()
         assert req_id == request_item.req_id
         assert reqs_per_sec == self.reqs_per_sec
         return request_item.req_id
@@ -2434,18 +2289,8 @@ class RequestValidator:
             the index reflected back
 
         """
-        self.idx += 1
-        request_item = self.request_deque.pop()
-        request_item.arrival_idx = self.idx  # first is zero
-        request_item.actual_func_arrival_time_ns = perf_counter_ns()
-        request_item.throttle_arrival_time_ns = self.t_throttle._arrival_time_ns
-        request_item.throttle_next_target_time_ns = self.t_throttle._next_target_time_ns
-        request_item.throttle_wait_time_ns = self.t_throttle._wait_time_ns
-        request_item.throttle_sent_time_ns = self.t_throttle.sent_time_ns
-        self.request_items.append(request_item)
-
+        request_item = self.set_idx_and_times()
         assert req_id == request_item.req_id
-
         return request_item.req_id
 
     ####################################################################
@@ -2465,16 +2310,7 @@ class RequestValidator:
             the index reflected back
 
         """
-        self.idx += 1
-        request_item = self.request_deque.pop()
-        request_item.arrival_idx = self.idx  # first is zero
-        request_item.actual_func_arrival_time_ns = perf_counter_ns()
-        request_item.throttle_arrival_time_ns = self.t_throttle._arrival_time_ns
-        request_item.throttle_next_target_time_ns = self.t_throttle._next_target_time_ns
-        request_item.throttle_wait_time_ns = self.t_throttle._wait_time_ns
-        request_item.throttle_sent_time_ns = self.t_throttle.sent_time_ns
-        self.request_items.append(request_item)
-
+        request_item = self.set_idx_and_times()
         assert req_id == request_item.req_id
         assert send_interval == self.send_interval
         return request_item.req_id
@@ -2496,16 +2332,7 @@ class RequestValidator:
             the index reflected back
 
         """
-        self.idx += 1
-        request_item = self.request_deque.pop()
-        request_item.arrival_idx = self.idx  # first is zero
-        request_item.actual_func_arrival_time_ns = perf_counter_ns()
-        request_item.throttle_arrival_time_ns = self.t_throttle._arrival_time_ns
-        request_item.throttle_next_target_time_ns = self.t_throttle._next_target_time_ns
-        request_item.throttle_wait_time_ns = self.t_throttle._wait_time_ns
-        request_item.throttle_sent_time_ns = self.t_throttle.sent_time_ns
-        self.request_items.append(request_item)
-
+        request_item = self.set_idx_and_times()
         assert req_id == request_item.req_id
         assert send_interval == self.send_interval
         return request_item.req_id
@@ -2548,16 +2375,7 @@ class RequestValidator:
             the index reflected back
 
         """
-        self.idx += 1
-        request_item = self.request_deque.pop()
-        request_item.arrival_idx = self.idx  # first is zero
-        request_item.actual_func_arrival_time_ns = perf_counter_ns()
-        request_item.throttle_arrival_time_ns = self.t_throttle._arrival_time_ns
-        request_item.throttle_next_target_time_ns = self.t_throttle._next_target_time_ns
-        request_item.throttle_wait_time_ns = self.t_throttle._wait_time_ns
-        request_item.throttle_sent_time_ns = self.t_throttle.sent_time_ns
-        self.request_items.append(request_item)
-
+        request_item = self.set_idx_and_times()
         assert req_id == request_item.req_id
         assert reqs_per_sec == self.reqs_per_sec
         assert bucket_size == self.bucket_size
