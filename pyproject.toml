@@ -52,7 +52,7 @@ line-length = 88
 # Enable the E501 (line-too-long) and W505 (doc-line-too-long) rules
 select = ["E501", "W505"]
 extend-select = ["ALL"]
-ignore = ["D203", "D213", "T201", ]
+ignore = ["D203", "D213", "T201", "COM812"]
 
 [tool.ruff.lint.pycodestyle]
 # 2. Max line length for DOCSTRINGS and STANDALONE COMMENTS
