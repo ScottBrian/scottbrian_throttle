@@ -41,9 +41,6 @@ strict = "True"
 implicit_reexport = "True"
 show_error_codes = "True"
 
-[tool.mypy.pytest]
-ignore_missing_imports = "True"
-
 [tool.ruff]
 # 1. Global max line length for CODE (used by ruff format and ruff check)
 line-length = 88

@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 ########################################################################
 from enum import Enum, auto
 from time import perf_counter_ns
-from typing import Any, Final, ParamSpec, TypeVar
+from typing import Any, Final, ParamSpec, TypeVar, cast
 from unittest.mock import patch
 
 import pytest
@@ -665,8 +665,8 @@ class TestThrottleDecoratorRequestErrors:
         ]
         assert len(matched_records) == 1
         record = matched_records[0]
-        assert record.function_name == "f_extra"
-        assert record.throttle_delay >= 0.0
+        assert record.function_name == "f_extra"  # type: ignore [attr-defined]
+        assert record.throttle_delay >= 0.0  # type: ignore [attr-defined]
         assert record.exc_info is not None
 
 
@@ -1243,8 +1243,14 @@ class TestPieThrottle:
             return request_item.req_id + 42 + 6
 
         if throttle_mode == Mode.ASYNC:
-            return eval(f"async_f{request_style.value}")  # noqa: S307
-        return eval(f"f{request_style.value}")  # noqa: S307
+            return cast(
+                "FuncWithThrottleAttr[Callable[P, Coroutine[Any, Any, R]]]",
+                eval(f"async_f{request_style.value}"),  # noqa: S307
+            )
+        return cast(
+            "FuncWithThrottleAttr[Callable[P, R]]",
+            eval(f"f{request_style.value}"),  # noqa: S307
+        )
 
     ####################################################################
     # test_pie_throttle_args_style
@@ -1294,7 +1300,10 @@ class TestPieThrottle:
         ################################################################
         # Get the target function
         ################################################################
-        target_func = self.get_targ(
+        target_func: (
+            FuncWithThrottleAttr[Callable[..., int]]
+            | FuncWithThrottleAttr[Callable[..., Coroutine[Any, Any, int]]]
+        ) = self.get_targ(
             request_style=request_style_arg,
             throttle_mode=throttle_mode_arg,
             reqs_per_sec=reqs_per_sec_arg,
@@ -1886,7 +1895,8 @@ class TestThrottleMisc:
                 from_start=False,
             )
             actual_completion_time_ns = func_sync.throttle.get_completion_time_ns(
-                num_requests=num_reqs, from_start=False
+                num_requests=num_reqs,
+                from_start=False,
             )
             assert actual_completion_time == exp_completion_time
             assert actual_completion_time_ns == exp_completion_time_ns
