@@ -72,20 +72,56 @@ parametrize-values-row-type = "tuple"
 Documentation = "https://scottbrian-throttle.readthedocs.io/en/latest/"
 Source = "https://github.com/ScottBrian/scottbrian_throttle.git"
 
-#[build-system]
-#requires = ["setuptools ~=83.0"]
-#build-backend = 'setuptools.build_meta'
+[dependency-groups]
+dev = [
+    "bandit>=1.9.4",
+    "check-manifest>=0.51",
+    "more-itertools>=11.2.0",
+    "mypy>=2.3.1",
+    "pytest>=9.1.1",
+    "pytest-cov>=7.1.0",
+    "ruff>=0.17.0",
+    "safety>=3.8.1",
+    "sphinx>=9.1.0",
+    "sphinx-autodoc-typehints>=3.13.10",
+    "sphinx-rtd-theme>=3.1.0",
+    "sybil>=10.1.0",
+    "tox>=4.64.1",
+    "tox-uv>=1.36.0",
+]
+
+[tool.pytest.ini_options]
+addopts = "-rsxX -l --tb=short --strict-markers --strict-config --capture=tee-sys -p no:doctest"
+xfail_strict = true
+log_cli = 1
+log_cli_level = "DEBUG"
+log_cli_format = "%(asctime)s %(msecs)03d [%(levelname)8s] %(name)s %(funcName)s: %(lineno)d (Thread ID: %(thread)d) (Name: %(threadName)s) -> %(message)s"
+log_cli_date_format = "%H:%M:%S"
+testpaths = [
+    "tests",
+]
+
+[tool.check-manifest]
+ignore = [
+    ".idea/**/*",
+    ".safety-project.ini",
+    ".venv314/**/*"
+]
 
 [build-system]
 requires = ["hatchling"]
 build-backend = 'hatchling.build'
 
-[dependency-groups]
-dev = [
-    "tox>=4.64.1",
-    "tox-uv>=1.36.0",
+
+[tool.hatch.build.targets.sdist]
+# Hatchling automatically includes everything in Git.
+# We explicitly exclude developer/CI configurations from the final PyPI package.
+exclude = [
+    "uv.lock",
+    ".coveragerc",
+    ".github/", # GitHub actions
+
 ]
 
-# Ensure your py.typed marker and Mypy plugin are included in the build
 [tool.hatch.build.targets.wheel]
 packages = ["src/scottbrian_throttle"]
