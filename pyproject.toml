@@ -75,19 +75,19 @@ Source = "https://github.com/ScottBrian/scottbrian_throttle.git"
 [dependency-groups]
 dev = [
     "bandit>=1.9.4",
+    "build>=1.6.1",
     "check-manifest>=0.51",
+    "hatchling>=1.32.4",
     "more-itertools>=11.2.0",
     "mypy>=2.3.1",
     "pytest>=9.1.1",
     "pytest-cov>=7.1.0",
     "ruff>=0.17.0",
-    "safety>=3.8.1",
+    "safety==3.8.1",
     "sphinx>=9.1.0",
     "sphinx-autodoc-typehints>=3.13.10",
     "sphinx-rtd-theme>=3.1.0",
     "sybil>=10.1.0",
-    "tox>=4.64.1",
-    "tox-uv>=1.36.0",
 ]
 
 [tool.pytest.ini_options]
@@ -105,7 +105,9 @@ testpaths = [
 ignore = [
     ".idea/**/*",
     ".safety-project.ini",
-    ".venv314/**/*"
+    ".coveragerc",
+    "uv.lock",
+    ".github/**/*"
 ]
 
 [build-system]

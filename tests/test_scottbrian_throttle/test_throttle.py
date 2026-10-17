@@ -11,7 +11,6 @@ import concurrent.futures
 import gc
 import inspect
 import logging
-import os
 import random
 import re
 import threading
@@ -34,7 +33,7 @@ import pytest
 # Third Party
 ########################################################################
 from pydantic import ValidationError
-from scottbrian_utils.diag_msg import get_caller_info, get_formatted_call_sequence
+from scottbrian_utils.diag_msg import get_caller_info
 from scottbrian_utils.entry_trace import etrace
 from scottbrian_utils.flower_box import print_flower_box_msg as flowers
 from scottbrian_utils.log_verifier import LogVer
@@ -203,10 +202,10 @@ class TestThrottleCorrectSource:
         """Test unique_ts correct source."""
         print("TESTING FROM PATH:", scottbrian_throttle.__file__)
         assert "dist\\unpacked" in scottbrian_throttle.__file__
-        # if "TOX_ENV_NAME" in os.environ:
-        #     testlib_path = verify_lib(obj_to_check=Throttle)
-        #     logger.debug(f"{testlib_path=}")
-        #     assert testlib_path.endswith("throttle_blocks.py")
+
+        testlib_path = verify_lib(obj_to_check=Throttle)
+        logger.debug(f"{testlib_path=}")
+        assert testlib_path.endswith("throttle_blocks.py")
 
 
 ########################################################################
@@ -2068,10 +2067,11 @@ class RequestValidator:
             assert is_async_environment() is True
             # we need to go back 1 frame for async_request
             if get_caller_info(caller_frame).func_name[0:13] == "async_request":
-                caller_frame = caller_frame.f_back  # type: ignore [union-attr]
+                caller_frame = caller_frame.f_back
 
             assert caller_frame is not None
             assert get_caller_info(caller_frame).func_name == "async_send_request"
+
         del caller_frame
 
         return request_item
