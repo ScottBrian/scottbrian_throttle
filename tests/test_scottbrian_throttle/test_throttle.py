@@ -2416,7 +2416,8 @@ class TestThrottleDocstrings:
     ####################################################################
     # test_throttle_example_1
     ####################################################################
-    def test_throttle_example_1(self, capsys: pytest.CaptureFixture[str]) -> None:
+    @staticmethod
+    def test_throttle_example_1(capsys: pytest.CaptureFixture[str]) -> None:
         """Method test_throttle_example_1.
 
         Args:
@@ -2465,7 +2466,8 @@ class TestThrottleDocstrings:
     ####################################################################
     # test_throttle_example_2
     ####################################################################
-    def test_throttle_example_2(self, capsys: pytest.CaptureFixture[str]) -> None:
+    @staticmethod
+    def test_throttle_example_2(capsys: pytest.CaptureFixture[str]) -> None:
         """Method test_throttle_example_2.
 
         Args:
@@ -2515,7 +2517,8 @@ class TestThrottleDocstrings:
     ####################################################################
     # test_throttle_example_3
     ####################################################################
-    def test_throttle_example_3(self, capsys: pytest.CaptureFixture[str]) -> None:
+    @staticmethod
+    def test_throttle_example_3(capsys: pytest.CaptureFixture[str]) -> None:
         """Method test_throttle_example_3.
 
         Args:
@@ -2531,7 +2534,7 @@ class TestThrottleDocstrings:
         from scottbrian_throttle.throttle import throttle
 
         @throttle(reqs_per_sec=2)
-        async def func3(request_number: int, time_of_start: float) -> None:
+        async def func3(request_number: int, time_of_start: float) -> None:  # ruff: ignore[unused-async]
             print(
                 f"request {request_number} sent at elapsed time: "
                 f"{time.time() - time_of_start:0.1f}",
@@ -2568,7 +2571,8 @@ class TestThrottleDocstrings:
     ####################################################################
     # test_throttle_example_4
     ####################################################################
-    def test_throttle_example_4(self, capsys: pytest.CaptureFixture[str]) -> None:
+    @staticmethod
+    def test_throttle_example_4(capsys: pytest.CaptureFixture[str]) -> None:
         """Method test_throttle_example_4.
 
         Args:
@@ -2621,7 +2625,8 @@ class TestThrottleDocstrings:
     ####################################################################
     # test_throttle_example_5
     ####################################################################
-    def test_throttle_example_5(self, capsys: pytest.CaptureFixture[str]) -> None:
+    @staticmethod
+    def test_throttle_example_5(capsys: pytest.CaptureFixture[str]) -> None:
         """Method test_throttle_example_5.
 
         Args:
@@ -2674,7 +2679,8 @@ class TestThrottleDocstrings:
     ####################################################################
     # test_throttle_example_6
     ####################################################################
-    def test_throttle_example_6(self, capsys: pytest.CaptureFixture[str]) -> None:
+    @staticmethod
+    def test_throttle_example_6(capsys: pytest.CaptureFixture[str]) -> None:
         """Method test_throttle_example_6.
 
         Args:
@@ -2722,7 +2728,8 @@ class TestThrottleDocstrings:
     ####################################################################
     # test_throttle_example_t1
     ####################################################################
-    def test_throttle_example_t1(self, capsys: pytest.CaptureFixture[str]) -> None:
+    @staticmethod
+    def test_throttle_example_t1(capsys: pytest.CaptureFixture[str]) -> None:
         """Method test_throttle_example_t1.
 
         Args:
@@ -2757,13 +2764,9 @@ class TestThrottleDocstrings:
     ####################################################################
     # test_throttle_example_7
     ####################################################################
-    def test_throttle_example_7(self) -> None:
-        """Method test_throttle_example_7.
-
-        Args:
-            capsys: pytest fixture to capture print output
-
-        """
+    @staticmethod
+    def test_throttle_example_7() -> None:
+        """Method test_throttle_example_7."""
         hdr_str = ":Example 7: get length for an asynchronous throttle"
         flowers(hdr_str)
 
@@ -2823,13 +2826,9 @@ class TestThrottleDocstrings:
     ####################################################################
     # test_throttle_example_8
     ####################################################################
-    def test_throttle_example_8(self) -> None:
-        """Method test_throttle_example_8.
-
-        Args:
-            capsys: pytest fixture to capture print output
-
-        """
+    @staticmethod
+    def test_throttle_example_8() -> None:
+        """Method test_throttle_example_8."""
         hdr_str = ":Example 7: get length for an asynchronous throttle"
         flowers(hdr_str)
 

@@ -46,14 +46,19 @@ show_error_codes = "True"
 line-length = 88
 
 [tool.ruff.lint]
+preview = true
 # Enable the E501 (line-too-long) and W505 (doc-line-too-long) rules
-select = ["E501", "W505"]
+select = ["DOC", "E501", "W505"]
 extend-select = ["ALL"]
 ignore = ["D203", "D213", "T201", "COM812"]
 
 [tool.ruff.lint.pycodestyle]
 # 2. Max line length for DOCSTRINGS and STANDALONE COMMENTS
 max-doc-length = 72
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
 
 [tool.ruff.lint.pylint]
 max-statements = 50
