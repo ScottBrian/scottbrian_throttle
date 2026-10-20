@@ -27,9 +27,6 @@ dependencies = [
     "mypy>=2.3.1",
 ]
 
-#[tool.setuptools]
-#packages = ["scottbrian_throttle"]
-#package-dir = { "" = "src" }
 
 [tool.mypy]
 mypy_path = "typings"
