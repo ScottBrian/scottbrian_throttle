@@ -198,7 +198,8 @@ class TestThrottleCorrectSource:
     ####################################################################
     # test_unique_ts_correct_source
     ####################################################################
-    def test_throttle_correct_source(self) -> None:
+    @staticmethod
+    def test_throttle_correct_source() -> None:
         """Test unique_ts correct source."""
         print("TESTING FROM PATH:", scottbrian_throttle.__file__)
         assert "dist\\unpacked" in scottbrian_throttle.__file__
@@ -217,13 +218,13 @@ class TestThrottleBasic:
     ####################################################################
     # repr
     ####################################################################
-    @pytest.mark.parametrize("reqs_per_sec_arg", (0.5, 1, 2))
-    @pytest.mark.parametrize("bucket_size_arg", (1, 2.2))
+    # @pytest.mark.parametrize("reqs_per_sec_arg", (0.5, 1, 2, 3))
+    # @pytest.mark.parametrize("bucket_size_arg", (1, 2.2))
     @pytest.mark.parametrize("convert_to_async_arg", (True, False))
     @pytest.mark.parametrize("name_arg", ("t1", "t2"))
     @etrace(omit_caller=True)
+    @staticmethod
     def test_throttle_repr(
-        self,
         *,
         reqs_per_sec_arg: float,
         bucket_size_arg: float,
@@ -267,7 +268,8 @@ class TestThrottleBasic:
 class TestThrottleDecoratorErrors:
     """TestThrottleDecoratorErrors class."""
 
-    def test_pie_reqs_to_sec_args(self) -> None:
+    @staticmethod
+    def test_pie_reqs_to_sec_args() -> None:
         """test_throttle using reqs_to_sec arguments."""
         ################################################################
         # bad reqs_per_sec
@@ -308,7 +310,8 @@ class TestThrottleDecoratorErrors:
         def f5() -> None:
             pass
 
-    def test_pie_bucket_size_args(self) -> None:
+    @staticmethod
+    def test_pie_bucket_size_args() -> None:
         """test_throttle using bucket_size arguments."""
         ################################################################
         # bad bucket_size
@@ -355,7 +358,8 @@ class TestThrottleDecoratorErrors:
         def f11() -> None:
             pass
 
-    def test_pie_convert_to_async_args(self) -> None:  # noqa: C901
+    @staticmethod
+    def test_pie_convert_to_async_args() -> None:  # ruff: ignore[complex-structure]
         """test_throttle using convert_to_async arguments."""
         ################################################################
         # bad convert_to_async
@@ -428,8 +432,8 @@ class TestThrottleDecoratorErrors:
 class TestThrottleDecoratorRequestErrors:
     """TestThrottleDecoratorErrors class."""
 
+    @staticmethod
     def test_pie_throttle_request_errors(
-        self,
         caplog: pytest.LogCaptureFixture,
     ) -> None:
         """test_throttle using request failure.
@@ -528,7 +532,7 @@ class TestThrottleDecoratorRequestErrors:
         )
 
         @throttle(reqs_per_sec=1)
-        async def f5() -> None:
+        async def f5() -> None:  # ruff: ignore[unused-async]
             ans = 42 / 0
             print(f"{ans=}")
 
@@ -546,7 +550,7 @@ class TestThrottleDecoratorRequestErrors:
         )
 
         @throttle(reqs_per_sec=1, bucket_size=2)
-        async def f6() -> None:
+        async def f6() -> None:  # ruff: ignore[unused-async]
             ans = 42 / 0
             print(f"{ans=}")
 
@@ -560,7 +564,8 @@ class TestThrottleDecoratorRequestErrors:
     ####################################################################
     # test_sentry_capture_exception
     ####################################################################
-    def test_sentry_capture_exception(self) -> None:
+    @staticmethod
+    def test_sentry_capture_exception() -> None:
         """Test sentry_sdk.capture_exception across contexts."""
         with patch("sentry_sdk.capture_exception") as mock_capture:
             # 1. Sync context
@@ -593,7 +598,7 @@ class TestThrottleDecoratorRequestErrors:
             mock_capture.reset_mock()
 
             @throttle(reqs_per_sec=1)
-            async def f_async() -> None:
+            async def f_async() -> None:  # ruff: ignore[unused-async]
                 exc_msg = "async error"
                 raise KeyError(exc_msg)
 
@@ -605,7 +610,8 @@ class TestThrottleDecoratorRequestErrors:
     ####################################################################
     # define test_sentry_import_error
     ####################################################################
-    def test_sentry_import_error(self) -> None:
+    @staticmethod
+    def test_sentry_import_error() -> None:
         """Test graceful fallback when sentry_sdk is not installed."""
         with patch.dict("sys.modules", {"sentry_sdk": None}):
             # Verify exception is still raised properly in sync context
@@ -629,7 +635,7 @@ class TestThrottleDecoratorRequestErrors:
             # Verify exception in async context
 
             @throttle(reqs_per_sec=1)
-            async def f_async() -> None:
+            async def f_async() -> None:  # ruff: ignore[unused-async]
                 _ = 1 / 0
 
             with pytest.raises(ZeroDivisionError):
@@ -638,8 +644,8 @@ class TestThrottleDecoratorRequestErrors:
     ####################################################################
     # test_capture_apm_error_structured_logging_extra
     ####################################################################
+    @staticmethod
     def test_capture_apm_error_structured_logging_extra(
-        self,
         caplog: pytest.LogCaptureFixture,
     ) -> None:
         """Test structured logging extra fields attached by APM capture.
@@ -724,14 +730,14 @@ class TestThrottle:
     # test_throttle_multi_threads1
     ####################################################################
     @pytest.mark.parametrize("throttle_mode_arg", tuple(Mode))
-    @pytest.mark.parametrize("num_threads_arg", (0, 1, 2))
-    @pytest.mark.parametrize("reqs_per_sec_arg", (0.25, 0.33, 0.5))
-    @pytest.mark.parametrize("bucket_size_arg", (1, 1.25, 1.5, 2))
-    @pytest.mark.parametrize("send_interval_mult_arg", (0.0, 0.9, 1.0, 1.1))
+    # @pytest.mark.parametrize("num_threads_1_arg", (0, 1, 2))
+    # @pytest.mark.parametrize("reqs_per_sec_arg", (0.25, 0.33, 0.5))
+    # @pytest.mark.parametrize("bucket_size_arg", (1, 1.25, 1.5, 2))
+    # @pytest.mark.parametrize("send_interval_mult_arg", (0.0, 0.9, 1.0, 1.1))
     def test_throttle_multi_threads1(
         self,
         throttle_mode_arg: Mode,
-        num_threads_arg: int,
+        num_threads_1_arg: int,
         reqs_per_sec_arg: float,
         bucket_size_arg: float,
         send_interval_mult_arg: float,
@@ -740,7 +746,7 @@ class TestThrottle:
 
         Args:
             throttle_mode_arg: choose whether sync or async
-            num_threads_arg: number of threads to start
+            num_threads_1_arg: number of threads to start
             reqs_per_sec_arg: number of requests per second from fixture
             bucket_size_arg: bucket size for throttle
             send_interval_mult_arg: interval between each send of a
@@ -754,7 +760,7 @@ class TestThrottle:
             bucket_size=bucket_size_arg,
             send_interval=send_interval,
             request_style=RequestStyle.POS_1,
-            num_threads=num_threads_arg,
+            num_threads=num_threads_1_arg,
             num_reqs_to_do=8,
         )
 
@@ -762,14 +768,14 @@ class TestThrottle:
     # test_throttle_multi_threads2
     ####################################################################
     @pytest.mark.parametrize("throttle_mode_arg", tuple(Mode))
-    @pytest.mark.parametrize("num_threads_arg", (0, 2, 8))
-    @pytest.mark.parametrize("reqs_per_sec_arg", (1, 2, 3))
-    @pytest.mark.parametrize("bucket_size_arg", (1, 1.5, 2, 3))
-    @pytest.mark.parametrize("send_interval_mult_arg", (0.0, 0.9, 1.0, 1.1))
+    # @pytest.mark.parametrize("num_threads_2_arg", (0, 2, 8))
+    # @pytest.mark.parametrize("reqs_per_sec_arg", (0.5, 1, 2, 3))
+    # @pytest.mark.parametrize("bucket_size_arg", (1, 1.5, 2, 3))
+    # @pytest.mark.parametrize("send_interval_mult_arg", (0.0, 0.9, 1.0, 1.1))
     def test_throttle_multi_threads2(
         self,
         throttle_mode_arg: Mode,
-        num_threads_arg: int,
+        num_threads_2_arg: int,
         reqs_per_sec_arg: float,
         bucket_size_arg: float,
         send_interval_mult_arg: float,
@@ -778,7 +784,7 @@ class TestThrottle:
 
         Args:
             throttle_mode_arg: choose whether sync or async
-            num_threads_arg: number of threads to start
+            num_threads_2_arg: number of threads to start
             reqs_per_sec_arg: number of requests per second from fixture
             bucket_size_arg: bucket size for throttle
             send_interval_mult_arg: interval between each send of a
@@ -792,7 +798,7 @@ class TestThrottle:
             bucket_size=bucket_size_arg,
             send_interval=send_interval,
             request_style=RequestStyle.POS_1,
-            num_threads=num_threads_arg,
+            num_threads=num_threads_2_arg,
             num_reqs_to_do=16,
         )
 
@@ -819,7 +825,7 @@ class TestThrottle:
 
         # the second half are random values
         for _ in range(num_reqs_to_do // 2):
-            send_intervals.append(send_interval * (random.random() * 2))  # noqa: S311
+            send_intervals.append(send_interval * (random.random() * 2))  # ruff: ignore[suspicious-non-cryptographic-random-usage]
 
         return send_intervals
 
@@ -962,7 +968,7 @@ class TestThrottle:
         else:
             send_req = "request_validator.t_throttle.async_send_request"
 
-        if throttle_mode in (Mode.SYNC, Mode.SYNC_CONVERT):
+        if throttle_mode in {Mode.SYNC, Mode.SYNC_CONVERT}:
             targ_prefix = ""
         else:
             targ_prefix = "async_"
@@ -1000,9 +1006,9 @@ class TestThrottle:
             request_item.send_time_ns = perf_counter_ns()
             request_validator.request_deque.appendleft(request_item)
             if throttle_mode == Mode.SYNC:
-                rc = eval(call_args)  # noqa: S307
+                rc = eval(call_args)  # ruff: ignore[suspicious-eval-usage]
             else:
-                rc = asyncio.run(eval(call_args))  # noqa: S307
+                rc = asyncio.run(eval(call_args))  # ruff: ignore[suspicious-eval-usage]
 
             request_item.return_time_ns = perf_counter_ns()
             exp_rc = idx
@@ -1099,8 +1105,8 @@ class TestPieThrottle:
     ################################################################
     # get_targ
     ################################################################
-    def get_targ(  # noqa: PLR0915, C901
-        self,
+    @staticmethod
+    def get_targ(  # ruff: ignore[complex-structure, too-many-statements]
         *,
         request_style: RequestStyle,
         throttle_mode: Mode,
@@ -1120,7 +1126,7 @@ class TestPieThrottle:
         # f0
         ################################################################
         @throttle(reqs_per_sec=reqs_per_sec)
-        async def async_f0() -> int:
+        async def async_f0() -> int:  # ruff: ignore[unused-async]
             request_item = request_validator.set_idx_and_times()
             return request_item.req_id + 42 + 0
 
@@ -1133,7 +1139,7 @@ class TestPieThrottle:
         # f1
         ################################################################
         @throttle(reqs_per_sec=reqs_per_sec)
-        async def async_f1(req_id: int) -> int:
+        async def async_f1(req_id: int) -> int:  # ruff: ignore[unused-async]
             request_item = request_validator.set_idx_and_times()
             assert req_id == request_item.req_id
             return request_item.req_id + 42 + 1
@@ -1148,7 +1154,7 @@ class TestPieThrottle:
         # f2
         ################################################################
         @throttle(reqs_per_sec=reqs_per_sec)
-        async def async_f2(req_id: int, reqs_per_sec: float) -> int:
+        async def async_f2(req_id: int, reqs_per_sec: float) -> int:  # ruff: ignore[unused-async]
             request_item = request_validator.set_idx_and_times()
             assert req_id == request_item.req_id
             assert reqs_per_sec == request_validator.reqs_per_sec
@@ -1165,7 +1171,7 @@ class TestPieThrottle:
         # f3
         ################################################################
         @throttle(reqs_per_sec=reqs_per_sec)
-        async def async_f3(*, req_id: int) -> int:
+        async def async_f3(*, req_id: int) -> int:  # ruff: ignore[unused-async]
             request_item = request_validator.set_idx_and_times()
             assert req_id == request_item.req_id
             return request_item.req_id + 42 + 3
@@ -1180,7 +1186,7 @@ class TestPieThrottle:
         # f4
         ################################################################
         @throttle(reqs_per_sec=reqs_per_sec)
-        async def async_f4(*, req_id: int, interval: float) -> int:
+        async def async_f4(*, req_id: int, interval: float) -> int:  # ruff: ignore[unused-async]
             request_item = request_validator.set_idx_and_times()
             assert req_id == request_item.req_id
             assert interval == request_item.send_interval
@@ -1197,7 +1203,7 @@ class TestPieThrottle:
         # f5
         ################################################################
         @throttle(reqs_per_sec=reqs_per_sec)
-        async def async_f5(req_id: int, *, interval: float) -> int:
+        async def async_f5(req_id: int, *, interval: float) -> int:  # ruff: ignore[unused-async]
             request_item = request_validator.set_idx_and_times()
             assert req_id == request_item.req_id
             assert interval == request_item.send_interval
@@ -1214,7 +1220,7 @@ class TestPieThrottle:
         # f6
         ################################################################
         @throttle(reqs_per_sec=reqs_per_sec)
-        async def async_f6(
+        async def async_f6(  # ruff: ignore[unused-async]
             req_id: int,
             reqs_per_sec: float,
             *,
@@ -1247,11 +1253,11 @@ class TestPieThrottle:
         if throttle_mode == Mode.ASYNC:
             return cast(
                 "FuncWithThrottleAttr[Callable[P, Coroutine[Any, Any, R]]]",
-                eval(f"async_f{request_style.value}"),  # noqa: S307
+                eval(f"async_f{request_style.value}"),  # ruff: ignore[suspicious-eval-usage]
             )
         return cast(
             "FuncWithThrottleAttr[Callable[P, R]]",
-            eval(f"f{request_style.value}"),  # noqa: S307
+            eval(f"f{request_style.value}"),  # ruff: ignore[suspicious-eval-usage]
         )
 
     ####################################################################
@@ -1337,12 +1343,12 @@ class TestPieThrottle:
             request_item.send_time_ns = perf_counter_ns()
             request_validator.request_deque.appendleft(request_item)
             if throttle_mode_arg == Mode.SYNC:
-                rc = eval(call_args)  # noqa: S307
+                rc = eval(call_args)  # ruff: ignore[suspicious-eval-usage]
             else:
-                rc = asyncio.run(eval(call_args))  # noqa: S307
+                rc = asyncio.run(eval(call_args))  # ruff: ignore[suspicious-eval-usage]
 
             request_item.return_time_ns = perf_counter_ns()
-            assert rc == eval(req_style_map[request_style_arg][2])  # noqa: S307
+            assert rc == eval(req_style_map[request_style_arg][2])  # ruff: ignore[suspicious-eval-usage]
 
         request_validator.validate_series()  # validate for the series
 
@@ -1350,11 +1356,11 @@ class TestPieThrottle:
     # test_pie_throttle
     ####################################################################
     @pytest.mark.parametrize("throttle_mode_arg", tuple(Mode))
-    @pytest.mark.parametrize("reqs_per_sec_arg", (1, 2, 3))
-    @pytest.mark.parametrize("bucket_size_arg", (1, 1.3, 2, 3))
-    @pytest.mark.parametrize("send_interval_mult_arg", (0.0, 0.9, 1.0, 1.1))
+    # @pytest.mark.parametrize("reqs_per_sec_arg", (0.5, 1, 2, 3))
+    # @pytest.mark.parametrize("bucket_size_arg", (1, 1.3, 2, 3))
+    # @pytest.mark.parametrize("send_interval_mult_arg", (0.0, 0.9, 1.0, 1.1))
+    @staticmethod
     def test_pie_throttle(
-        self,
         throttle_mode_arg: Mode,
         reqs_per_sec_arg: float,
         bucket_size_arg: float,
@@ -1397,7 +1403,7 @@ class TestPieThrottle:
             reqs_per_sec=reqs_per_sec_arg,
             bucket_size=bucket_size_arg,
         )
-        async def async_f0() -> int:
+        async def async_f0() -> int:  # ruff: ignore[unused-async]
             request_validator.set_idx_and_times()
             return 0
 
@@ -1413,7 +1419,7 @@ class TestPieThrottle:
         ################################################################
         # Instantiate the validator
         ################################################################
-        if throttle_mode_arg in (Mode.SYNC, Mode.SYNC_CONVERT):
+        if throttle_mode_arg in {Mode.SYNC, Mode.SYNC_CONVERT}:
             t_throttle = f0.throttle
         else:
             t_throttle = async_f0.throttle
@@ -1466,19 +1472,19 @@ class TestPieThrottle:
     ####################################################################
     @pytest.mark.parametrize("throttle_mode_arg", tuple(Mode))
     @pytest.mark.parametrize("method_type_arg", tuple(MethodType))
-    @pytest.mark.parametrize("reqs_per_sec_arg", (1, 2, 3))
-    @pytest.mark.parametrize("bucket_size_arg", (1, 1.3, 2, 3))
-    @pytest.mark.parametrize("send_interval_mult_arg", (0.0, 0.9, 1.0, 1.1))
-    @pytest.mark.parametrize("num_threads_arg", (1, 2, 16))
-    def test_pie_throttle_methods(  # noqa: C901
-        self,
+    # @pytest.mark.parametrize("reqs_per_sec_arg", (1, 2, 3))
+    # @pytest.mark.parametrize("bucket_size_arg", (1, 1.3, 2, 3))
+    # @pytest.mark.parametrize("send_interval_mult_arg", (0.0, 0.9, 1.0, 1.1))
+    # @pytest.mark.parametrize("num_threads_3_arg", (1, 2, 16))
+    @staticmethod
+    def test_pie_throttle_methods(  # ruff: ignore[complex-structure]
         *,
         throttle_mode_arg: Mode,
         method_type_arg: MethodType,
         reqs_per_sec_arg: float,
         bucket_size_arg: float,
         send_interval_mult_arg: float,
-        num_threads_arg: int,
+        num_threads_3_arg: int,
     ) -> None:
         """Method to start throttle tests.
 
@@ -1489,7 +1495,7 @@ class TestPieThrottle:
             bucket_size_arg: bucket size for the throttle
             send_interval_mult_arg: interval between each send of a
                                       request
-            num_threads_arg: number of instances to run
+            num_threads_3_arg: number of instances to run
 
         """
         ################################################################
@@ -1506,7 +1512,7 @@ class TestPieThrottle:
             num_reqs_to_do,
         )
 
-        total_requests = num_reqs_to_do * num_threads_arg
+        total_requests = num_reqs_to_do * num_threads_3_arg
 
         ################################################################
         # set sync_convert
@@ -1570,7 +1576,7 @@ class TestPieThrottle:
                 reqs_per_sec=reqs_per_sec_arg,
                 bucket_size=bucket_size_arg,
             )
-            async def async_m0(self) -> int:
+            async def async_m0(self) -> int:  # ruff: ignore[no-self-use]
                 Class0.class0_validator.set_idx_and_times()
                 return 0
 
@@ -1579,7 +1585,7 @@ class TestPieThrottle:
                 bucket_size=bucket_size_arg,
                 convert_to_async=sync_convert,
             )
-            def m0(self) -> int:
+            def m0(self) -> int:  # ruff: ignore[no-self-use]
                 Class0.class0_validator.set_idx_and_times()
                 return 0
 
@@ -1693,7 +1699,7 @@ class TestPieThrottle:
             Class0(
                 throttle_mode=throttle_mode_arg,
             )
-            for _ in range(num_threads_arg)
+            for _ in range(num_threads_3_arg)
         ]
         if throttle_mode_arg == Mode.SYNC:
             with concurrent.futures.ThreadPoolExecutor() as executor:
@@ -1721,6 +1727,9 @@ def formatted_time_str(raw_time: float) -> str:
     Args:
         raw_time: the time that is to be formatted
 
+    Returns:
+        Formatted time.
+
     """
     return (
         time.strftime("%H:%M:%S", time.localtime(raw_time))
@@ -1736,6 +1745,9 @@ def formatted_interval_str(raw_interval: float) -> str:
 
     Args:
         raw_interval: the interval time that is to be formatted
+
+    Returns:
+        Formatted time.
 
     """
     return (
@@ -1753,8 +1765,9 @@ class TestThrottleMisc:
     ####################################################################
     # test_get_interval_secs
     ####################################################################
-    @pytest.mark.parametrize("reqs_per_sec_arg", (0.5, 1, 2, 3))
-    def test_get_interval_secs(self, reqs_per_sec_arg: float) -> None:
+    # @pytest.mark.parametrize("reqs_per_sec_arg", (0.5, 1, 2, 3))
+    @staticmethod
+    def test_get_interval_secs(reqs_per_sec_arg: float) -> None:
         """Method to test get_interval in seconds.
 
         Args:
@@ -1780,8 +1793,9 @@ class TestThrottleMisc:
     ####################################################################
     # test_get_completion_time_secs
     ####################################################################
-    @pytest.mark.parametrize("reqs_per_sec_arg", (0.2, 1, 2, 3))
-    def test_get_completion_time_secs(self, reqs_per_sec_arg: float) -> None:
+    # @pytest.mark.parametrize("reqs_per_sec_arg", (0.2, 1, 2, 3))
+    @staticmethod
+    def test_get_completion_time_secs(reqs_per_sec_arg: float) -> None:
         """Method to test get completion time in seconds.
 
         Args:
@@ -1831,8 +1845,9 @@ class TestThrottleMisc:
     ####################################################################
     # test_decorated_func_get_interval
     ####################################################################
-    @pytest.mark.parametrize("reqs_per_sec_arg", (0.5, 1, 2, 3))
-    def test_decorated_func_get_interval(self, reqs_per_sec_arg: float) -> None:
+    # @pytest.mark.parametrize("reqs_per_sec_arg", (0.5, 1, 2, 3))
+    @staticmethod
+    def test_decorated_func_get_interval(reqs_per_sec_arg: float) -> None:
         """Method to test get_interval on decorated function.
 
         Args:
@@ -1860,8 +1875,9 @@ class TestThrottleMisc:
     ####################################################################
     # test_decorated_func_get_completion_time
     ####################################################################
-    @pytest.mark.parametrize("reqs_per_sec_arg", (0.2, 1, 2, 3))
-    def test_decorated_func_get_completion_time(self, reqs_per_sec_arg: float) -> None:
+    # @pytest.mark.parametrize("reqs_per_sec_arg", (0.2, 1, 2, 3))
+    @staticmethod
+    def test_decorated_func_get_completion_time(reqs_per_sec_arg: float) -> None:
         """Method to test get completion time on decorated function.
 
         Args:
@@ -1906,8 +1922,9 @@ class TestThrottleMisc:
     ####################################################################
     # test_decorated_method_throttle_methods
     ####################################################################
-    @pytest.mark.parametrize("reqs_per_sec_arg", (0.5, 2, 4))
-    def test_decorated_method_throttle_methods(self, reqs_per_sec_arg: float) -> None:
+    # @pytest.mark.parametrize("reqs_per_sec_arg", (0.5, 2, 4))
+    @staticmethod
+    def test_decorated_method_throttle_methods(reqs_per_sec_arg: float) -> None:
         """Method to test throttle methods on decorated class method.
 
         Args:
@@ -2022,13 +2039,6 @@ class RequestValidator:
 
         self.cumulative_throttle_wait_time_ns: float = 0.0
 
-        self.reset()
-
-    ####################################################################
-    # reset
-    ####################################################################
-    def reset(self) -> None:
-        """Reset the variables to starting values."""
         self.idx = -1
 
     ################################################################
@@ -2057,7 +2067,7 @@ class RequestValidator:
 
         caller_frame = inspect.currentframe().f_back.f_back  # type: ignore [union-attr]
         assert caller_frame is not None
-        if request_item.throttle_mode in (Mode.SYNC, Mode.SYNC_CONVERT):
+        if request_item.throttle_mode in {Mode.SYNC, Mode.SYNC_CONVERT}:
             assert is_async_environment() is False
             if request_item.throttle_mode == Mode.SYNC_CONVERT:
                 assert get_caller_info(caller_frame).func_name == "worker_thread_target"
@@ -2080,12 +2090,7 @@ class RequestValidator:
     # validate_series
     ####################################################################
     def validate_series(self) -> None:
-        """Validate the requests.
-
-        Raises:
-            InvalidModeNum: Mode must be 1, 2, 3, or 4
-
-        """
+        """Validate the requests."""
         logger.debug(f"validate_series: {self=}, {id(self)=}")
         assert 0 < self.total_requests
         assert len(self.request_items) == self.total_requests
@@ -2107,7 +2112,7 @@ class RequestValidator:
         first_send_time = self.request_items[0].send_time_ns
         for req_item in self.request_items:
             extra_time = 0.0
-            if req_item.expected_delay_ns == 0.0:
+            if req_item.expected_delay_ns <= 0.0:
                 extra_time = self.target_interval_ns
             expected_actual_diff_ratio = (
                 req_item.actual_delay_ns - req_item.expected_delay_ns
@@ -2145,7 +2150,7 @@ class RequestValidator:
         # assert throttle_verifier.num_excessive_request_delays < 4
         assert ratio_delay_time <= 0.07 + (self.num_threads / 100)
 
-        self.reset()
+        self.idx = -1
 
     ####################################################################
     # process_request_items
