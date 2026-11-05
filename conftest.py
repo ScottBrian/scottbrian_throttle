@@ -1,28 +1,31 @@
 import re
 from doctest import ELLIPSIS
 
-from scottbrian_utils.doc_checker import DocCheckerTestParser, DocCheckerOutputChecker
+from scottbrian_utils.doc_checker import DocCheckerOutputChecker, DocCheckerTestParser
 from sybil import Sybil
 from sybil.parsers.rest import PythonCodeBlockParser
 
 
 class SbtDocCheckerOutputChecker(DocCheckerOutputChecker):
+    """Doc Checker Class."""
+
     def __init__(self) -> None:
         """Initialize the output checker object."""
         super().__init__()
 
     def check_output(self, want: str, got: str, optionflags: int) -> bool:
-        """Check the output of the example against expected value.
+        """Check the output of the example against the expected value.
 
         Args:
             want: the expected value of the example output
             got: the actual value of the example output
             optionflags: doctest option flags for the Sybil
                 BaseOutPutChecker check_output method
+
         Returns:
             True if the want and got values match, False otherwise
         """
-        if self.mod_name == "throttle" or self.mod_name == "README":
+        if self.mod_name in {"throttle", "README"}:
             # Many of the code examples are dealing with time values
             # that might vary because of the unpredictability of
             # thread processing. What we want to do here is allow some
@@ -36,9 +39,7 @@ class SbtDocCheckerOutputChecker(DocCheckerOutputChecker):
                     # handle elapsed time case
                     ####################################################
                     match_str = (
-                        "request "
-                        + f"{idx}"
-                        + " sent at elapsed time: [0-9]{1,2}.[0-9]{1,2}"
+                        f"request {idx} sent at elapsed time: [0-9]{{1,2}}.[0-9]{{1,2}}"
                     )
                     found_item = re.match(match_str, got_item)
                     if found_item:
@@ -71,8 +72,18 @@ class SbtDocCheckerOutputChecker(DocCheckerOutputChecker):
     ####################################################################
     # adjust_time_differences
     ####################################################################
-    def time_difference_small(self, want_item: str, got_item: str) -> bool:
-        """Adjust the time differences in the want and got strings."""
+    @staticmethod
+    def time_difference_small(want_item: str, got_item: str) -> bool:
+        """Adjust the time differences in the want and got strings.
+
+        Args:
+            want_item: expected text value
+            got_item: text that was actually parsed
+
+        Returns:
+            True when the value is as expected, False otherwise.
+
+        """
         want_splits = want_item.split()
         got_splits = got_item.split()
         expected_value = float(want_splits[6])
@@ -104,5 +115,5 @@ pytest_collect_file = Sybil(
         PythonCodeBlockParser(),
     ],
     patterns=["*.rst", "*.py"],
-    # excludes=['log_verifier.py']
+    # ---> example:  excludes=['log_verifier.py']
 ).pytest()

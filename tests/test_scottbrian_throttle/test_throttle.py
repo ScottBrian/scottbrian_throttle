@@ -202,9 +202,15 @@ class TestThrottleCorrectSource:
     def test_throttle_correct_source() -> None:
         """Test unique_ts correct source."""
         print("TESTING FROM PATH:", scottbrian_throttle.__file__)
-        assert "dist\\unpacked" in scottbrian_throttle.__file__
+        assert (
+            "PycharmProjects\\scottbrian_throttle\\src\\scottbrian_throttle"
+            in scottbrian_throttle.__file__
+        )
 
-        testlib_path = verify_lib(obj_to_check=Throttle)
+        testlib_path = verify_lib(
+            obj_to_check=Throttle,
+            str_to_check="PycharmProjects/scottbrian_throttle/src/scottbrian_throttle",
+        )
         logger.debug(f"{testlib_path=}")
         assert testlib_path.endswith("throttle_blocks.py")
 

@@ -86,11 +86,12 @@ def thread_exc(
 ########################################################################
 # parameter sets
 ########################################################################
-def pytest_addoption(parser):
+def pytest_addoption(parser: pytest.Parser) -> None:
     parser.addoption("--all", action="store_true", help="run all combinations")
 
 
-def pytest_generate_tests(metafunc):
+def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
+    reqs_per_sec_values: tuple[float | int, ...]
     if "reqs_per_sec_arg" in metafunc.fixturenames:
         if metafunc.config.getoption("all"):
             reqs_per_sec_values = (0.2, 0.5, 1, 2, 3)
@@ -99,6 +100,7 @@ def pytest_generate_tests(metafunc):
         metafunc.parametrize("reqs_per_sec_arg", reqs_per_sec_values)
 
     if "bucket_size_arg" in metafunc.fixturenames:
+        bucket_size_values: tuple[float | int, ...]
         if metafunc.config.getoption("all"):
             bucket_size_values = (1, 1.4, 2, 3)
         else:
@@ -106,6 +108,7 @@ def pytest_generate_tests(metafunc):
         metafunc.parametrize("bucket_size_arg", bucket_size_values)
 
     if "send_interval_mult_arg" in metafunc.fixturenames:
+        send_interval_mult_values: tuple[float | int, ...]
         if metafunc.config.getoption("all"):
             send_interval_mult_values = (0.0, 0.9, 1.0, 1.1)
         else:
@@ -113,6 +116,7 @@ def pytest_generate_tests(metafunc):
         metafunc.parametrize("send_interval_mult_arg", send_interval_mult_values)
 
     if "num_threads_1_arg" in metafunc.fixturenames:
+        num_threads_1_values: tuple[int, ...]
         if metafunc.config.getoption("all"):
             num_threads_1_values = (0, 1, 2)
         else:
@@ -120,6 +124,7 @@ def pytest_generate_tests(metafunc):
         metafunc.parametrize("num_threads_1_arg", num_threads_1_values)
 
     if "num_threads_2_arg" in metafunc.fixturenames:
+        num_threads_2_values: tuple[int, ...]
         if metafunc.config.getoption("all"):
             num_threads_2_values = (0, 2, 8)
         else:
@@ -127,6 +132,7 @@ def pytest_generate_tests(metafunc):
         metafunc.parametrize("num_threads_2_arg", num_threads_2_values)
 
     if "num_threads_3_arg" in metafunc.fixturenames:
+        num_threads_3_values: tuple[int, ...]
         if metafunc.config.getoption("all"):
             num_threads_3_values = (1, 2, 16)
         else:
