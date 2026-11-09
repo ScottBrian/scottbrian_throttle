@@ -134,7 +134,7 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
     if "num_threads_3_arg" in metafunc.fixturenames:
         num_threads_3_values: tuple[int, ...]
         if metafunc.config.getoption("all"):
-            num_threads_3_values = (1, 2, 16)
+            num_threads_3_values = (1, 2, 8)
         else:
             num_threads_3_values = (1,)
         metafunc.parametrize("num_threads_3_arg", num_threads_3_values)

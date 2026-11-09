@@ -137,7 +137,7 @@ loop will not be blocked. There are two possible scenarios:
     import time
     import asyncio
 
-    @throttle(reqs_per_sec=2)
+    @throttle
     async def func3(request_number, time_of_start):
         print(f'request {request_number} sent at elapsed time: '
               f'{time.time() - time_of_start:0.1f}')
@@ -154,15 +154,15 @@ loop will not be blocked. There are two possible scenarios:
 . code-block:: text
 
         request 0 sent at elapsed time: 0.0
-        request 1 sent at elapsed time: 0.5
-        request 2 sent at elapsed time: 1.0
-        request 3 sent at elapsed time: 1.5
-        request 4 sent at elapsed time: 2.0
-        request 5 sent at elapsed time: 2.5
-        request 6 sent at elapsed time: 3.0
-        request 7 sent at elapsed time: 3.5
-        request 8 sent at elapsed time: 4.0
-        request 9 sent at elapsed time: 4.5
+        request 1 sent at elapsed time: 1.0
+        request 2 sent at elapsed time: 2.0
+        request 3 sent at elapsed time: 3.0
+        request 4 sent at elapsed time: 4.0
+        request 5 sent at elapsed time: 5.0
+        request 6 sent at elapsed time: 6.0
+        request 7 sent at elapsed time: 7.0
+        request 8 sent at elapsed time: 8.0
+        request 9 sent at elapsed time: 9.0
 
 
 
@@ -174,7 +174,7 @@ loop will not be blocked. There are two possible scenarios:
     import time
     import asyncio
 
-    @throttle(reqs_per_sec=2)
+    @throttle
     def func4(request_number, time_of_start):
         print(f'request {request_number} sent at elapsed time: '
               f'{time.time() - time_of_start:0.1f}')
@@ -188,18 +188,18 @@ loop will not be blocked. There are two possible scenarios:
 
 :Expected output for Example 4::
 
-.. code-block:: text
+. code-block:: text
 
         request 0 sent at elapsed time: 0.0
-        request 1 sent at elapsed time: 0.5
-        request 2 sent at elapsed time: 1.0
-        request 3 sent at elapsed time: 1.5
-        request 4 sent at elapsed time: 2.0
-        request 5 sent at elapsed time: 2.5
-        request 6 sent at elapsed time: 3.0
-        request 7 sent at elapsed time: 3.5
-        request 8 sent at elapsed time: 4.0
-        request 9 sent at elapsed time: 4.5
+        request 1 sent at elapsed time: 1.0
+        request 2 sent at elapsed time: 2.0
+        request 3 sent at elapsed time: 3.0
+        request 4 sent at elapsed time: 4.0
+        request 5 sent at elapsed time: 5.0
+        request 6 sent at elapsed time: 6.0
+        request 7 sent at elapsed time: 7.0
+        request 8 sent at elapsed time: 8.0
+        request 9 sent at elapsed time: 9.0
 
 :Example 5: throttle with convert_to_async in asyncio environment:
 
@@ -209,7 +209,7 @@ loop will not be blocked. There are two possible scenarios:
     import time
     import asyncio
 
-    @throttle(reqs_per_sec=2, convert_to_async=True)
+    @throttle(convert_to_async=True)
     def func5(request_number, time_of_start):
         print(f'request {request_number} sent at elapsed time: '
               f'{time.time() - time_of_start:0.1f}')
@@ -226,15 +226,15 @@ loop will not be blocked. There are two possible scenarios:
 .. code-block:: text
 
         request 0 sent at elapsed time: 0.0
-        request 1 sent at elapsed time: 0.5
-        request 2 sent at elapsed time: 1.0
-        request 3 sent at elapsed time: 1.5
-        request 4 sent at elapsed time: 2.0
-        request 5 sent at elapsed time: 2.5
-        request 6 sent at elapsed time: 3.0
-        request 7 sent at elapsed time: 3.5
-        request 8 sent at elapsed time: 4.0
-        request 9 sent at elapsed time: 4.5
+        request 1 sent at elapsed time: 1.0
+        request 2 sent at elapsed time: 2.0
+        request 3 sent at elapsed time: 3.0
+        request 4 sent at elapsed time: 4.0
+        request 5 sent at elapsed time: 5.0
+        request 6 sent at elapsed time: 6.0
+        request 7 sent at elapsed time: 7.0
+        request 8 sent at elapsed time: 8.0
+        request 9 sent at elapsed time: 9.0
 
 The throttle as leaky bucket:
 =============================

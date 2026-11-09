@@ -202,14 +202,14 @@ class TestThrottleCorrectSource:
     def test_throttle_correct_source() -> None:
         """Test unique_ts correct source."""
         print("TESTING FROM PATH:", scottbrian_throttle.__file__)
-        assert (
-            "PycharmProjects\\scottbrian_throttle\\src\\scottbrian_throttle"
-            in scottbrian_throttle.__file__
+        exp_path = (
+            "PycharmProjects\\scottbrian_throttle\\dist\\unpacked\\scottbrian_throttle"
         )
+        assert exp_path in scottbrian_throttle.__file__
 
         testlib_path = verify_lib(
             obj_to_check=Throttle,
-            str_to_check="PycharmProjects/scottbrian_throttle/src/scottbrian_throttle",
+            str_to_check="PycharmProjects/scottbrian_throttle/dist/unpacked/scottbrian_throttle",
         )
         logger.debug(f"{testlib_path=}")
         assert testlib_path.endswith("throttle_blocks.py")
@@ -224,10 +224,9 @@ class TestThrottleBasic:
     ####################################################################
     # repr
     ####################################################################
-    # @pytest.mark.parametrize("reqs_per_sec_arg", (0.5, 1, 2, 3))
-    # @pytest.mark.parametrize("bucket_size_arg", (1, 2.2))
     @pytest.mark.parametrize("convert_to_async_arg", (True, False))
     @pytest.mark.parametrize("name_arg", ("t1", "t2"))
+    # See conftest for additional parametrized args
     @etrace(omit_caller=True)
     @staticmethod
     def test_throttle_repr(
@@ -736,10 +735,7 @@ class TestThrottle:
     # test_throttle_multi_threads1
     ####################################################################
     @pytest.mark.parametrize("throttle_mode_arg", tuple(Mode))
-    # @pytest.mark.parametrize("num_threads_1_arg", (0, 1, 2))
-    # @pytest.mark.parametrize("reqs_per_sec_arg", (0.25, 0.33, 0.5))
-    # @pytest.mark.parametrize("bucket_size_arg", (1, 1.25, 1.5, 2))
-    # @pytest.mark.parametrize("send_interval_mult_arg", (0.0, 0.9, 1.0, 1.1))
+    # See conftest for additional parametrized args
     def test_throttle_multi_threads1(
         self,
         throttle_mode_arg: Mode,
@@ -774,10 +770,7 @@ class TestThrottle:
     # test_throttle_multi_threads2
     ####################################################################
     @pytest.mark.parametrize("throttle_mode_arg", tuple(Mode))
-    # @pytest.mark.parametrize("num_threads_2_arg", (0, 2, 8))
-    # @pytest.mark.parametrize("reqs_per_sec_arg", (0.5, 1, 2, 3))
-    # @pytest.mark.parametrize("bucket_size_arg", (1, 1.5, 2, 3))
-    # @pytest.mark.parametrize("send_interval_mult_arg", (0.0, 0.9, 1.0, 1.1))
+    # See conftest for additional parametrized args
     def test_throttle_multi_threads2(
         self,
         throttle_mode_arg: Mode,
@@ -1362,9 +1355,7 @@ class TestPieThrottle:
     # test_pie_throttle
     ####################################################################
     @pytest.mark.parametrize("throttle_mode_arg", tuple(Mode))
-    # @pytest.mark.parametrize("reqs_per_sec_arg", (0.5, 1, 2, 3))
-    # @pytest.mark.parametrize("bucket_size_arg", (1, 1.3, 2, 3))
-    # @pytest.mark.parametrize("send_interval_mult_arg", (0.0, 0.9, 1.0, 1.1))
+    # See conftest for additional parametrized args
     @staticmethod
     def test_pie_throttle(
         throttle_mode_arg: Mode,
@@ -1478,10 +1469,7 @@ class TestPieThrottle:
     ####################################################################
     @pytest.mark.parametrize("throttle_mode_arg", tuple(Mode))
     @pytest.mark.parametrize("method_type_arg", tuple(MethodType))
-    # @pytest.mark.parametrize("reqs_per_sec_arg", (1, 2, 3))
-    # @pytest.mark.parametrize("bucket_size_arg", (1, 1.3, 2, 3))
-    # @pytest.mark.parametrize("send_interval_mult_arg", (0.0, 0.9, 1.0, 1.1))
-    # @pytest.mark.parametrize("num_threads_3_arg", (1, 2, 16))
+    # See conftest for additional parametrized args
     @staticmethod
     def test_pie_throttle_methods(  # ruff: ignore[complex-structure]
         *,
@@ -1771,7 +1759,7 @@ class TestThrottleMisc:
     ####################################################################
     # test_get_interval_secs
     ####################################################################
-    # @pytest.mark.parametrize("reqs_per_sec_arg", (0.5, 1, 2, 3))
+    # See conftest for reqs_per_sec_arg parametrized arg
     @staticmethod
     def test_get_interval_secs(reqs_per_sec_arg: float) -> None:
         """Method to test get_interval in seconds.
@@ -1799,7 +1787,7 @@ class TestThrottleMisc:
     ####################################################################
     # test_get_completion_time_secs
     ####################################################################
-    # @pytest.mark.parametrize("reqs_per_sec_arg", (0.2, 1, 2, 3))
+    # See conftest for reqs_per_sec_arg parametrized arg
     @staticmethod
     def test_get_completion_time_secs(reqs_per_sec_arg: float) -> None:
         """Method to test get completion time in seconds.
@@ -1851,7 +1839,7 @@ class TestThrottleMisc:
     ####################################################################
     # test_decorated_func_get_interval
     ####################################################################
-    # @pytest.mark.parametrize("reqs_per_sec_arg", (0.5, 1, 2, 3))
+    # See conftest for reqs_per_sec_arg parametrized arg
     @staticmethod
     def test_decorated_func_get_interval(reqs_per_sec_arg: float) -> None:
         """Method to test get_interval on decorated function.
@@ -1881,7 +1869,7 @@ class TestThrottleMisc:
     ####################################################################
     # test_decorated_func_get_completion_time
     ####################################################################
-    # @pytest.mark.parametrize("reqs_per_sec_arg", (0.2, 1, 2, 3))
+    # See conftest for reqs_per_sec_arg parametrized arg
     @staticmethod
     def test_decorated_func_get_completion_time(reqs_per_sec_arg: float) -> None:
         """Method to test get completion time on decorated function.
@@ -1928,7 +1916,7 @@ class TestThrottleMisc:
     ####################################################################
     # test_decorated_method_throttle_methods
     ####################################################################
-    # @pytest.mark.parametrize("reqs_per_sec_arg", (0.5, 2, 4))
+    # See conftest for reqs_per_sec_arg parametrized arg
     @staticmethod
     def test_decorated_method_throttle_methods(reqs_per_sec_arg: float) -> None:
         """Method to test throttle methods on decorated class method.
@@ -2116,6 +2104,20 @@ class RequestValidator:
         )
 
         first_send_time = self.request_items[0].send_time_ns
+        last_func_arrival_time_ns = self.request_items[-1].actual_func_arrival_time_ns
+        actual_mean_interval_ns = (last_func_arrival_time_ns - first_send_time) / (
+            self.total_requests - 1
+        )
+        print(f"{actual_mean_interval_ns=:.4f}")
+
+        mean_send_interval_ns = sum(self.send_intervals) / (self.total_requests - 1)
+        print(f"{mean_send_interval_ns=:.4f}")
+
+        mean_min_throttle_interval_ns = (
+            self.target_interval_ns * (self.total_requests - self.bucket_size)
+        ) / (self.total_requests - 1)
+        print(f"{mean_min_throttle_interval_ns=:.4f}")
+
         for req_item in self.request_items:
             extra_time = 0.0
             if req_item.expected_delay_ns <= 0.0:
@@ -2155,6 +2157,9 @@ class RequestValidator:
 
         # assert throttle_verifier.num_excessive_request_delays < 4
         assert ratio_delay_time <= 0.07 + (self.num_threads / 100)
+
+        assert mean_min_throttle_interval_ns <= actual_mean_interval_ns
+        assert mean_send_interval_ns <= actual_mean_interval_ns
 
         self.idx = -1
 
