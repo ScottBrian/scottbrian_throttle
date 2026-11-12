@@ -94,10 +94,20 @@ def pytest_generate_tests(metafunc: pytest.Metafunc) -> None:
     reqs_per_sec_values: tuple[float | int, ...]
     if "reqs_per_sec_arg" in metafunc.fixturenames:
         if metafunc.config.getoption("all"):
-            reqs_per_sec_values = (0.2, 0.5, 1, 2, 3)
+            reqs_per_sec_values = (0.5, 1, 2, 3)
         else:
             reqs_per_sec_values = (3,)
         metafunc.parametrize("reqs_per_sec_arg", reqs_per_sec_values)
+
+    if "reqs_per_sec_2_arg" in metafunc.fixturenames:
+        if metafunc.config.getoption("all"):
+            reqs_per_sec_2_values = (
+                1,
+                2,
+            )
+        else:
+            reqs_per_sec_2_values = (3,)
+        metafunc.parametrize("reqs_per_sec_2_arg", reqs_per_sec_2_values)
 
     if "bucket_size_arg" in metafunc.fixturenames:
         bucket_size_values: tuple[float | int, ...]

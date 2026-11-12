@@ -756,6 +756,11 @@ class TestThrottle:
 
         """
         send_interval = (1 / reqs_per_sec_arg) * send_interval_mult_arg
+        logger.debug(
+            f"test_throttle_multi_threads1 entered: {str(throttle_mode_arg)=}, "
+            f"{num_threads_1_arg=}, {reqs_per_sec_arg=}, {bucket_size_arg=}, "
+            f"{send_interval_mult_arg=}, {send_interval=}",
+        )
         self.throttle_router(
             reqs_per_sec=reqs_per_sec_arg,
             throttle_mode=throttle_mode_arg,
@@ -1475,7 +1480,7 @@ class TestPieThrottle:
         *,
         throttle_mode_arg: Mode,
         method_type_arg: MethodType,
-        reqs_per_sec_arg: float,
+        reqs_per_sec_2_arg: float,
         bucket_size_arg: float,
         send_interval_mult_arg: float,
         num_threads_3_arg: int,
@@ -2097,26 +2102,49 @@ class RequestValidator:
         # calculate the request intervals and verify accuracy
         ################################################################
         self.process_request_items()
+
+        first_create_time_ns = self.request_items[0].create_time_ns
+        first_send_time = self.request_items[0].send_time_ns
+
+        pauser_intervals_ns = [
+            self.request_items[idx].send_time_ns
+            - self.request_items[idx].create_time_ns
+            for idx in range(len(self.request_items))
+        ]
+
+        mean_pauser_interval_ns = sum(pauser_intervals_ns) / self.total_requests
+        print(f"{mean_pauser_interval_ns=:.4f}")
+
+        last_func_arrival_time_ns = self.request_items[-1].actual_func_arrival_time_ns
+        actual_mean_interval_ns = (last_func_arrival_time_ns - first_send_time) / (
+            self.total_requests
+        )
+        print(f"{actual_mean_interval_ns=:.4f}")
+
+        mean_send_interval_ns = (
+            sum(self.send_intervals) / self.total_requests
+        ) * SECS_2_NS
+        print(f"{mean_send_interval_ns=:.4f}")
+        print(f"{mean_pauser_interval_ns / mean_send_interval_ns=:.4f}")
+
+        print(f"{pauser_intervals_ns=}")
+        print(f"{self.send_intervals=}")
+
+        mean_min_throttle_interval_ns = (
+            self.target_interval_ns * (self.total_requests - self.bucket_size)
+        ) / self.total_requests
+        print(f"{mean_min_throttle_interval_ns=:.4f}")
+
+        max_send_or_throttle_interval = max(
+            mean_send_interval_ns, mean_min_throttle_interval_ns
+        )
+        print(f"{actual_mean_interval_ns/max_send_or_throttle_interval=:.4f}")
+
         print("Interval Times:\n")
         print(
             "\nreq_ID | arrival idx |    send | t arrival | exp arrival | "
             "act arrival | exp delay | act delay |        diff ratio |",
         )
-
-        first_send_time = self.request_items[0].send_time_ns
-        last_func_arrival_time_ns = self.request_items[-1].actual_func_arrival_time_ns
-        actual_mean_interval_ns = (last_func_arrival_time_ns - first_send_time) / (
-            self.total_requests - 1
-        )
-        print(f"{actual_mean_interval_ns=:.4f}")
-
-        mean_send_interval_ns = sum(self.send_intervals) / (self.total_requests - 1)
-        print(f"{mean_send_interval_ns=:.4f}")
-
-        mean_min_throttle_interval_ns = (
-            self.target_interval_ns * (self.total_requests - self.bucket_size)
-        ) / (self.total_requests - 1)
-        print(f"{mean_min_throttle_interval_ns=:.4f}")
 
         for req_item in self.request_items:
             extra_time = 0.0
@@ -2160,6 +2188,8 @@ class RequestValidator:
 
         assert mean_min_throttle_interval_ns <= actual_mean_interval_ns
         assert mean_send_interval_ns <= actual_mean_interval_ns
+
+        assert actual_mean_interval_ns <= max_send_or_throttle_interval * 1.15
 
         self.idx = -1
 
