@@ -116,6 +116,13 @@ class RequestItem:
 
     req_id: int = 0
     create_time_ns: float = 0.0  # also the start time
+    expected_create_time_ns: float = 0.0
+    expected_create_interval_ns: float = 0.0
+    actual_create_interval_ns: float = 0.0
+    create_interval_diff_ns: float = 0.0
+
+    pause_time_ns: float = 0.0
+
     throttle_mode: Mode = Mode.SYNC
 
     # send_interval set by sender when sending request
@@ -146,20 +153,6 @@ class RequestItem:
 
     actual_delay_ns: float = 0.0
     expected_delay_ns: float = 0.0
-
-
-########################################################################
-# RequestThreadItem used to track requests in a thread
-########################################################################
-@dataclass
-class RequestThreadItem:
-    """RequestThreadItem class to track requests for a thread."""
-
-    thread_item: threading.Thread
-    thread_item_idx: int = 0
-    thread_create_time_ns: float = 0.0
-    num_reqs: int = 0
-    send_intervals: list[float | int] = field(default_factory=list)
 
 
 req_style_map: dict[RequestStyle, tuple[str, str, str]] = {
@@ -1006,6 +999,7 @@ class TestThrottle:
             )
 
             if s_interval > 0.0:
+                request_item.pause_time_ns = s_interval * SECS_2_NS
                 pauser.pause(s_interval)
             request_item.send_time_ns = perf_counter_ns()
             request_validator.request_deque.appendleft(request_item)
@@ -2115,6 +2109,17 @@ class RequestValidator:
         mean_pauser_interval_ns = sum(pauser_intervals_ns) / self.total_requests
         print(f"{mean_pauser_interval_ns=:.4f}")
 
+        send_arrival_intervals_ns = [
+            self.request_items[idx].throttle_arrival_time_ns
+            - self.request_items[idx].send_time_ns
+            for idx in range(len(self.request_items))
+        ]
+
+        mean_send_arrival_interval_ns = (
+            sum(send_arrival_intervals_ns) / self.total_requests
+        )
+        print(f"{mean_send_arrival_interval_ns=:.4f}")
+
         last_func_arrival_time_ns = self.request_items[-1].actual_func_arrival_time_ns
         actual_mean_interval_ns = (last_func_arrival_time_ns - first_send_time) / (
             self.total_requests
@@ -2125,7 +2130,8 @@ class RequestValidator:
             sum(self.send_intervals) / self.total_requests
         ) * SECS_2_NS
         print(f"{mean_send_interval_ns=:.4f}")
-        print(f"{mean_pauser_interval_ns / mean_send_interval_ns=:.4f}")
+        if mean_send_interval_ns > 0:
+            print(f"{mean_pauser_interval_ns / mean_send_interval_ns=:.4f}")
 
         print(f"{pauser_intervals_ns=}")
         print(f"{self.send_intervals=}")
@@ -2140,9 +2146,11 @@ class RequestValidator:
         )
         print(f"{actual_mean_interval_ns/max_send_or_throttle_interval=:.4f}")
 
-        print("Interval Times:\n")
+        flowers("Interval Times")
+        # print("Interval Times:\n")
         print(
-            "\nreq_ID | arrival idx |    send | t arrival | exp arrival | "
+            "\nreq_ID |     exp_create |     act_create |     create_diff |    send | t arrival "
+            "| exp arrival | "
             "act arrival | exp delay | act delay |        diff ratio |",
         )
 
@@ -2165,7 +2173,9 @@ class RequestValidator:
             ) * NS_2_SECS
             print(
                 f"    {req_item.req_id:2} "
-                f"|          {req_item.arrival_idx:2} "
+                f"|          {req_item.expected_create_interval_ns:7.4f} "
+                f"|          {req_item.actual_create_interval_ns:7.4f} "
+                f"|          {req_item.create_interval_diff_ns:7.4f} "
                 f"| {(req_item.send_time_ns - first_send_time) * NS_2_SECS:7.4f} "
                 f"|   {line4_val:7.4f} "
                 f"|     {line5_val:7.4f} "
@@ -2201,6 +2211,10 @@ class RequestValidator:
         # Calculate the interval between request send and exit receive
         # as observed by the requestor.
 
+        self.request_items[0].expected_create_time_ns = self.request_items[
+            0
+        ].create_time_ns
+
         self.request_items[0].expected_delay_ns = 0
 
         self.request_items[0].expected_func_arrival_time_ns = self.request_items[
@@ -2232,6 +2246,27 @@ class RequestValidator:
                 amount_in_bucket_ns += self.target_interval_ns
 
             self.request_items[idx].expected_delay_ns = exp_delay_ns
+
+            self.request_items[idx].expected_create_time_ns = (
+                self.request_items[idx - 1].expected_create_time_ns
+                + self.request_items[idx - 1].pause_time_ns
+                + self.request_items[idx - 1].expected_delay_ns
+            )
+
+            self.request_items[idx].expected_create_interval_ns = (
+                self.request_items[idx].expected_create_time_ns
+                - self.request_items[idx - 1].expected_create_time_ns
+            )
+
+            self.request_items[idx].actual_create_interval_ns = (
+                self.request_items[idx].create_time_ns
+                - self.request_items[idx - 1].create_time_ns
+            )
+
+            self.request_items[idx].create_interval_diff_ns = (
+                self.request_items[idx].actual_create_interval_ns
+                - self.request_items[idx].expected_create_interval_ns
+            )
 
             self.request_items[idx].expected_func_arrival_time_ns = (
                 self.request_items[idx].throttle_arrival_time_ns
@@ -2806,123 +2841,3 @@ class TestThrottleDocstrings:
         captured = capsys.readouterr().out
 
         assert captured == expected_result
-
-    ####################################################################
-    # test_throttle_example_7
-    ####################################################################
-    @staticmethod
-    def test_throttle_example_7() -> None:
-        """Method test_throttle_example_7."""
-        hdr_str = ":Example 7: get length for an asynchronous throttle"
-        flowers(hdr_str)
-
-        from scottbrian_throttle.throttle import throttle
-
-        class Funky:
-            def __init__(self, a_var: int) -> None:
-                self.funky_var = a_var
-
-            @throttle(reqs_per_sec=2)
-            def func7a(self) -> None:
-                self.funky_var += 1
-
-            @throttle(reqs_per_sec=3)
-            def func7b(self) -> None:
-                self.funky_var += 10
-
-        funky1 = Funky(a_var=2)
-        funky2 = Funky(a_var=102)
-
-        funky1.func7a()
-
-        funky1.func7b()
-        funky1.func7b()
-
-        funky2.func7a()
-        funky2.func7a()
-        funky2.func7a()
-
-        funky2.func7b()
-        funky2.func7b()
-        funky2.func7b()
-        funky2.func7b()
-
-        print(
-            f"\n{funky1.func7a.throttle.reqs_per_sec=},"
-            f" {funky1.func7a.throttle.call_count=}, "
-            f"{funky1.funky_var=}, {id(funky1.func7a.throttle)=}\n",
-        )
-        print(
-            f"\n{funky1.func7b.throttle.reqs_per_sec=},"
-            f" {funky1.func7b.throttle.call_count=},"
-            f" {funky1.funky_var=}, {id(funky1.func7b.throttle)=}\n",
-        )
-
-        print(
-            f"\n{funky2.func7a.throttle.reqs_per_sec=},"
-            f" {funky2.func7a.throttle.call_count=}, "
-            f"{funky2.funky_var=}, {id(funky2.func7a.throttle)=}\n",
-        )
-        print(
-            f"\n{funky2.func7b.throttle.reqs_per_sec=},"
-            f" {funky2.func7b.throttle.call_count=}, "
-            f"{funky2.funky_var=}, {id(funky2.func7b.throttle)=}\n",
-        )
-
-    ####################################################################
-    # test_throttle_example_8
-    ####################################################################
-    @staticmethod
-    def test_throttle_example_8() -> None:
-        """Method test_throttle_example_8."""
-        hdr_str = ":Example 7: get length for an asynchronous throttle"
-        flowers(hdr_str)
-
-        from scottbrian_throttle.throttle import throttle
-
-        class Funky:
-            def __init__(self, a_var: int) -> None:
-                self.funky_var = a_var
-
-            @throttle
-            @staticmethod
-            def func7a() -> None:
-                pass
-
-            @throttle
-            @classmethod
-            def func7b(cls) -> None:
-                pass
-
-        funky1 = Funky(a_var=2)
-        funky2 = Funky(a_var=102)
-
-        funky1.func7a()
-
-        Funky.func7b()
-
-        funky2.func7a()
-        funky2.func7a()
-        funky2.func7a()
-
-        print(
-            f"\n{funky1.func7a.throttle.reqs_per_sec=},"
-            f" {funky1.func7a.throttle.call_count=}, "
-            f"{funky1.funky_var=}, {id(funky1.func7a.throttle)=}\n",
-        )
-        print(
-            f"\n{funky1.func7b.throttle.reqs_per_sec=},"
-            f" {funky1.func7b.throttle.call_count=},"
-            f" {funky1.funky_var=}, {id(funky1.func7b.throttle)=}\n",
-        )
-
-        print(
-            f"\n{funky2.func7a.throttle.reqs_per_sec=},"
-            f" {funky2.func7a.throttle.call_count=}, "
-            f"{funky2.funky_var=}, {id(funky2.func7a.throttle)=}\n",
-        )
-        print(
-            f"\n{funky2.func7b.throttle.reqs_per_sec=},"
-            f" {funky2.func7b.throttle.call_count=}, "
-            f"{funky2.funky_var=}, {id(funky2.func7b.throttle)=}\n",
-        )

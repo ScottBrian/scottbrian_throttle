@@ -139,7 +139,6 @@ class Throttle:
         "_wait_time_ns",
         "async_lock",
         "bucket_size",
-        "call_count",
         "convert_to_async",
         "lb_adjustment_ns",
         "lb_with_one_request",
@@ -240,8 +239,6 @@ class Throttle:
 
         # adjust _next_target_time_ns for normal or lb algo
         self._next_target_time_ns = time.perf_counter_ns() - self.lb_adjustment_ns
-
-        self.call_count = 0
 
     ####################################################################
     # repr
@@ -373,12 +370,7 @@ class Throttle:
               The return value from the request function which may be
               any value or None.
 
-        Raises:
-            Exception: An exception occurred in the request target. It
-                will be logged and re-raised.
-
         """
-        self.call_count += 1
         ############################################################
         # SYNC mode
         ############################################################
@@ -461,12 +453,7 @@ class Throttle:
               The return value from the request function which may be
               any value or None.
 
-        Raises:
-            Exception: An exception occurred in the request target. It
-                will be logged and re-raised.
-
         """
-        self.call_count += 1
         ############################################################
         # ASYNC mode
         ############################################################
