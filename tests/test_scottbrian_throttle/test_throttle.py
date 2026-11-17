@@ -120,8 +120,10 @@ class RequestItem:
     expected_create_interval_ns: float = 0.0
     actual_create_interval_ns: float = 0.0
     create_interval_diff_ns: float = 0.0
+    create_interval_diff_pct: float = 0.0
 
     pause_time_ns: float = 0.0
+    expected_total_delay_ns: float = 0.0
 
     throttle_mode: Mode = Mode.SYNC
 
@@ -1051,7 +1053,7 @@ class TestThrottle:
             request_item.return_time_ns = perf_counter_ns()
 
     ####################################################################
-    # make_multi_reqs
+    # async_make_multi_reqs
     ####################################################################
     @staticmethod
     async def async_make_multi_reqs(
@@ -2149,18 +2151,28 @@ class RequestValidator:
         flowers("Interval Times")
         # print("Interval Times:\n")
         print(
-            "\nreq_ID |     exp_create |     act_create |     create_diff |    send | t arrival "
+            "\nreq_ID |  exp_create |  act_create | diff_% |    send | t arrival "
             "| exp arrival | "
             "act arrival | exp delay | act delay |        diff ratio |",
         )
 
+        total_expected_delay_ns: float = 0.0
+
         for req_item in self.request_items:
+            total_expected_delay_ns += req_item.expected_total_delay_ns
             extra_time = 0.0
             if req_item.expected_delay_ns <= 0.0:
                 extra_time = self.target_interval_ns
             expected_actual_diff_ratio = (
                 req_item.actual_delay_ns - req_item.expected_delay_ns
             ) / (req_item.expected_delay_ns + extra_time)
+
+            exp_create_time_interval_sec = (
+                req_item.expected_create_interval_ns * NS_2_SECS
+            )
+            act_create_time_interval_sec = (
+                req_item.actual_create_interval_ns * NS_2_SECS
+            )
 
             line4_val = (
                 req_item.throttle_arrival_time_ns - first_send_time
@@ -2173,9 +2185,9 @@ class RequestValidator:
             ) * NS_2_SECS
             print(
                 f"    {req_item.req_id:2} "
-                f"|          {req_item.expected_create_interval_ns:7.4f} "
-                f"|          {req_item.actual_create_interval_ns:7.4f} "
-                f"|          {req_item.create_interval_diff_ns:7.4f} "
+                f"|    {exp_create_time_interval_sec:2.6f} "
+                f"|    {act_create_time_interval_sec:2.6f} "
+                f"|  {req_item.create_interval_diff_pct:5.2f} "
                 f"| {(req_item.send_time_ns - first_send_time) * NS_2_SECS:7.4f} "
                 f"|   {line4_val:7.4f} "
                 f"|     {line5_val:7.4f} "
@@ -2184,6 +2196,22 @@ class RequestValidator:
                 f"|   {req_item.actual_delay_ns * NS_2_SECS:7.4f} "
                 f"|    {expected_actual_diff_ratio * NS_2_SECS:7.12f} |",
             )
+
+        print(f"{total_expected_delay_ns=}")
+        total_actual_delay_ns = (
+            self.request_items[-1].return_time_ns - self.request_items[0].create_time_ns
+        )
+        print(f"{total_actual_delay_ns=}")
+        ratio_total_act_vs_exp_delay = total_actual_delay_ns / total_expected_delay_ns
+        print(f"{ratio_total_act_vs_exp_delay=}")
+
+        last_exp_create_time_sec = (
+            self.request_items[-1].expected_create_time_ns * NS_2_SECS
+        )
+        last_act_create_time_sec = self.request_items[-1].create_time_ns * NS_2_SECS
+        print(f"{last_exp_create_time_sec=:7.4f}")
+        print(f"{last_act_create_time_sec=:7.4f}")
+        print(f"{last_act_create_time_sec/last_exp_create_time_sec=:7.4f}")
 
         print(f"{self.cumulative_expected_delay_ns=}")
         print(f"{self.cumulative_actual_delay_ns=}")
@@ -2247,6 +2275,10 @@ class RequestValidator:
 
             self.request_items[idx].expected_delay_ns = exp_delay_ns
 
+            self.request_items[idx].expected_total_delay_ns = (
+                self.request_items[idx].pause_time_ns + exp_delay_ns
+            )
+
             self.request_items[idx].expected_create_time_ns = (
                 self.request_items[idx - 1].expected_create_time_ns
                 + self.request_items[idx - 1].pause_time_ns
@@ -2267,6 +2299,25 @@ class RequestValidator:
                 self.request_items[idx].actual_create_interval_ns
                 - self.request_items[idx].expected_create_interval_ns
             )
+
+            exp_create_interval_ns = self.request_items[idx].expected_create_interval_ns
+            if exp_create_interval_ns == 0:
+                self.request_items[
+                    idx
+                ].create_interval_diff_pct = 99  # avoid dev by zero
+            else:
+                self.request_items[idx].create_interval_diff_pct = (
+                    self.request_items[idx].create_interval_diff_ns
+                    / exp_create_interval_ns
+                ) * 100
+
+            # print(
+            #     f"{idx=}, "
+            #     f"est: {self.request_items[idx].expected_create_interval_ns}, "
+            #     f"act: {self.request_items[idx].actual_create_interval_ns}, "
+            #     f"diff_ns: {self.request_items[idx].create_interval_diff_ns} "
+            #     f"pct: {self.request_items[idx].create_interval_diff_pct}"
+            # )
 
             self.request_items[idx].expected_func_arrival_time_ns = (
                 self.request_items[idx].throttle_arrival_time_ns
@@ -2292,6 +2343,22 @@ class RequestValidator:
             self.cumulative_throttle_wait_time_ns += self.request_items[
                 idx
             ].throttle_wait_time_ns
+
+        # last_req_exp_create_time_ns = self.request_items[-1].expected_create_time_ns
+        # last_req_act_create_time_ns = self.request_items[-1].create_time_ns
+        #
+        # total_create_time_diff_ns = (
+        #     last_req_act_create_time_ns - last_req_exp_create_time_ns
+        # )
+        #
+        # if total_create_time_diff_ns == 0:
+        #     total_create_time_diff_ns = 1  # avoid div by zero
+        #
+        # for idx in range(len(self.request_items)):
+        #     self.request_items[idx].create_interval_diff_pct = (
+        #         self.request_items[idx].create_interval_diff_ns
+        #         / total_create_time_diff_ns
+        #     ) * 100
 
     ####################################################################
     # request0c
