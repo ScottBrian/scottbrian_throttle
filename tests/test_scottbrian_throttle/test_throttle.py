@@ -2197,21 +2197,22 @@ class RequestValidator:
                 f"|    {expected_actual_diff_ratio * NS_2_SECS:7.12f} |",
             )
 
-        print(f"{total_expected_delay_ns=}")
+        total_expected_delay_sec = total_expected_delay_ns * NS_2_SECS
+        print(f"{total_expected_delay_sec=:0.6f}")
         total_actual_delay_ns = (
             self.request_items[-1].return_time_ns - self.request_items[0].create_time_ns
         )
-        print(f"{total_actual_delay_ns=}")
+        total_actual_delay_sec = total_actual_delay_ns * NS_2_SECS
+        print(f"{total_actual_delay_sec=:0.6f}")
         ratio_total_act_vs_exp_delay = total_actual_delay_ns / total_expected_delay_ns
-        print(f"{ratio_total_act_vs_exp_delay=}")
+        print(f"{ratio_total_act_vs_exp_delay=:0.6f}")
+
+        assert ratio_total_act_vs_exp_delay <= 1.05
 
         last_exp_create_time_sec = (
             self.request_items[-1].expected_create_time_ns * NS_2_SECS
         )
         last_act_create_time_sec = self.request_items[-1].create_time_ns * NS_2_SECS
-        print(f"{last_exp_create_time_sec=:7.4f}")
-        print(f"{last_act_create_time_sec=:7.4f}")
-        print(f"{last_act_create_time_sec/last_exp_create_time_sec=:7.4f}")
 
         print(f"{self.cumulative_expected_delay_ns=}")
         print(f"{self.cumulative_actual_delay_ns=}")
@@ -2227,7 +2228,7 @@ class RequestValidator:
         assert mean_min_throttle_interval_ns <= actual_mean_interval_ns
         assert mean_send_interval_ns <= actual_mean_interval_ns
 
-        assert actual_mean_interval_ns <= max_send_or_throttle_interval * 1.15
+        # assert actual_mean_interval_ns <= max_send_or_throttle_interval * 1.15
 
         self.idx = -1
 
