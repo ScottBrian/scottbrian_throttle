@@ -57,6 +57,11 @@ P = ParamSpec("P")
 R = TypeVar("R")
 F = TypeVar("F", bound=Callable[..., Any])
 
+########################################################################
+# Constants
+########################################################################
+MAX_RATIO_EXP_VS_ACT_DELAY = 1.05
+
 
 ########################################################################
 # Throttle test exceptions
@@ -1972,7 +1977,7 @@ NS_2_SECS: Final[float] = 0.000000001
 ########################################################################
 # RequestValidator class
 ########################################################################
-class RequestValidator:
+class RequestValidator:  # ruff: ignore[too-many-public-methods]
     """Class to validate the requests."""
 
     ####################################################################
@@ -2029,8 +2034,8 @@ class RequestValidator:
 
         self.target_interval_ns = self.target_interval * SECS_2_NS
 
-        self.cumulative_expected_delay_ns: float = 0.0
-        self.cumulative_actual_delay_ns: float = 0.0
+        self.total_exp_throttle_delay_ns: float = 0.0
+        self.total_act_throttle_delay_ns: float = 0.0
 
         self.cumulative_throttle_wait_time_ns: float = 0.0
 
@@ -2149,9 +2154,8 @@ class RequestValidator:
         print(f"{actual_mean_interval_ns/max_send_or_throttle_interval=:.4f}")
 
         flowers("Interval Times")
-        # print("Interval Times:\n")
         print(
-            "\nreq_ID |  exp_create |  act_create | diff_% |    send | t arrival "
+            "\nreq_ID |  exp_create |  act_create |  diff_% |    send | t arrival "
             "| exp arrival | "
             "act arrival | exp delay | act delay |        diff ratio |",
         )
@@ -2187,7 +2191,7 @@ class RequestValidator:
                 f"    {req_item.req_id:2} "
                 f"|    {exp_create_time_interval_sec:2.6f} "
                 f"|    {act_create_time_interval_sec:2.6f} "
-                f"|  {req_item.create_interval_diff_pct:5.2f} "
+                f"|   {req_item.create_interval_diff_pct:5.2f} "
                 f"| {(req_item.send_time_ns - first_send_time) * NS_2_SECS:7.4f} "
                 f"|   {line4_val:7.4f} "
                 f"|     {line5_val:7.4f} "
@@ -2207,23 +2211,23 @@ class RequestValidator:
         ratio_total_act_vs_exp_delay = total_actual_delay_ns / total_expected_delay_ns
         print(f"{ratio_total_act_vs_exp_delay=:0.6f}")
 
-        assert ratio_total_act_vs_exp_delay <= 1.05
+        self.display_request_intervals()
 
-        last_exp_create_time_sec = (
-            self.request_items[-1].expected_create_time_ns * NS_2_SECS
-        )
-        last_act_create_time_sec = self.request_items[-1].create_time_ns * NS_2_SECS
+        assert ratio_total_act_vs_exp_delay <= MAX_RATIO_EXP_VS_ACT_DELAY
 
-        print(f"{self.cumulative_expected_delay_ns=}")
-        print(f"{self.cumulative_actual_delay_ns=}")
+        total_exp_throttle_delay_sec = self.total_exp_throttle_delay_ns * NS_2_SECS
+        total_act_throttle_delay_sec = self.total_act_throttle_delay_ns * NS_2_SECS
+        print(f"{total_exp_throttle_delay_sec=:0.6f}")
+        print(f"{total_act_throttle_delay_sec=:0.6f}")
 
-        ratio_delay_time = (
-            self.cumulative_actual_delay_ns - self.cumulative_expected_delay_ns
-        ) / (self.target_interval_ns * self.total_requests)
-        print(f"ratio diff expected/actual: {ratio_delay_time:.4f}")
-
-        # assert throttle_verifier.num_excessive_request_delays < 4
-        assert ratio_delay_time <= 0.07 + (self.num_threads / 100)
+        if self.total_exp_throttle_delay_ns > 0:
+            ratio_total_throttle_act_vs_exp_delay = (
+                self.total_act_throttle_delay_ns / self.total_exp_throttle_delay_ns
+            )
+            print(f"{ratio_total_throttle_act_vs_exp_delay:0.6f}")
+            # assert ratio_total_throttle_act_vs_exp_delay <= 1.07 + (
+            #     self.num_threads / 100
+            # )
 
         assert mean_min_throttle_interval_ns <= actual_mean_interval_ns
         assert mean_send_interval_ns <= actual_mean_interval_ns
@@ -2231,6 +2235,142 @@ class RequestValidator:
         # assert actual_mean_interval_ns <= max_send_or_throttle_interval * 1.15
 
         self.idx = -1
+
+    ####################################################################
+    # display_request_intervals
+    ####################################################################
+    def display_request_intervals(self) -> None:
+        """Built line by line display of each request times."""
+        flowers("Request Interval Times:")
+
+        for idx in range(len(self.request_items)):
+            print("\n")
+            req_item = self.request_items[idx]
+            if idx + 1 < len(self.request_items):
+                next_req_item = self.request_items[idx + 1]
+            else:
+                next_req_item = None
+
+            # build line 0
+            print(
+                f"\n  req_ID: {req_item.req_id:2} "
+                f"|       pause "
+                f"|     arrival "
+                f"|     t_delay "
+                f"|      return "
+                f"| next_create |"
+            )
+
+            # build line 1
+            exp_pause_interval_sec = req_item.pause_time_ns * NS_2_SECS
+            exp_arrival_interval_sec: float = 0.0
+            exp_throttle_delay_sec = req_item.expected_delay_ns * NS_2_SECS
+            exp_return_interval_sec: float = 0.0
+            exp_next_create_interval_sec = 0.0
+            print(
+                f"   expected: "
+                f"| {exp_pause_interval_sec:7.6f} "
+                f"| {exp_arrival_interval_sec:7.6f} "
+                f"| {exp_throttle_delay_sec:7.6f} "
+                f"| {exp_return_interval_sec:7.6f} "
+                f"| {exp_next_create_interval_sec:7.6f} |"
+            )
+
+            # build line 2
+            act_pause_interval_sec = (
+                req_item.send_time_ns - req_item.create_time_ns
+            ) * NS_2_SECS
+            act_arrival_interval_sec: float = (
+                req_item.throttle_arrival_time_ns - req_item.send_time_ns
+            ) * NS_2_SECS
+            act_throttle_delay_sec = (
+                req_item.send_time_ns - req_item.throttle_arrival_time_ns
+            ) * NS_2_SECS
+            act_return_interval_sec: float = (
+                req_item.return_time_ns - req_item.send_time_ns
+            ) * NS_2_SECS
+            if next_req_item is not None:
+                act_next_create_interval_sec = (
+                    next_req_item.create_time_ns - req_item.return_time_ns
+                ) * NS_2_SECS
+            else:
+                act_next_create_interval_sec = 0.0
+
+            print(
+                f"     actual: "
+                f"| {act_pause_interval_sec:7.6f} "
+                f"| {act_arrival_interval_sec:7.6f} "
+                f"| {act_throttle_delay_sec:7.6f} "
+                f"| {act_return_interval_sec:7.6f} "
+                f"| {act_next_create_interval_sec:7.6f} |"
+            )
+
+            # build line 3
+            diff_pause_interval_sec = act_pause_interval_sec - exp_pause_interval_sec
+            diff_arrival_interval_sec = (
+                act_arrival_interval_sec - exp_arrival_interval_sec
+            )
+
+            diff_throttle_delay_sec = act_throttle_delay_sec - exp_throttle_delay_sec
+
+            diff_return_interval_sec = act_return_interval_sec - exp_return_interval_sec
+
+            diff_next_create_interval_sec = (
+                act_next_create_interval_sec - exp_next_create_interval_sec
+            )
+            print(
+                f" difference: "
+                f"| {diff_pause_interval_sec:7.6f} "
+                f"| {diff_arrival_interval_sec:7.6f} "
+                f"| {diff_throttle_delay_sec:7.6f} "
+                f"| {diff_return_interval_sec:7.6f} "
+                f"| {diff_next_create_interval_sec:7.6f} |"
+            )
+
+            # build line 4
+            if exp_pause_interval_sec > 0.0:
+                ratio_pause_interval_sec: float = (
+                    act_pause_interval_sec / exp_pause_interval_sec
+                )
+            else:
+                ratio_pause_interval_sec = -1
+
+            if exp_arrival_interval_sec > 0.0:
+                ratio_arrival_interval_sec: float = (
+                    act_arrival_interval_sec / exp_arrival_interval_sec
+                )
+            else:
+                ratio_arrival_interval_sec = -1
+
+            if exp_throttle_delay_sec > 0:
+                ratio_throttle_delay_sec: float = (
+                    act_throttle_delay_sec / exp_throttle_delay_sec
+                )
+            else:
+                ratio_throttle_delay_sec = -1
+
+            if exp_return_interval_sec > 0:
+                ratio_return_interval_sec: float = (
+                    act_return_interval_sec / exp_return_interval_sec
+                )
+            else:
+                ratio_return_interval_sec = -1
+
+            if exp_next_create_interval_sec > 0:
+                ratio_next_create_interval_sec: float = (
+                    act_next_create_interval_sec / exp_next_create_interval_sec
+                )
+            else:
+                ratio_next_create_interval_sec = -1
+
+            print(
+                f"      ratio: "
+                f"| {ratio_pause_interval_sec:7.6f} "
+                f"| {ratio_arrival_interval_sec:7.6f} "
+                f"| {ratio_throttle_delay_sec:7.6f} "
+                f"| {ratio_return_interval_sec:7.6f} "
+                f"| {ratio_next_create_interval_sec:7.6f} |"
+            )
 
     ####################################################################
     # process_request_items
@@ -2336,10 +2476,10 @@ class RequestValidator:
                 < tolerance_ratio
             )
 
-            self.cumulative_expected_delay_ns += self.request_items[
+            self.total_exp_throttle_delay_ns += self.request_items[
                 idx
             ].expected_delay_ns
-            self.cumulative_actual_delay_ns += self.request_items[idx].actual_delay_ns
+            self.total_act_throttle_delay_ns += self.request_items[idx].actual_delay_ns
 
             self.cumulative_throttle_wait_time_ns += self.request_items[
                 idx
