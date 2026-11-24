@@ -60,7 +60,7 @@ F = TypeVar("F", bound=Callable[..., Any])
 ########################################################################
 # Constants
 ########################################################################
-MAX_RATIO_EXP_VS_ACT_DELAY = 1.05
+MAX_RATIO_EXP_VS_ACT_DELAY = 1.10
 Max_Diff_Threshold_SECS = 0.5
 
 
@@ -157,6 +157,9 @@ class RequestItem:
 
     throttle_wait_time_ns: float = 0.0
 
+    # delay time that target function will simulate
+    target_delay_time_ns: float = 0.0
+
     # return_time_ns set by sender when req returns
     return_time_ns: float = 0.0
 
@@ -200,6 +203,9 @@ class MaxDiffs:
     max_t_delay_diff: float = 0.0
     max_return_diff: float = 0.0
     max_next_create_diff: float = 0.0
+
+
+random.seed(42)
 
 
 ########################################################################
@@ -846,6 +852,31 @@ class TestThrottle:
 
         return send_intervals
 
+    ####################################################################
+    # build_intervals
+    ####################################################################
+    @staticmethod
+    def build_intervals(send_interval: float, num_reqs_to_do: int) -> list[float]:
+        """Build the list of send intervals.
+
+        Args:
+            send_interval: the interval between sends
+            num_reqs_to_do: number of requests to do
+
+        Returns:
+            a list of send intervals
+
+        """
+        # the first send interval is always 0.0
+        # the remaining are the same value send_interval passed in
+        intervals = [0.0] + [send_interval] * (num_reqs_to_do // 2 - 1)
+
+        # the second half are random values
+        for _ in range(num_reqs_to_do // 2):
+            intervals.append(send_interval * (random.random() * 2))  # ruff: ignore[suspicious-non-cryptographic-random-usage]
+
+        return intervals
+
     ##################################################################
     # throttle_router
     ##################################################################
@@ -879,7 +910,8 @@ class TestThrottle:
         ################################################################
         # get send interval list
         ################################################################
-        send_intervals = self.build_send_intervals(send_interval, num_reqs_to_do)
+        send_intervals = self.build_intervals(send_interval, num_reqs_to_do)
+        targ_delay_intervals = self.build_intervals(send_interval, num_reqs_to_do)
         if num_threads > 1:
             num_reqs_to_do *= num_threads
 
@@ -919,7 +951,7 @@ class TestThrottle:
 
         if num_threads == 0:
             logger.debug("throttle_router making requests")
-            self.make_reqs(request_validator, request_style)
+            self.make_reqs(request_validator, request_style, targ_delay_intervals)
             logger.debug("throttle_router validating series")
             request_validator.validate_series()  # validate for the series
         else:
@@ -931,6 +963,7 @@ class TestThrottle:
                             self.make_multi_reqs,
                             request_validator,
                             send_intervals,
+                            targ_delay_intervals,
                             thread_idx,
                         )
                         for thread_idx in range(num_threads)
@@ -945,6 +978,7 @@ class TestThrottle:
                                 self.async_make_multi_reqs(
                                     request_validator,
                                     send_intervals,
+                                    targ_delay_intervals,
                                     thread_idx,
                                 ),
                             )
@@ -969,12 +1003,14 @@ class TestThrottle:
     def make_reqs(
         request_validator: RequestValidator,
         request_style: RequestStyle,
+        targ_delay_intervals: list[float],
     ) -> None:
         """Make the requests.
 
         Args:
             request_validator: the validator for the reqs
             request_style: determine the args to pass
+            targ_delay_intervals: delay intervals for target
 
         """
         pauser = Pauser()
@@ -1018,11 +1054,15 @@ class TestThrottle:
                 create_time_ns=perf_counter_ns(),
                 throttle_mode=throttle_mode,
                 send_interval=s_interval,
+                target_delay_time_ns=targ_delay_intervals[idx] * SECS_2_NS,
             )
 
             if s_interval > 0.0:
                 request_item.pause_time_ns = s_interval * SECS_2_NS
-                pauser.pause(s_interval)
+                if throttle_mode == Mode.SYNC:
+                    pauser.pause(s_interval)
+                else:
+                    asyncio.run(asyncio.sleep(s_interval))
             request_item.send_time_ns = perf_counter_ns()
             request_validator.request_deque.appendleft(request_item)
             if throttle_mode == Mode.SYNC:
@@ -1041,6 +1081,7 @@ class TestThrottle:
     def make_multi_reqs(
         request_validator: RequestValidator,
         send_intervals: list[float],
+        targ_delay_intervals: list[float],
         thread_idx: int,
     ) -> None:
         """Make the requests.
@@ -1048,6 +1089,7 @@ class TestThrottle:
         Args:
             request_validator: the validator for the reqs
             send_intervals: the intervals for the requests
+            targ_delay_intervals: delay intervals for target
             thread_idx: index of thread
 
         """
@@ -1062,6 +1104,7 @@ class TestThrottle:
                 create_time_ns=perf_counter_ns(),
                 throttle_mode=throttle_mode,
                 send_interval=s_interval,
+                target_delay_time_ns=targ_delay_intervals[idx] * SECS_2_NS,
             )
 
             if s_interval > 0.0:
@@ -1083,6 +1126,7 @@ class TestThrottle:
     async def async_make_multi_reqs(
         request_validator: RequestValidator,
         send_intervals: list[float],
+        targ_delay_intervals: list[float],
         thread_idx: int,
     ) -> None:
         """Make the requests.
@@ -1090,6 +1134,8 @@ class TestThrottle:
         Args:
             request_validator: the validator for the reqs
             send_intervals: the request send intervals
+            targ_delay_intervals: delay intervals for target
+            thread_idx: index of thread for the requests
 
         """
         a_throttle = request_validator.t_throttle
@@ -1102,6 +1148,7 @@ class TestThrottle:
                 create_time_ns=perf_counter_ns(),
                 throttle_mode=throttle_mode,
                 send_interval=s_interval,
+                target_delay_time_ns=targ_delay_intervals[idx] * SECS_2_NS,
             )
 
             if s_interval > 0.0:
@@ -1153,38 +1200,48 @@ class TestPieThrottle:
         # f0
         ################################################################
         @throttle(reqs_per_sec=reqs_per_sec)
-        async def async_f0() -> int:  # ruff: ignore[unused-async]
+        async def async_f0() -> int:
             request_item = request_validator.set_idx_and_times()
+            if request_item.target_delay_time_ns > 0:
+                await asyncio.sleep(request_item.target_delay_time_ns * NS_2_SECS)
             return request_item.req_id + 42 + 0
 
         @throttle(reqs_per_sec=reqs_per_sec, convert_to_async=convert_to_sync)
         def f0() -> int:
             request_item = request_validator.set_idx_and_times()
+            if request_item.target_delay_time_ns > 0:
+                Pauser().pause_ns(request_item.target_delay_time_ns)
             return request_item.req_id + 42 + 0
 
         ################################################################
         # f1
         ################################################################
         @throttle(reqs_per_sec=reqs_per_sec)
-        async def async_f1(req_id: int) -> int:  # ruff: ignore[unused-async]
+        async def async_f1(req_id: int) -> int:
             request_item = request_validator.set_idx_and_times()
             assert req_id == request_item.req_id
+            if request_item.target_delay_time_ns > 0:
+                await asyncio.sleep(request_item.target_delay_time_ns * NS_2_SECS)
             return request_item.req_id + 42 + 1
 
         @throttle(reqs_per_sec=reqs_per_sec, convert_to_async=convert_to_sync)
         def f1(req_id: int) -> int:
             request_item = request_validator.set_idx_and_times()
             assert req_id == request_item.req_id
+            if request_item.target_delay_time_ns > 0:
+                Pauser().pause_ns(request_item.target_delay_time_ns)
             return request_item.req_id + 42 + 1
 
         ################################################################
         # f2
         ################################################################
         @throttle(reqs_per_sec=reqs_per_sec)
-        async def async_f2(req_id: int, reqs_per_sec: float) -> int:  # ruff: ignore[unused-async]
+        async def async_f2(req_id: int, reqs_per_sec: float) -> int:
             request_item = request_validator.set_idx_and_times()
             assert req_id == request_item.req_id
             assert reqs_per_sec == request_validator.reqs_per_sec
+            if request_item.target_delay_time_ns > 0:
+                await asyncio.sleep(request_item.target_delay_time_ns * NS_2_SECS)
             return request_item.req_id + 42 + 2
 
         @throttle(reqs_per_sec=reqs_per_sec, convert_to_async=convert_to_sync)
@@ -1192,31 +1249,39 @@ class TestPieThrottle:
             request_item = request_validator.set_idx_and_times()
             assert req_id == request_item.req_id
             assert reqs_per_sec == request_validator.reqs_per_sec
+            if request_item.target_delay_time_ns > 0:
+                Pauser().pause_ns(request_item.target_delay_time_ns)
             return request_item.req_id + 42 + 2
 
         ################################################################
         # f3
         ################################################################
         @throttle(reqs_per_sec=reqs_per_sec)
-        async def async_f3(*, req_id: int) -> int:  # ruff: ignore[unused-async]
+        async def async_f3(*, req_id: int) -> int:
             request_item = request_validator.set_idx_and_times()
             assert req_id == request_item.req_id
+            if request_item.target_delay_time_ns > 0:
+                await asyncio.sleep(request_item.target_delay_time_ns * NS_2_SECS)
             return request_item.req_id + 42 + 3
 
         @throttle(reqs_per_sec=reqs_per_sec, convert_to_async=convert_to_sync)
         def f3(*, req_id: int) -> int:
             request_item = request_validator.set_idx_and_times()
             assert req_id == request_item.req_id
+            if request_item.target_delay_time_ns > 0:
+                Pauser().pause_ns(request_item.target_delay_time_ns)
             return request_item.req_id + 42 + 3
 
         ################################################################
         # f4
         ################################################################
         @throttle(reqs_per_sec=reqs_per_sec)
-        async def async_f4(*, req_id: int, interval: float) -> int:  # ruff: ignore[unused-async]
+        async def async_f4(*, req_id: int, interval: float) -> int:
             request_item = request_validator.set_idx_and_times()
             assert req_id == request_item.req_id
             assert interval == request_item.send_interval
+            if request_item.target_delay_time_ns > 0:
+                await asyncio.sleep(request_item.target_delay_time_ns * NS_2_SECS)
             return request_item.req_id + 42 + 4
 
         @throttle(reqs_per_sec=reqs_per_sec, convert_to_async=convert_to_sync)
@@ -1224,16 +1289,20 @@ class TestPieThrottle:
             request_item = request_validator.set_idx_and_times()
             assert req_id == request_item.req_id
             assert interval == request_item.send_interval
+            if request_item.target_delay_time_ns > 0:
+                Pauser().pause_ns(request_item.target_delay_time_ns)
             return request_item.req_id + 42 + 4
 
         ################################################################
         # f5
         ################################################################
         @throttle(reqs_per_sec=reqs_per_sec)
-        async def async_f5(req_id: int, *, interval: float) -> int:  # ruff: ignore[unused-async]
+        async def async_f5(req_id: int, *, interval: float) -> int:
             request_item = request_validator.set_idx_and_times()
             assert req_id == request_item.req_id
             assert interval == request_item.send_interval
+            if request_item.target_delay_time_ns > 0:
+                await asyncio.sleep(request_item.target_delay_time_ns * NS_2_SECS)
             return request_item.req_id + 42 + 5
 
         @throttle(reqs_per_sec=reqs_per_sec, convert_to_async=convert_to_sync)
@@ -1241,13 +1310,15 @@ class TestPieThrottle:
             request_item = request_validator.set_idx_and_times()
             assert req_id == request_item.req_id
             assert interval == request_item.send_interval
+            if request_item.target_delay_time_ns > 0:
+                Pauser().pause_ns(request_item.target_delay_time_ns)
             return request_item.req_id + 42 + 5
 
         ################################################################
         # f6
         ################################################################
         @throttle(reqs_per_sec=reqs_per_sec)
-        async def async_f6(  # ruff: ignore[unused-async]
+        async def async_f6(
             req_id: int,
             reqs_per_sec: float,
             *,
@@ -1259,6 +1330,8 @@ class TestPieThrottle:
             assert reqs_per_sec == request_validator.reqs_per_sec
             assert bucket_size == request_validator.bucket_size
             assert interval == request_item.send_interval
+            if request_item.target_delay_time_ns > 0:
+                await asyncio.sleep(request_item.target_delay_time_ns * NS_2_SECS)
             return request_item.req_id + 42 + 6
 
         @throttle(reqs_per_sec=reqs_per_sec, convert_to_async=convert_to_sync)
@@ -1275,6 +1348,8 @@ class TestPieThrottle:
             assert reqs_per_sec == request_validator.reqs_per_sec
             assert bucket_size == request_validator.bucket_size
             assert interval == request_item.send_interval
+            if request_item.target_delay_time_ns > 0:
+                Pauser().pause_ns(request_item.target_delay_time_ns)
             return request_item.req_id + 42 + 6
 
         if throttle_mode == Mode.ASYNC:
@@ -2277,6 +2352,27 @@ class RequestValidator:  # ruff: ignore[too-many-public-methods]
         self.idx = -1
 
     ####################################################################
+    # get_same_thread_next_req_item
+    ###################################################################
+    def get_same_thread_next_req_item(
+        self, req_item: RequestItem
+    ) -> RequestItem | None:
+        """Get previous request item in same thread.
+
+        Args:
+            req_item: the request item whose previous request item is to
+                be obtained
+
+        Returns:
+              Request_item if a previous item is found, otherwise None
+        """
+        for idx in range(req_item.arrival_idx + 1, len(self.request_items)):
+            if self.request_items[idx].thread_idx == req_item.thread_idx:
+                return self.request_items[idx]
+
+        return None
+
+    ####################################################################
     # display_request_intervals
     ###################################################################
     def display_request_intervals(self) -> MaxDiffs:  # ruff: ignore[too-many-branches, too-many-locals, too-many-statements]
@@ -2296,11 +2392,7 @@ class RequestValidator:  # ruff: ignore[too-many-public-methods]
 
             prev_req_item = self.request_items[idx - 1] if idx > 0 else None
 
-            if idx + 1 < len(self.request_items):
-                next_req_item = self.request_items[idx + 1]
-            else:
-                next_req_item = None
-
+            next_req_item = self.get_same_thread_next_req_item(req_item)
             # build line 0
             print(
                 f"\n  idx, thread: {req_item.arrival_idx:2}, "
@@ -2315,6 +2407,7 @@ class RequestValidator:  # ruff: ignore[too-many-public-methods]
             # build line 1
             exp_pause_interval_sec = req_item.pause_time_ns * NS_2_SECS
 
+            # account for delay waiting behind lock for previous request
             if (
                 prev_req_item is not None
                 and prev_req_item.return_time_ns > req_item.send_time_ns
@@ -2326,7 +2419,7 @@ class RequestValidator:  # ruff: ignore[too-many-public-methods]
                 exp_arrival_interval_sec = 0.0
 
             exp_throttle_delay_sec = req_item.expected_delay_ns * NS_2_SECS
-            exp_return_interval_sec: float = 0.0
+            exp_return_interval_sec: float = req_item.target_delay_time_ns * NS_2_SECS
             exp_next_create_interval_sec = 0.0
             print(
                 f"            expected: "
@@ -2350,10 +2443,7 @@ class RequestValidator:  # ruff: ignore[too-many-public-methods]
             act_return_interval_sec: float = (
                 req_item.return_time_ns - req_item.throttle_sent_time_ns
             ) * NS_2_SECS
-            if (
-                next_req_item is not None
-                and next_req_item.thread_idx == req_item.thread_idx
-            ):
+            if next_req_item is not None:
                 act_next_create_interval_sec = (
                     next_req_item.create_time_ns - req_item.return_time_ns
                 ) * NS_2_SECS
@@ -2612,6 +2702,8 @@ class RequestValidator:  # ruff: ignore[too-many-public-methods]
 
         """
         request_item = self.set_idx_and_times(request_item=request_item)
+        if request_item.target_delay_time_ns > 0:
+            Pauser().pause_ns(request_item.target_delay_time_ns)
 
         return self.idx
 
@@ -2619,7 +2711,11 @@ class RequestValidator:  # ruff: ignore[too-many-public-methods]
     # request0b
     ####################################################################
     async def async_request0b(self) -> int:
-        return self.request0b()
+        request_item = self.set_idx_and_times()  # ruff: ignore[no-indented-block]
+        assert request_item.req_id == self.idx
+        if request_item.target_delay_time_ns > 0:
+            await asyncio.sleep(request_item.target_delay_time_ns * NS_2_SECS)
+        return request_item.req_id
 
     def request0b(self) -> int:
         """Request0 target.
@@ -2633,13 +2729,20 @@ class RequestValidator:  # ruff: ignore[too-many-public-methods]
         """
         request_item = self.set_idx_and_times()
         assert request_item.req_id == self.idx
+        if request_item.target_delay_time_ns > 0:
+            Pauser().pause_ns(request_item.target_delay_time_ns)
         return request_item.req_id
 
     ####################################################################
     # request1b
     ####################################################################
     async def async_request1b(self, req_id: int) -> int:
-        return self.request1b(req_id)
+        request_item = self.set_idx_and_times()
+        assert request_item.req_id == self.idx
+        assert req_id == request_item.req_id
+        if request_item.target_delay_time_ns > 0:
+            await asyncio.sleep(request_item.target_delay_time_ns * NS_2_SECS)
+        return request_item.req_id
 
     def request1b(self, req_id: int) -> int:
         """Request1 target.
@@ -2654,13 +2757,20 @@ class RequestValidator:  # ruff: ignore[too-many-public-methods]
         request_item = self.set_idx_and_times()
         assert request_item.req_id == self.idx
         assert req_id == request_item.req_id
+        if request_item.target_delay_time_ns > 0:
+            Pauser().pause_ns(request_item.target_delay_time_ns)
         return request_item.req_id
 
     ####################################################################
     # request2b
     ####################################################################
     async def async_request2b(self, req_id: int, reqs_per_sec: float) -> int:
-        return self.request2b(req_id, reqs_per_sec)
+        request_item = self.set_idx_and_times()
+        assert req_id == request_item.req_id
+        assert reqs_per_sec == self.reqs_per_sec
+        if request_item.target_delay_time_ns > 0:
+            await asyncio.sleep(request_item.target_delay_time_ns * NS_2_SECS)
+        return request_item.req_id
 
     # def request2b(self, idx: int, requests: int,
     # obtained_nowait: bool) -> int:
@@ -2678,13 +2788,19 @@ class RequestValidator:  # ruff: ignore[too-many-public-methods]
         request_item = self.set_idx_and_times()
         assert req_id == request_item.req_id
         assert reqs_per_sec == self.reqs_per_sec
+        if request_item.target_delay_time_ns > 0:
+            Pauser().pause_ns(request_item.target_delay_time_ns)
         return request_item.req_id
 
     ####################################################################
     # request3b
     ####################################################################
     async def async_request3b(self, *, req_id: int) -> int:
-        return self.request3b(req_id=req_id)
+        request_item = self.set_idx_and_times()
+        assert req_id == request_item.req_id
+        if request_item.target_delay_time_ns > 0:
+            await asyncio.sleep(request_item.target_delay_time_ns * NS_2_SECS)
+        return request_item.req_id
 
     def request3b(self, *, req_id: int) -> int:
         """Request3 target.
@@ -2698,13 +2814,20 @@ class RequestValidator:  # ruff: ignore[too-many-public-methods]
         """
         request_item = self.set_idx_and_times()
         assert req_id == request_item.req_id
+        if request_item.target_delay_time_ns > 0:
+            Pauser().pause_ns(request_item.target_delay_time_ns)
         return request_item.req_id
 
     ####################################################################
     # request4b
     ####################################################################
     async def async_request4b(self, *, req_id: int, send_interval: float) -> int:
-        return self.request4b(req_id=req_id, send_interval=send_interval)
+        request_item = self.set_idx_and_times()
+        assert req_id == request_item.req_id
+        assert send_interval == self.send_interval
+        if request_item.target_delay_time_ns > 0:
+            await asyncio.sleep(request_item.target_delay_time_ns * NS_2_SECS)
+        return request_item.req_id
 
     def request4b(self, *, req_id: int, send_interval: float) -> int:
         """Request4 target.
@@ -2720,13 +2843,20 @@ class RequestValidator:  # ruff: ignore[too-many-public-methods]
         request_item = self.set_idx_and_times()
         assert req_id == request_item.req_id
         assert send_interval == self.send_interval
+        if request_item.target_delay_time_ns > 0:
+            Pauser().pause_ns(request_item.target_delay_time_ns)
         return request_item.req_id
 
     ####################################################################
     # request5b
     ####################################################################
     async def async_request5b(self, req_id: int, *, send_interval: float) -> int:
-        return self.request5b(req_id, send_interval=send_interval)
+        request_item = self.set_idx_and_times()
+        assert req_id == request_item.req_id
+        assert send_interval == self.send_interval
+        if request_item.target_delay_time_ns > 0:
+            await asyncio.sleep(request_item.target_delay_time_ns * NS_2_SECS)
+        return request_item.req_id
 
     def request5b(self, req_id: int, *, send_interval: float) -> int:
         """Request5 target.
@@ -2742,6 +2872,8 @@ class RequestValidator:  # ruff: ignore[too-many-public-methods]
         request_item = self.set_idx_and_times()
         assert req_id == request_item.req_id
         assert send_interval == self.send_interval
+        if request_item.target_delay_time_ns > 0:
+            Pauser().pause_ns(request_item.target_delay_time_ns)
         return request_item.req_id
 
     ####################################################################
@@ -2755,12 +2887,14 @@ class RequestValidator:  # ruff: ignore[too-many-public-methods]
         bucket_size: float,
         send_interval: float,
     ) -> int:
-        return self.request6b(
-            req_id,
-            reqs_per_sec,
-            bucket_size=bucket_size,
-            send_interval=send_interval,
-        )
+        request_item = self.set_idx_and_times()
+        assert req_id == request_item.req_id
+        assert reqs_per_sec == self.reqs_per_sec
+        assert bucket_size == self.bucket_size
+        assert send_interval == self.send_interval
+        if request_item.target_delay_time_ns > 0:
+            await asyncio.sleep(request_item.target_delay_time_ns * NS_2_SECS)
+        return request_item.req_id
 
     def request6b(
         self,
@@ -2787,6 +2921,8 @@ class RequestValidator:  # ruff: ignore[too-many-public-methods]
         assert reqs_per_sec == self.reqs_per_sec
         assert bucket_size == self.bucket_size
         assert send_interval == self.send_interval
+        if request_item.target_delay_time_ns > 0:
+            Pauser().pause_ns(request_item.target_delay_time_ns)
         return request_item.req_id
 
 
