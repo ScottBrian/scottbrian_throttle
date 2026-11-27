@@ -113,6 +113,18 @@ class ReqTime:
     arrival_time: float = 0.0
 
 
+@dataclass
+class ExpectedAndActualTimes:
+    """ExpectedAndActualTimes used to track times and intervals."""
+
+    expected_time_ns: float = 0.0
+    actual_time_ns: float = 0.0
+    expected_interval_ns: float = 0.0
+    actual_interval_ns: float = 0.0
+    interval_diff_ns: float = 0.0
+    interval_diff_pct: float = 0.0
+
+
 ########################################################################
 # RequestItem data class used to track requests
 ########################################################################
@@ -129,17 +141,47 @@ class RequestItem:
     # thread_idx identifies the thread where the request is run
     thread_idx: int = 0
 
-    # create time is the start of a request before any pause
-    expected_create_time_ns: float = 0.0
-    actual_create_time_ns: float = 0.0
+    # delays
+    expected_pause_delay_ns: float = 0.0
+    actual_pause_delay_ns: float = 0.0
 
-    expected_create_interval_ns: float = 0.0
+    expected_lock_delay_ns: float = 0.0
+    actual_lock_delay_ns: float = 0.0
 
-    actual_create_interval_ns: float = 0.0
-    create_interval_diff_ns: float = 0.0
-    create_interval_diff_pct: float = 0.0
+    expected_throttle_delay_ns: float = 0.0
+    actual_throttle_delay_ns: float = 0.0
 
-    pause_time_ns: float = 0.0
+    expected_target_delay_ns: float = 0.0
+    actual_target_delay_ns: float = 0.0
+
+    expected_create_delay_ns: float = 0.0
+    actual_create_delay_ns: float = 0.0
+
+    # create time is the start of a request before any pause. The
+    # create interval is the time from the previous request return time
+    # to this request create time
+    create_times: ExpectedAndActualTimes = field(default_factory=ExpectedAndActualTimes)
+
+    # start time is when the request is invoked which then calls the
+    # throttle. The start interval is the interval from create to start
+    # which includes the pause delay for a pause greater than zero
+    start_times: ExpectedAndActualTimes = field(default_factory=ExpectedAndActualTimes)
+
+    # throttle_arrival time is when the lock has been obtained
+    throttle_arrival_times: ExpectedAndActualTimes = field(
+        default_factory=ExpectedAndActualTimes
+    )
+
+    # throttle send time is when the throttle calls the target
+    throttle_send_times: ExpectedAndActualTimes = field(
+        default_factory=ExpectedAndActualTimes
+    )
+
+    # request return time is when the target has finished and returns to
+    # the caller. The time includes a target delay, if one.
+    return_times: ExpectedAndActualTimes = field(default_factory=ExpectedAndActualTimes)
+
+    throttle_arrival_time_ns: float = 0.0
 
     expected_request_interval_ns: float = 0.0
 
@@ -151,10 +193,6 @@ class RequestItem:
     send_time_ns: float = 0.0  # after interval pause
 
     throttle_sent_time_ns: float = 0.0
-
-    # throttle_arrival time obtained by req target from throttle
-    # instance
-    throttle_arrival_time_ns: float = 0.0
 
     # actual_func_arrival_time_ns assigned by the req target code when
     # entered
@@ -170,9 +208,6 @@ class RequestItem:
 
     # return_time_ns set by sender when req returns
     return_time_ns: float = 0.0
-
-    actual_throttle_delay_ns: float = 0.0
-    expected_throttle_delay_ns: float = 0.0
 
 
 req_style_map: dict[RequestStyle, tuple[str, str, str]] = {
@@ -1059,14 +1094,15 @@ class TestThrottle:
         for idx, s_interval in enumerate(request_validator.send_intervals):
             request_item = RequestItem(
                 req_id=idx,
-                actual_create_time_ns=perf_counter_ns(),
+                # actual_create_time_ns=perf_counter_ns(),
                 throttle_mode=throttle_mode,
                 send_interval=s_interval,
                 target_delay_time_ns=targ_delay_intervals[idx] * SECS_2_NS,
             )
+            request_item.create_times.actual_time_ns = perf_counter_ns()
 
             if s_interval > 0.0:
-                request_item.pause_time_ns = s_interval * SECS_2_NS
+                request_item.expected_start_interval_ns = s_interval * SECS_2_NS
                 if throttle_mode == Mode.SYNC:
                     pauser.pause(s_interval)
                 else:
@@ -1109,14 +1145,15 @@ class TestThrottle:
             request_item = RequestItem(
                 req_id=idx,
                 thread_idx=thread_idx,
-                actual_create_time_ns=perf_counter_ns(),
+                # actual_create_time_ns=perf_counter_ns(),
                 throttle_mode=throttle_mode,
                 send_interval=s_interval,
                 target_delay_time_ns=targ_delay_intervals[idx] * SECS_2_NS,
             )
+            request_item.create_times.actual_time_ns = perf_counter_ns()
 
             if s_interval > 0.0:
-                request_item.pause_time_ns = s_interval * SECS_2_NS
+                request_item.expected_start_interval_ns = s_interval * SECS_2_NS
                 pauser.pause(s_interval)
             request_item.send_time_ns = perf_counter_ns()
 
@@ -1153,14 +1190,15 @@ class TestThrottle:
             request_item = RequestItem(
                 req_id=idx,
                 thread_idx=thread_idx,
-                actual_create_time_ns=perf_counter_ns(),
+                # actual_create_time_ns=perf_counter_ns(),
                 throttle_mode=throttle_mode,
                 send_interval=s_interval,
                 target_delay_time_ns=targ_delay_intervals[idx] * SECS_2_NS,
             )
+            request_item.create_times.actual_time_ns = perf_counter_ns()
 
             if s_interval > 0.0:
-                request_item.pause_time_ns = s_interval * SECS_2_NS
+                request_item.expected_start_interval_ns = s_interval * SECS_2_NS
                 await asyncio.sleep(s_interval)
 
             request_item.send_time_ns = perf_counter_ns()
@@ -1444,14 +1482,15 @@ class TestPieThrottle:
         for request_id, s_interval in enumerate(send_intervals):
             request_item = RequestItem(
                 req_id=request_id,
-                actual_create_time_ns=perf_counter_ns(),
+                # actual_create_time_ns=perf_counter_ns(),
                 throttle_mode=throttle_mode_arg,
                 send_interval=s_interval,
                 target_delay_time_ns=targ_delay_intervals[request_id] * SECS_2_NS,
             )
+            request_item.create_times.actual_time_ns = perf_counter_ns()
 
             if s_interval > 0.0:
-                request_item.pause_time_ns = s_interval * SECS_2_NS
+                request_item.expected_start_interval_ns = s_interval * SECS_2_NS
                 if throttle_mode_arg == Mode.SYNC:
                     pauser.pause(s_interval)
                 else:
@@ -1566,14 +1605,15 @@ class TestPieThrottle:
         for req_id, s_interval in enumerate(send_intervals):
             request_item = RequestItem(
                 req_id=req_id,
-                actual_create_time_ns=perf_counter_ns(),
+                # actual_create_time_ns=perf_counter_ns(),
                 throttle_mode=throttle_mode_arg,
                 send_interval=s_interval,
                 target_delay_time_ns=targ_delay_intervals[req_id] * SECS_2_NS,
             )
+            request_item.create_times.actual_time_ns = perf_counter_ns()
 
             if s_interval > 0.0:
-                request_item.pause_time_ns = s_interval * SECS_2_NS
+                request_item.expected_start_interval_ns = s_interval * SECS_2_NS
                 if throttle_mode_arg == Mode.SYNC:
                     pauser.pause(s_interval)
                 else:
@@ -1780,15 +1820,18 @@ class TestPieThrottle:
                     ml_request_item = RequestItem(
                         req_id=req_id,
                         thread_idx=self.thread_idx,
-                        actual_create_time_ns=perf_counter_ns(),
+                        # actual_create_time_ns=perf_counter_ns(),
                         throttle_mode=Class0.class0_validator.throttle_mode,
                         send_interval=s_interval,
                         target_delay_time_ns=targ_delay_intervals[req_id] * SECS_2_NS,
                     )
+                    ml_request_item.create_times.actual_time_ns = perf_counter_ns()
 
                     if throttle_mode_arg == Mode.SYNC:
                         if s_interval > 0.0:
-                            ml_request_item.pause_time_ns = s_interval * SECS_2_NS
+                            ml_request_item.expected_start_interval_ns = (
+                                s_interval * SECS_2_NS
+                            )
                             self.pauser.pause(s_interval)
                         ml_request_item.send_time_ns = perf_counter_ns()
                         Class0.class0_validator.request_deque.appendleft(
@@ -1813,13 +1856,16 @@ class TestPieThrottle:
                     ml_request_item = RequestItem(
                         req_id=req_id,
                         thread_idx=self.thread_idx,
-                        actual_create_time_ns=perf_counter_ns(),
+                        # actual_create_time_ns=perf_counter_ns(),
                         throttle_mode=Class0.class0_validator.throttle_mode,
                         send_interval=s_interval,
                         target_delay_time_ns=targ_delay_intervals[req_id] * SECS_2_NS,
                     )
+                    ml_request_item.create_times.actual_time_ns = perf_counter_ns()
                     if s_interval > 0.0:
-                        ml_request_item.pause_time_ns = s_interval * SECS_2_NS
+                        ml_request_item.expected_start_interval_ns = (
+                            s_interval * SECS_2_NS
+                        )
                         await asyncio.sleep(s_interval)
 
                     ml_request_item.send_time_ns = perf_counter_ns()
@@ -2452,7 +2498,7 @@ class RequestValidator:  # ruff: ignore[too-many-public-methods]
             )
 
             # build line 1
-            exp_pause_interval_sec = req_item.pause_time_ns * NS_2_SECS
+            exp_pause_interval_sec = req_item.expected_start_interval_ns * NS_2_SECS
 
             # account for delay waiting behind lock for previous request
             if (
@@ -2654,14 +2700,14 @@ class RequestValidator:  # ruff: ignore[too-many-public-methods]
                 amount_in_bucket_ns += self.target_interval_ns
 
             self.request_items[idx].expected_request_interval_ns = (
-                self.request_items[idx].pause_time_ns
+                self.request_items[idx].expected_start_interval_ns
                 + self.request_items[idx].expected_throttle_delay_ns
                 + self.request_items[idx].target_delay_time_ns
             )
 
             self.request_items[idx].expected_create_time_ns = (
                 self.request_items[idx - 1].expected_create_time_ns
-                + self.request_items[idx - 1].pause_time_ns
+                + self.request_items[idx - 1].expected_start_interval_ns
                 + self.request_items[idx - 1].expected_throttle_delay_ns
             )
 
